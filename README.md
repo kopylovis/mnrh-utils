@@ -9,6 +9,9 @@ mnrh disk             что можно почистить на диске
 mnrh disk --apply     удалить безопасное (спросит подтверждение; -y без вопроса)
 mnrh repos            состояние всех git-проектов в ~/Developer
 mnrh repos --fetch    то же со свежими данными со всех remote
+mnrh sim              запущенные симуляторы, устройства и runtime с размерами
+mnrh sim stop         остановить все симуляторы
+mnrh sim clean        удалить устройства без runtime (--runtimes: ещё старые runtime)
 mnrh ram              кто ест оперативную память, сгруппировано по приложениям
 mnrh ram -p           то же по отдельным процессам
 mnrh ram -n 30        больше строк

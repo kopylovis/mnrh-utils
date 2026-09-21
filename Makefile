@@ -25,6 +25,8 @@ test:
 	@./bin/mnrh doctor -h >/dev/null
 	@./bin/mnrh disk -h >/dev/null
 	@./bin/mnrh repos -h >/dev/null
+	@./bin/mnrh sim -h >/dev/null
+	@./bin/mnrh sim >/dev/null
 	@./bin/mnrh repos >/dev/null
 	@./bin/mnrh disk >/dev/null
 	@./bin/mnrh disk --apply </dev/null >/dev/null; test $$? -eq 2

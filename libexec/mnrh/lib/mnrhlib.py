@@ -71,3 +71,43 @@ def gradle_versions_in_use():
 
 def version_key(name):
     return [int(n) for n in re.findall(r"\d+", name)]
+
+
+def process_memory():
+    units = {"B": 1, "K": 1024, "M": 1048576, "G": 1073741824}
+    mem, started = {}, False
+    for line in run(["top", "-l", "1", "-stats", "pid,mem"]).splitlines():
+        if line.startswith("PID"):
+            started = True
+            continue
+        cols = line.split()
+        if started and len(cols) >= 2:
+            m = re.match(r"([\d.]+)([BKMG])", cols[1])
+            if m:
+                mem[cols[0]] = float(m.group(1)) * units[m.group(2)]
+    return mem
+
+
+def process_commands():
+    cmds = {}
+    for line in run(["ps", "-axo", "pid=,command="]).splitlines():
+        parts = line.strip().split(" ", 1)
+        if len(parts) == 2:
+            cmds[parts[0]] = parts[1]
+    return cmds
+
+
+def simulator_memory():
+    mem = process_memory()
+    return sum(mem.get(pid, 0) for pid, cmd in process_commands().items()
+               if "/CoreSimulator/" in cmd or "CoreSimulator.framework" in cmd)
+
+
+def confirm(question, assume_yes):
+    import sys as _sys
+    if assume_yes:
+        return True
+    if not _sys.stdin.isatty():
+        print("Не терминал, подтвердить нельзя. Повтори с -y")
+        _sys.exit(2)
+    return input(f"{question} [y/N] ").strip().lower() in ("y", "yes", "д", "да")
