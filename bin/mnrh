@@ -16,7 +16,7 @@ COMMANDS="$ROOT/libexec/mnrh"
 
 describe() {
   case "$1" in
-    claude)      echo "запустить Claude Code в проекте из ~/Developer (root — в домашнем)" ;;
+    claude)      echo "запустить Claude Code в проекте из ~/Developer (root — в домашнем, sessions — сессии)" ;;
     disk)        echo "что можно почистить на диске (--apply удалить безопасное)" ;;
     doctor)      echo "проверка системы: диск, память, оболочка, ссылки, автозапуск, безопасность" ;;
     repos)       echo "состояние всех git-проектов в ~/Developer (--fetch со свежими данными)" ;;

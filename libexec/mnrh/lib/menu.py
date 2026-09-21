@@ -163,6 +163,30 @@ class Menu:
             self.draw()
 
 
+def pick(items, title="", label="", start=1, default=0):
+    if not items:
+        return None
+    fd = os.open("/dev/tty", os.O_RDWR)
+    saved = termios.tcgetattr(fd)
+    menu = Menu(fd, items, title, label, start, default)
+    try:
+        tty.setcbreak(fd)
+        attrs = termios.tcgetattr(fd)
+        attrs[3] &= ~termios.ISIG
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        choice = menu.run()
+    except Cancel:
+        choice = None
+    finally:
+        menu.clear()
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        menu.write(SHOW)
+    if choice is not None and label:
+        menu.write(f"{label}: \x1b[1m{items[choice][0]}\x1b[0m\r\n")
+    os.close(fd)
+    return choice
+
+
 def main():
     p = argparse.ArgumentParser(description="меню со стрелками; пункты «ключ<TAB>текст» из stdin, ответ — индекс с 0")
     p.add_argument("--title", default="")
@@ -179,29 +203,9 @@ def main():
         items.append((key, text or key))
     if not items:
         return 1
-
-    fd = os.open("/dev/tty", os.O_RDWR)
-    saved = termios.tcgetattr(fd)
-    menu = Menu(fd, items, a.title, a.label, a.start, a.default)
-    try:
-        tty.setcbreak(fd)
-        attrs = termios.tcgetattr(fd)
-        attrs[3] &= ~termios.ISIG
-        termios.tcsetattr(fd, termios.TCSANOW, attrs)
-        choice = menu.run()
-    except Cancel:
-        choice = None
-    finally:
-        menu.clear()
-        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
-        menu.write(SHOW)
-
+    choice = pick(items, a.title, a.label, a.start, a.default)
     if choice is None:
-        os.close(fd)
         return 130
-    if a.label:
-        menu.write(f"{a.label}: \x1b[1m{items[choice][0]}\x1b[0m\r\n")
-    os.close(fd)
     print(choice)
     return 0
 

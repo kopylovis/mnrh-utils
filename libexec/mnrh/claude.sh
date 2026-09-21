@@ -13,11 +13,18 @@ mnrh claude <имя>           сразу в проекте (достаточн�
 mnrh claude ... -n          обычная сессия без вопроса
 mnrh claude ... -k          caffeinate без вопроса
 mnrh claude ... -- <аргументы claude>   например: mnrh claude kcalm -- --continue
+mnrh claude sessions        сохранённые сессии: размер, продолжить, перенести в другую папку, удалить
+                            (подробнее: mnrh claude sessions -h)
 
 caffeinate (по умолчанию) не даёт Mac уснуть, пока идёт сессия:
 удобно для долгих задач и Remote Control с телефона. Экран при этом гаснуть может.
 EOF
 }
+
+if [ "${1:-}" = sessions ]; then
+  shift
+  exec /usr/bin/python3 "$(dirname "$MENU")/claude_sessions.py" "$@"
+fi
 
 target="" mode="" passthrough=()
 while [ $# -gt 0 ]; do
