@@ -26,6 +26,8 @@ test:
 	@./bin/mnrh disk -h >/dev/null
 	@./bin/mnrh repos -h >/dev/null
 	@./bin/mnrh sim -h >/dev/null
+	@./bin/mnrh claude -h >/dev/null
+	@./bin/mnrh claude </dev/null >/dev/null 2>&1; test $$? -eq 2
 	@./bin/mnrh sim >/dev/null
 	@./bin/mnrh repos >/dev/null
 	@./bin/mnrh disk >/dev/null

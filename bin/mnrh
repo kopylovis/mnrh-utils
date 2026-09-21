@@ -16,6 +16,7 @@ COMMANDS="$ROOT/libexec/mnrh"
 
 describe() {
   case "$1" in
+    claude)      echo "запустить Claude Code в проекте из ~/Developer (root — в домашнем)" ;;
     disk)        echo "что можно почистить на диске (--apply удалить безопасное)" ;;
     doctor)      echo "проверка системы: диск, память, оболочка, ссылки, автозапуск, безопасность" ;;
     repos)       echo "состояние всех git-проектов в ~/Developer (--fetch со свежими данными)" ;;
@@ -58,7 +59,7 @@ run() {
       *)    exec "$f" "$@" ;;
     esac
   done
-  echo "mnrh: неизвестная команда «$name»" >&2
+  echo "mnrh: неизвестная команда «${name}»" >&2
   echo >&2
   usage >&2
   exit 2
