@@ -3,6 +3,7 @@ set -uo pipefail
 
 DEV="$HOME/Developer"
 CLAUDE_BIN="${MNRH_CLAUDE_BIN:-claude}"
+MENU="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/menu.py"
 
 help() {
   cat <<'EOF'
@@ -59,22 +60,19 @@ match() {
 }
 
 choose() {
-  local i=1 d name branch last ans
-  echo "Проекты в ~/Developer:" >&2
-  for d in "${dirs[@]}"; do
-    name=$(basename "$d")
-    branch=$(git -C "$d" branch --show-current 2>/dev/null)
-    last=$(git -C "$d" log -1 --format=%cr 2>/dev/null)
-    printf '  %2d) %-30s %-28s %s\n' "$i" "$name" "${branch:--}" "$last" >&2
-    i=$((i + 1))
-  done
-  printf '   0) ~ (домашний каталог)\n\nНомер или начало имени: ' >&2
-  read -r ans
-  case "$ans" in
-    0|root|"~") echo "$HOME" ;;
-    ''|*[!0-9]*) [ -n "$ans" ] && match "$ans" || return 1 ;;
-    *) [ "$ans" -ge 1 ] && [ "$ans" -le "${#dirs[@]}" ] && echo "${dirs[$((ans - 1))]}" || { echo "mnrh claude: нет пункта $ans" >&2; return 1; } ;;
-  esac
+  local d name branch last idx
+  idx=$(
+    {
+      printf '~\t~ (домашний каталог)\n'
+      for d in "${dirs[@]}"; do
+        name=$(basename "$d")
+        branch=$(git -C "$d" branch --show-current 2>/dev/null)
+        last=$(git -C "$d" log -1 --format=%cr 2>/dev/null)
+        printf '%s\t%-30s %-28s %s\n' "$name" "$name" "${branch:--}" "$last"
+      done
+    } | /usr/bin/python3 "$MENU" --title "Проекты в ~/Developer:" --label "Проект" --start 0 --default 1
+  ) || return 1
+  if [ "$idx" -eq 0 ]; then echo "$HOME"; else echo "${dirs[$((idx - 1))]}"; fi
 }
 
 if [ -z "$target" ]; then
@@ -86,9 +84,9 @@ else
 fi
 
 if [ -z "$mode" ]; then
-  printf '\nРежим сессии в %s:\n  1) caffeinate — Mac не уснёт, пока идёт сессия (Enter)\n  2) обычная\nВыбор [1]: ' "${dir/#$HOME/~}"
-  read -r ans
-  case "$ans" in 2) mode=normal ;; *) mode=caffeinate ;; esac
+  idx=$(printf 'caffeinate\tcaffeinate — Mac не уснёт, пока идёт сессия\nобычная\tобычная\n' |
+    /usr/bin/python3 "$MENU" --title "Режим сессии в ${dir/#$HOME/~}:" --label "Режим") || exit 1
+  [ "$idx" = 1 ] && mode=normal || mode=caffeinate
 fi
 
 cd "$dir" || exit 1
