@@ -27,6 +27,8 @@ test:
 	@./bin/mnrh repos -h >/dev/null
 	@./bin/mnrh sim -h >/dev/null
 	@./bin/mnrh claude -h >/dev/null
+	@./bin/mnrh gradle -h >/dev/null
+	@./bin/mnrh gradle >/dev/null
 	@./bin/mnrh claude </dev/null >/dev/null 2>&1; test $$? -eq 2
 	@./bin/mnrh sim >/dev/null
 	@./bin/mnrh repos >/dev/null

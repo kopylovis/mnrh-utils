@@ -111,3 +111,26 @@ def confirm(question, assume_yes):
         print("Не терминал, подтвердить нельзя. Повтори с -y")
         _sys.exit(2)
     return input(f"{question} [y/N] ").strip().lower() in ("y", "yes", "д", "да")
+
+
+def gradle_build_dirs(project):
+    found = []
+    for root, dirs, files in os.walk(project):
+        dirs[:] = [d for d in dirs if d not in (".git", "node_modules", ".idea", "Pods")]
+        if "build" in dirs and ({"build.gradle", "build.gradle.kts"} & set(files)):
+            found.append(os.path.join(root, "build"))
+        dirs[:] = [d for d in dirs if d not in ("build", ".gradle")]
+    pg = os.path.join(project, ".gradle")
+    if os.path.isdir(pg):
+        found.append(pg)
+    return found
+
+
+def remove_under_home(path):
+    import shutil as _shutil
+    if not path.startswith(HOME + os.sep) or path.rstrip("/") == HOME:
+        return
+    if os.path.islink(path) or os.path.isfile(path):
+        os.unlink(path)
+    else:
+        _shutil.rmtree(path, ignore_errors=True)

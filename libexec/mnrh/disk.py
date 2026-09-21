@@ -9,8 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import (DEV, HOME, du_bytes, gradle_versions_in_use, has_flag, human, paint,
-                     projects, run, tilde, version_key)
+from mnrhlib import (DEV, HOME, du_bytes, gradle_build_dirs, gradle_versions_in_use, has_flag, human, paint,
+                     projects, remove_under_home, run, tilde, version_key)
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help"):
@@ -81,16 +81,7 @@ def scan_ides():
 
 
 def scan_build_outputs():
-    builds = []
-    for proj in projects():
-        for root, dirs, files in os.walk(proj):
-            dirs[:] = [d for d in dirs if d not in (".git", "node_modules", ".idea", "Pods")]
-            if "build" in dirs and ({"build.gradle", "build.gradle.kts"} & set(files)):
-                builds.append(os.path.join(root, "build"))
-            dirs[:] = [d for d in dirs if d not in ("build", ".gradle")]
-        pg = os.path.join(proj, ".gradle")
-        if os.path.isdir(pg):
-            builds.append(pg)
+    builds = [d for proj in projects() for d in gradle_build_dirs(proj)]
     add(SAFE, f"build/ и .gradle/ в проектах {tilde(DEV)}", builds,
         hint="пересоберутся при следующей сборке")
 
@@ -215,13 +206,6 @@ if not assume_yes:
         sys.exit(0)
 
 
-def remove(path):
-    if not path.startswith(HOME + os.sep) or path.rstrip("/") == HOME:
-        return
-    if os.path.islink(path) or os.path.isfile(path):
-        os.unlink(path)
-    else:
-        shutil.rmtree(path, ignore_errors=True)
 
 
 for it in safe:
@@ -229,7 +213,7 @@ for it in safe:
         it.action()
     else:
         for p in it.paths:
-            remove(p)
+            remove_under_home(p)
     print(f"  удалено: {it.label}")
 
 free_after = shutil.disk_usage("/System/Volumes/Data")[2]

@@ -22,6 +22,7 @@ describe() {
     repos)       echo "состояние всех git-проектов в ~/Developer (--fetch со свежими данными)" ;;
     sim)         echo "симуляторы: что запущено, stop, clean (--runtimes старые runtime)" ;;
     ram)         echo "кто ест оперативную память, по приложениям (-p по процессам, -n N строк)" ;;
+    gradle)      echo "версии Gradle по проектам, кеши, демоны, build/ (clean удалить лишнее)" ;;
     killdaemons) echo "остановить демоны Gradle и Kotlin (-l только показать, -f и занятых)" ;;
     *)           echo "" ;;
   esac

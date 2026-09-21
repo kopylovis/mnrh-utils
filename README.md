@@ -18,6 +18,9 @@ mnrh sim clean        удалить устройства без runtime (--runt
 mnrh ram              кто ест оперативную память, сгруппировано по приложениям
 mnrh ram -p           то же по отдельным процессам
 mnrh ram -n 30        больше строк
+mnrh gradle           версии Gradle по проектам, дистрибутивы, кеши, демоны, build/
+mnrh gradle --check   ещё сверить с последней версией Gradle
+mnrh gradle clean     удалить версии, которые не использует ни один проект (--builds: и build/)
 mnrh killdaemons      остановить демоны Gradle и Kotlin любых версий
 mnrh killdaemons -l   только показать
 mnrh killdaemons -f   снять и тех, кто занят сборкой
