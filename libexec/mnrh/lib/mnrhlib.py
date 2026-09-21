@@ -43,3 +43,31 @@ def tilde(path):
 
 def has_flag(args, *names):
     return any(a in args for a in names)
+
+
+DEV = os.path.join(HOME, "Developer")
+
+
+def projects():
+    if not os.path.isdir(DEV):
+        return []
+    return sorted(os.path.join(DEV, d) for d in os.listdir(DEV)
+                  if os.path.isdir(os.path.join(DEV, d, ".git")))
+
+
+def gradle_versions_in_use():
+    used = {}
+    for proj in projects():
+        props = os.path.join(proj, "gradle", "wrapper", "gradle-wrapper.properties")
+        try:
+            text = open(props, encoding="utf-8").read()
+        except OSError:
+            continue
+        m = re.search(r"gradle-([\d.]+)-(bin|all)\.zip", text)
+        if m:
+            used.setdefault(m.group(1), []).append(os.path.basename(proj))
+    return used
+
+
+def version_key(name):
+    return [int(n) for n in re.findall(r"\d+", name)]

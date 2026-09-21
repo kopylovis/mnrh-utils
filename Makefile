@@ -23,6 +23,9 @@ test:
 	@./bin/mnrh ram -h >/dev/null
 	@./bin/mnrh killdaemons -h >/dev/null
 	@./bin/mnrh doctor -h >/dev/null
+	@./bin/mnrh disk -h >/dev/null
+	@./bin/mnrh disk >/dev/null
+	@./bin/mnrh disk --apply </dev/null >/dev/null; test $$? -eq 2
 	@./bin/mnrh doctor >/dev/null; test $$? -le 1
 	@! ./bin/mnrh no-such-command >/dev/null 2>&1
 	@find libexec -name __pycache__ -type d -exec rm -rf {} +
