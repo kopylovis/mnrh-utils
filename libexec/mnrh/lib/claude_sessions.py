@@ -22,7 +22,7 @@ def usage():
     print("mnrh claude sessions -l               просто список")
     print("mnrh claude sessions resume <id> [-n] продолжить в её папке (по умолчанию через caffeinate, -n обычная)")
     print("mnrh claude sessions mv <id> <папка>  перенести в другую папку: путь, имя проекта в ~/Developer или root")
-    print("mnrh claude sessions rm <id>... [-y]  удалить")
+    print("mnrh claude sessions rm <id>... [-y]  удалить вместе с историей запросов этой сессии")
     print("mnrh claude sessions clean [-y]       битые ссылки, сессии без единого ответа, папки удалённых проектов")
     print()
     print("<id> — начало id из списка, 4–8 символов обычно хватает.")
@@ -342,7 +342,31 @@ def delete(s):
             p = os.path.join(CLAUDE, sub, s["id"])
             if os.path.isdir(p) and not os.path.islink(p):
                 shutil.rmtree(p)
+        forget_history(s["id"])
     remove_if_empty(s["pdir"])
+
+
+def forget_history(sid):
+    path = os.path.join(CLAUDE, "history.jsonl")
+    for _ in range(3):
+        try:
+            size = os.stat(path).st_size
+        except OSError:
+            return
+        with open(path, encoding="utf-8", errors="surrogateescape", newline="") as f:
+            lines = f.readlines()
+        kept = [l for l in lines if f'"sessionId":"{sid}"' not in l]
+        if len(kept) == len(lines):
+            return
+        tmp = path + ".mnrh-tmp"
+        with open(tmp, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
+            f.writelines(kept)
+        shutil.copymode(path, tmp)
+        if os.stat(path).st_size != size:
+            os.remove(tmp)
+            continue
+        os.replace(tmp, path)
+        return
 
 
 def resume(s, mode):

@@ -17,7 +17,9 @@ CLAUDE_BIN = os.environ.get("MNRH_CLAUDE_BIN", "claude")
 LOG = os.path.join(HOME, "Library", "Logs", "mnrh-claude-restart.log")
 MNRH = shutil.which("mnrh") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "bin", "mnrh")
-COMMAND_FILE = os.path.join(CLAUDE, "commands", "restart.md")
+COMMANDS = os.path.join(CLAUDE, "commands")
+COMMAND_FILE = os.path.join(COMMANDS, "restart.md")
+FORGET_FILE = os.path.join(COMMANDS, "forget.md")
 QUEUE = os.path.join(HOME, ".cache", "mnrh", "restart")
 ZSHRC = os.path.join(os.environ.get("ZDOTDIR") or HOME, ".zshrc")
 DROP_WITH_VALUE = {"-r", "--resume", "--session-id", "--fork-session", "-p", "--print"}
@@ -104,7 +106,7 @@ def resume_flags(args):
     return out
 
 
-def plan(update=True):
+def plan(update=True, forget=False):
     pid = find_claude()
     try:
         with open(session_file(pid)) as f:
@@ -134,10 +136,11 @@ def plan(update=True):
     parent = ps("ppid", pid)
     caffeinate = bool(parent) and os.path.basename(ps("comm", int(parent))) == "caffeinate"
 
-    run = (["caffeinate", "-is"] if caffeinate else []) + [CLAUDE_BIN, "--resume", sid] + flags
+    run = (["caffeinate", "-is"] if caffeinate else []) + [CLAUDE_BIN] + ([] if forget else ["--resume", sid]) + flags
+    update = update and not forget
     line = (f"cd {shlex.quote(cwd)} && "
             + (f"{{ {shlex.quote(CLAUDE_BIN)} update; " if update else "{ ") + shlex.join(run) + "; }")
-    return {"pid": pid, "sid": sid, "cwd": cwd, "tty": tty, "term": term, "via": via, "line": line,
+    return {"pid": pid, "sid": sid, "cwd": cwd, "tty": tty, "term": term, "via": via, "line": line, "forget": forget,
             "title": info.get("name") or sid}
 
 
@@ -191,12 +194,25 @@ def watcher(p, delay):
         except ProcessLookupError:
             pass
         time.sleep(0.5)
+    if p["forget"]:
+        forget_session(p["sid"])
     if p["via"] == "zsh":
         log(f"zsh: {p['line']}")
         return
     time.sleep(0.8)
     code, out = osascript(p["term"], p["tty"], p["line"])
     log(f"osascript {code} {out}: {p['line']}")
+
+
+def forget_session(sid):
+    import claude_sessions
+    for s in claude_sessions.load():
+        if s["id"] == sid:
+            s["running"] = None
+            claude_sessions.delete(s)
+            log(f"forget: удалил {sid}")
+            return
+    log(f"forget: сессии {sid} не нашёл")
 
 
 def detach(p, delay):
@@ -216,8 +232,8 @@ def detach(p, delay):
     os._exit(0)
 
 
-def restart(update=True, delay=1.5, dry=False):
-    p = plan(update)
+def restart(update=True, delay=1.5, dry=False, forget=False):
+    p = plan(update, forget)
     preflight(p)
     if dry:
         return p
@@ -225,23 +241,33 @@ def restart(update=True, delay=1.5, dry=False):
     return p
 
 
-def cli(args):
+def cli(args, forget=False):
+    name = "forget" if forget else "restart"
     if "-h" in args or "--help" in args:
-        print("mnrh claude restart            изнутри Claude Code: закрыть его и открыть эту же сессию в той же вкладке")
-        print("                               перед запуском выполняется claude update")
-        print("mnrh claude restart --no-update   без обновления")
-        print("mnrh claude restart --dry-run     только показать, что будет сделано")
+        if forget:
+            print("mnrh claude forget             изнутри Claude Code: закрыть его, удалить эту сессию без следа")
+            print("                               (переписка, история запросов, file-history) и открыть чистый Claude")
+            print("                               в той же папке и вкладке — как /clear, только старое не сохраняется")
+            print("mnrh claude forget --dry-run   только показать, что будет сделано")
+        else:
+            print("mnrh claude restart            изнутри Claude Code: закрыть его и открыть эту же сессию в той же вкладке")
+            print("                               перед запуском выполняется claude update")
+            print("mnrh claude restart --no-update   без обновления")
+            print("mnrh claude restart --dry-run     только показать, что будет сделано")
         print()
-        print("Обычно вызывается из Claude: /restart или инструментом restart из MCP-сервера mnrh")
+        print(f"Обычно вызывается из Claude: /{name} или инструментом {name} из MCP-сервера mnrh")
         print("(установить: mnrh claude setup). Лог: " + tilde(LOG))
         return 0
     try:
-        p = restart(update="--no-update" not in args, dry="--dry-run" in args)
+        p = restart(update="--no-update" not in args, dry="--dry-run" in args, forget=forget)
     except RestartError as e:
-        print(f"mnrh claude restart: {e}", file=sys.stderr)
+        print(f"mnrh claude {name}: {e}", file=sys.stderr)
         return 1
     if "--dry-run" in args:
-        print(f"закрою pid {p['pid']}, в {p['tty']} через {p['via']} выполню:\n  {p['line']}")
+        extra = f"удалю сессию {p['sid']}, " if forget else ""
+        print(f"закрою pid {p['pid']}, {extra}в {p['tty']} через {p['via']} выполню:\n  {p['line']}")
+    elif forget:
+        print(f"Через пару секунд Claude Code закроется, сессия «{p['title']}» будет удалена, и откроется чистая.")
     else:
         print(f"Перезапускаю Claude Code через пару секунд, сессия «{p['title']}» откроется снова в этой вкладке.")
     return 0
@@ -258,6 +284,16 @@ TOOL = {
         "properties": {"update": {"type": "boolean", "description": "выполнить claude update перед запуском",
                                   "default": True}},
     },
+}
+
+
+FORGET_TOOL = {
+    "name": "forget",
+    "description": ("Забыть эту сессию: Claude Code закроется, текущая переписка удалится с диска без следа "
+                    "(вместе с историей запросов), и в той же папке и вкладке откроется новый чистый Claude — "
+                    "как /clear, только старое не сохраняется. Вызывай только когда пользователь сам просит забыть "
+                    "или удалить эту сессию; после вызова ничего больше не делай."),
+    "inputSchema": {"type": "object", "properties": {}},
 }
 
 
@@ -281,17 +317,24 @@ def mcp():
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "mnrh", "version": "1.0.0"}}})
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": rid, "result": {"tools": [TOOL]}})
+            send({"jsonrpc": "2.0", "id": rid, "result": {"tools": [TOOL, FORGET_TOOL]}})
         elif method == "tools/call":
             params = req.get("params") or {}
-            if params.get("name") != "restart":
+            tool = params.get("name")
+            if tool not in ("restart", "forget"):
                 send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": "нет такого инструмента"}})
                 continue
             update = (params.get("arguments") or {}).get("update", True)
             try:
-                p = restart(update=bool(update), delay=2.5)
-                text, err = (f"Перезапуск запущен: через пару секунд Claude Code закроется"
-                             f"{', обновится' if update else ''} и снова откроет сессию {p['sid']} в {tilde(p['cwd'])}."), False
+                if tool == "forget":
+                    p = restart(update=False, delay=2.5, forget=True)
+                    text = (f"Готово: через пару секунд Claude Code закроется, сессия {p['sid']} будет удалена, "
+                            f"и в {tilde(p['cwd'])} откроется новая.")
+                else:
+                    p = restart(update=bool(update), delay=2.5)
+                    text = (f"Перезапуск запущен: через пару секунд Claude Code закроется"
+                            f"{', обновится' if update else ''} и снова откроет сессию {p['sid']} в {tilde(p['cwd'])}.")
+                err = False
             except RestartError as e:
                 text, err = f"Не получилось: {e}", True
             send({"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": text}], "isError": err}})
@@ -299,6 +342,16 @@ def mcp():
             send({"jsonrpc": "2.0", "id": rid, "result": {}})
         else:
             send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"не умею {method}"}})
+
+
+FORGET_SLASH = """---
+description: Забыть эту сессию без следа и открыть чистый Claude Code в той же папке
+allowed-tools: Bash(mnrh claude forget:*)
+---
+!`mnrh claude forget $ARGUMENTS`
+
+Эта сессия сейчас удалится, и Claude Code откроется заново. Ничего не делай и ответь одним словом: «Забываю».
+"""
 
 
 SLASH = """---
@@ -335,19 +388,21 @@ def write_zshrc(lines):
 def setup(args):
     marker = "share/mnrh/restart.zsh"
     if "--remove" in args:
-        if os.path.exists(COMMAND_FILE):
-            os.remove(COMMAND_FILE)
+        for f in (COMMAND_FILE, FORGET_FILE):
+            if os.path.exists(f):
+                os.remove(f)
         subprocess.run(["claude", "mcp", "remove", "--scope", "user", "mnrh"], capture_output=True)
         lines = zshrc_lines()
         kept = [l for l in lines if marker not in l]
         if kept != lines:
             write_zshrc(kept)
-        print(f"Убрал /restart, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
+        print(f"Убрал /restart, /forget, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
         return 0
     os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
-    with open(COMMAND_FILE, "w") as f:
-        f.write(SLASH)
-    print(f"✓ /restart → {tilde(COMMAND_FILE)}")
+    for path, text in ((COMMAND_FILE, SLASH), (FORGET_FILE, FORGET_SLASH)):
+        with open(path, "w") as f:
+            f.write(text)
+        print(f"✓ /{os.path.basename(path)[:-3]} → {tilde(path)}")
 
     hook = hook_file()
     line = f'[ -f "{hook}" ] && source "{hook}"\n'
@@ -370,7 +425,7 @@ def setup(args):
         if r.returncode != 0:
             print(f"✗ не подключил MCP: {r.stderr.strip() or r.stdout.strip()}")
             return 1
-        print(f"✓ MCP-сервер mnrh: {tilde(MNRH)} claude mcp (инструмент restart)")
+        print(f"✓ MCP-сервер mnrh: {tilde(MNRH)} claude mcp (инструменты restart и forget)")
     print("Подхватится в новых вкладках и сессиях Claude Code; в уже открытых — после перезапуска.")
     return 0
 
@@ -382,4 +437,4 @@ if __name__ == "__main__":
     elif cmd == "setup":
         sys.exit(setup(rest))
     else:
-        sys.exit(cli(rest))
+        sys.exit(cli(rest, forget=cmd == "forget"))
