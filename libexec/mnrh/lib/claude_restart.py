@@ -167,7 +167,8 @@ def plan(update=True, forget=False):
     run = (["caffeinate", "-is"] if caffeinate else []) + [CLAUDE_BIN] + ([] if forget else ["--resume", sid]) + flags
     update = update and not forget
     line = (f"cd {shlex.quote(cwd)} && "
-            + (f"{{ {shlex.quote(CLAUDE_BIN)} update; " if update else "{ ") + shlex.join(run) + "; }")
+            + (f"{{ {shlex.quote(CLAUDE_BIN)} update; " if update else "{ ")
+            + ("clear; printf '\\033[3J'; " if forget else "") + shlex.join(run) + "; }")
     return {"pid": pid, "sid": sid, "cwd": cwd, "tty": tty, "term": term, "via": via, "line": line, "forget": forget,
             "title": info.get("name") or sid}
 
