@@ -21,7 +21,7 @@ def usage():
     print("mnrh claude sessions                  сохранённые сессии: выбрать стрелками, продолжить, перенести, удалить")
     print("mnrh claude sessions -l               просто список")
     print("mnrh claude sessions resume <id> [-n] продолжить в её папке (по умолчанию через caffeinate, -n обычная)")
-    print("mnrh claude sessions mv <id> <папка>  перенести в другую папку: путь, имя проекта в ~/Developer или root")
+    print("mnrh claude sessions mv <id> <папка>  перенести в другую папку: путь, имя проекта из папки проектов или root")
     print("mnrh claude sessions rm <id>... [-y]  удалить вместе с историей запросов этой сессии")
     print("mnrh claude sessions clean [-y]       битые ссылки, сессии без единого ответа, папки удалённых проектов")
     print()

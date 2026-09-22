@@ -45,7 +45,38 @@ def has_flag(args, *names):
     return any(a in args for a in names)
 
 
-DEV = os.path.join(HOME, "Developer")
+CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "mnrh", "config")
+DEFAULT_DEV = os.path.join(HOME, "Developer")
+
+
+def read_config():
+    conf = {}
+    try:
+        with open(CONFIG) as f:
+            for line in f:
+                key, sep, value = line.strip().partition("=")
+                if sep:
+                    conf[key.strip()] = value.strip()
+    except OSError:
+        pass
+    return conf
+
+
+def write_config(**values):
+    conf = read_config()
+    conf.update(values)
+    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+    with open(CONFIG, "w") as f:
+        for key, value in conf.items():
+            f.write(f"{key}={value}\n")
+
+
+def projects_dir():
+    path = os.environ.get("MNRH_PROJECTS") or read_config().get("projects") or DEFAULT_DEV
+    return os.path.abspath(os.path.expanduser(path))
+
+
+DEV = projects_dir()
 
 
 def projects():

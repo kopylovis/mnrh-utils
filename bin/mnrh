@@ -16,10 +16,11 @@ COMMANDS="$ROOT/libexec/mnrh"
 
 describe() {
   case "$1" in
-    claude)      echo "запустить Claude Code в проекте из ~/Developer (root — в домашнем, sessions — сессии)" ;;
+    claude)      echo "запустить Claude Code в одном из проектов (root — в домашнем, sessions — сессии)" ;;
     disk)        echo "что можно почистить на диске (--apply удалить безопасное)" ;;
+    init)        echo "первая настройка: папка с проектами и подключение к Claude Code" ;;
     doctor)      echo "проверка системы: диск, память, оболочка, ссылки, автозапуск, безопасность" ;;
-    repos)       echo "состояние всех git-проектов в ~/Developer (--fetch со свежими данными)" ;;
+    repos)       echo "состояние всех git-проектов в папке проектов (--fetch со свежими данными)" ;;
     sim)         echo "симуляторы: что запущено, stop, clean (--runtimes старые runtime)" ;;
     ram)         echo "кто ест оперативную память, по приложениям (-p по процессам, -n N строк)" ;;
     gradle)      echo "версии Gradle по проектам, кеши, демоны, build/ (clean удалить лишнее)" ;;

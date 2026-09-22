@@ -27,6 +27,9 @@ test:
 	@./bin/mnrh repos -h >/dev/null
 	@./bin/mnrh sim -h >/dev/null
 	@./bin/mnrh claude -h >/dev/null
+	@./bin/mnrh init -h >/dev/null
+	@./bin/mnrh init --show >/dev/null
+	@./bin/mnrh init </dev/null >/dev/null 2>&1; test $$? -eq 2
 	@./bin/mnrh claude sessions -h >/dev/null
 	@./bin/mnrh claude sessions -l >/dev/null
 	@./bin/mnrh claude restart -h >/dev/null

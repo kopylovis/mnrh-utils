@@ -3,7 +3,8 @@
 Набор утилит для обслуживания Mac. Одна команда `mnrh`, подкоманды — отдельные файлы.
 
 ```
-mnrh claude           выбрать проект в ~/Developer и запустить в нём Claude Code
+mnrh init             первая настройка: папка с проектами, подключение к Claude Code
+mnrh claude           выбрать проект и запустить в нём Claude Code
 mnrh claude root      запустить в домашнем каталоге
 mnrh claude kcalm     сразу в проекте (достаточно начала имени)
 mnrh claude sessions  сохранённые сессии с размером: продолжить, перенести в другую папку, удалить
@@ -15,7 +16,7 @@ mnrh doctor           проверка системы, коротким спис
 mnrh doctor --full    ещё обновления macOS и целостность Homebrew
 mnrh disk             что можно почистить на диске
 mnrh disk --apply     удалить безопасное (спросит подтверждение; -y без вопроса)
-mnrh repos            состояние всех git-проектов в ~/Developer
+mnrh repos            состояние всех git-проектов в папке проектов
 mnrh repos --fetch    то же со свежими данными со всех remote
 mnrh sim              запущенные симуляторы, устройства и runtime с размерами
 mnrh sim stop         остановить все симуляторы
@@ -45,14 +46,20 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kopylovis/homebrew-tap/main/
 
 Скрипт по шагам ставит Homebrew и GitHub CLI, если их нет, выполняет вход в GitHub —
 репозиторий приватный, и Homebrew берёт код через git, — затем `brew install
-kopylovis/tap/mnrh` и `mnrh claude setup`. Запускать можно повторно: сделанное пропускается.
+kopylovis/tap/mnrh` и `mnrh init`. Запускать можно повторно: сделанное пропускается.
 
 Вручную, если вход уже настроен (`gh auth login` и `gh auth setup-git`):
 
 ```bash
 brew install kopylovis/tap/mnrh
-mnrh claude setup
+mnrh init
 ```
+
+`mnrh init` спрашивает, где лежат проекты (по умолчанию `~/Developer`; предлагает найденные
+`~/Projects`, `~/AndroidStudioProjects` и т. п. с числом git-репозиториев), сохраняет это в
+`~/.config/mnrh/config` и предлагает `mnrh claude setup`. Без настройки и без `~/Developer`
+`mnrh claude` сам спросит папку при первом запуске. `mnrh init ~/Projects` задаёт папку сразу,
+`MNRH_PROJECTS=<папка>` переопределяет её на время.
 
 `mnrh claude setup` кладёт команды `/restart` и `/forget`, хук zsh и регистрирует MCP-сервер `mnrh` в Claude Code.
 Обновление: `brew upgrade mnrh`. Удаление: `brew uninstall mnrh`.
@@ -86,7 +93,7 @@ macOS, bash и `/usr/bin/python3` из Xcode Command Line Tools
 
 ## Как работает `mnrh claude`
 
-Показывает каталоги `~/Developer` с текущей веткой и датой последнего коммита.
+Показывает каталоги папки проектов (`mnrh init`, по умолчанию `~/Developer`) с текущей веткой и датой последнего коммита.
 Выбор стрелками ↑↓ и Enter. Цифра сразу ставит курсор на пункт (`0` — домашний
 каталог, `1` и `0` подряд — десятый), буквы фильтруют список по имени, Esc
 сбрасывает фильтр или выходит. Затем так же выбирается режим:
@@ -169,7 +176,7 @@ MCP-сервер `mnrh` с инструментами `restart` и `forget` (sco
 ## Как `mnrh disk` решает, что безопасно
 
 Две группы. **Безопасное** пересоздаётся само, и только его удаляет `--apply`:
-`build/` и `.gradle/` в проектах `~/Developer`, Xcode DerivedData, кеши и логи старых
+`build/` и `.gradle/` в проектах из папки проектов, Xcode DerivedData, кеши и логи старых
 версий Android Studio и JetBrains, версии Gradle, которые не указаны ни в одном
 `gradle-wrapper.properties`, build cache Gradle, кеши npm, pip, SwiftPM и CocoaPods,
 `brew cleanup`, симуляторы без runtime.
@@ -187,7 +194,7 @@ Ruby-гемов (их чистка ломает `bundle exec` в проекта�
 
 ## Что показывает `mnrh repos`
 
-По каждому репозиторию в `~/Developer`: текущая ветка, сколько коммитов не отправлено
+По каждому репозиторию в папке проектов: текущая ветка, сколько коммитов не отправлено
 и насколько ветка отстаёт, изменённые и неотслеживаемые файлы, stash, и отдельной
 строкой — другие ветки, у которых есть коммиты только локально.
 
