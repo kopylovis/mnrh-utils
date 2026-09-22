@@ -107,6 +107,48 @@ def resume_flags(args):
     return out
 
 
+def split_caffeinate(args):
+    out, i = [], 0
+    while i < len(args) and args[i].startswith("-"):
+        out.append(args[i])
+        if args[i] in ("-t", "-w") and i + 1 < len(args):
+            out.append(args[i + 1])
+            i += 1
+        i += 1
+    return out, args[i:]
+
+
+def caffeinate_args(pid):
+    candidates = []
+    parent = ps("ppid", pid)
+    if parent and os.path.basename(ps("comm", int(parent))) == "caffeinate":
+        candidates.append(int(parent))
+    r = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="], capture_output=True, text=True)
+    for line in r.stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[1] == str(pid) and os.path.basename(parts[2]) == "caffeinate":
+            candidates.append(int(parts[0]))
+    for c in candidates:
+        flags, utility = split_caffeinate(shlex.split(ps("args", c))[1:])
+        if utility:
+            return flags
+    return None
+
+
+def drop_name(flags):
+    out, i = [], 0
+    while i < len(flags):
+        if flags[i] in ("-n", "--name"):
+            i += 2
+            continue
+        if flags[i].startswith("--name="):
+            i += 1
+            continue
+        out.append(flags[i])
+        i += 1
+    return out
+
+
 SHELLS = {"zsh", "bash", "sh", "fish", "login"}
 
 
@@ -162,9 +204,11 @@ def plan(update=True, forget=False):
     argv = shlex.split(ps("args", pid))
     flags = resume_flags(argv[1:])
     parent = ps("ppid", pid)
-    caffeinate = bool(parent) and os.path.basename(ps("comm", int(parent))) == "caffeinate"
+    caffeinate = caffeinate_args(pid)
+    if forget:
+        flags = drop_name(flags)
 
-    run = (["caffeinate", "-is"] if caffeinate else []) + [CLAUDE_BIN] + ([] if forget else ["--resume", sid]) + flags
+    run = (["caffeinate"] + caffeinate if caffeinate is not None else []) + [CLAUDE_BIN] + ([] if forget else ["--resume", sid]) + flags
     update = update and not forget
     line = (f"cd {shlex.quote(cwd)} && "
             + (f"{{ {shlex.quote(CLAUDE_BIN)} update; " if update else "{ ")
