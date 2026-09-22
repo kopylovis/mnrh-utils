@@ -29,6 +29,8 @@ test:
 	@./bin/mnrh claude -h >/dev/null
 	@./bin/mnrh claude sessions -h >/dev/null
 	@./bin/mnrh claude sessions -l >/dev/null
+	@./bin/mnrh claude restart -h >/dev/null
+	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep -q '"restart"'
 	@./bin/mnrh gradle -h >/dev/null
 	@./bin/mnrh gradle >/dev/null
 	@./bin/mnrh claude </dev/null >/dev/null 2>&1; test $$? -eq 2

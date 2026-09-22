@@ -8,6 +8,8 @@ mnrh claude root      запустить в домашнем каталоге
 mnrh claude kcalm     сразу в проекте (достаточно начала имени)
 mnrh claude sessions  сохранённые сессии с размером: продолжить, перенести в другую папку, удалить
 mnrh claude sessions clean   битые ссылки, пустые сессии, папки удалённых проектов
+mnrh claude setup     поставить /restart и MCP-сервер mnrh в Claude Code (--remove убрать)
+mnrh claude restart   изнутри Claude: закрыть, claude update, открыть эту же сессию снова
 mnrh doctor           проверка системы, коротким списком с подсказками
 mnrh doctor --full    ещё обновления macOS и целостность Homebrew
 mnrh disk             что можно почистить на диске
@@ -82,6 +84,24 @@ Claude Code хранит сессии в `~/.claude/projects/<путь-папк�
   проектов, которых больше нет на диске (вместе с их `memory`). Каждая группа
   спрашивается отдельно.
 - `-l` — просто список с id, без меню.
+
+## Как работает перезапуск Claude Code
+
+`mnrh claude setup` кладёт `~/.claude/commands/restart.md` и регистрирует MCP-сервер
+`mnrh` с инструментом `restart` (scope user, во всех проектах). Дальше в любой сессии:
+
+- `/restart` — сразу, без участия модели; `/restart --no-update` — без обновления;
+- или попросить Claude «перезапустись» / «обновись» — он вызовет инструмент `restart`.
+
+Что происходит: по дереву процессов находится свой `claude` и его запись в
+`~/.claude/sessions/<pid>.json` (id сессии, папка, терминал). Отдельный отвязанный
+процесс шлёт ему SIGTERM — Claude закрывается штатно, сессия уже на диске, — и через
+AppleScript набирает в той же вкладке `cd <папка> && { claude update; claude --resume <id>; }`.
+Флаги запуска (`--model`, `--dangerously-skip-permissions`, …) и caffeinate сохраняются.
+
+Работает в Terminal и iTerm2. Первый раз macOS может спросить разрешение на
+управление терминалом — перед закрытием это проверяется, так что без разрешения
+Claude просто не закроется. Лог: `~/Library/Logs/mnrh-claude-restart.log`.
 
 ## Что проверяет `mnrh doctor`
 

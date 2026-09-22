@@ -15,16 +15,18 @@ mnrh claude ... -k          caffeinate без вопроса
 mnrh claude ... -- <аргументы claude>   например: mnrh claude kcalm -- --continue
 mnrh claude sessions        сохранённые сессии: размер, продолжить, перенести в другую папку, удалить
                             (подробнее: mnrh claude sessions -h)
+mnrh claude restart         изнутри Claude: закрыть и открыть эту же сессию заново, с claude update
+mnrh claude setup           поставить /restart и MCP-сервер mnrh с инструментом restart (--remove убрать)
 
 caffeinate (по умолчанию) не даёт Mac уснуть, пока идёт сессия:
 удобно для долгих задач и Remote Control с телефона. Экран при этом гаснуть может.
 EOF
 }
 
-if [ "${1:-}" = sessions ]; then
-  shift
-  exec /usr/bin/python3 "$(dirname "$MENU")/claude_sessions.py" "$@"
-fi
+case "${1:-}" in
+  sessions) shift; exec /usr/bin/python3 "$(dirname "$MENU")/claude_sessions.py" "$@" ;;
+  restart|mcp|setup) exec /usr/bin/python3 "$(dirname "$MENU")/claude_restart.py" "$@" ;;
+esac
 
 target="" mode="" passthrough=()
 while [ $# -gt 0 ]; do
