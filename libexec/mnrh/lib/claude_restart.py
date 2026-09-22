@@ -19,8 +19,8 @@ MNRH = shutil.which("mnrh") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "bin", "mnrh")
 COMMANDS = os.path.join(CLAUDE, "commands")
 COMMAND_FILE = os.path.join(COMMANDS, "restart.md")
-FORGET_FILE = os.path.join(COMMANDS, "forget-session.md")
-OLD_FORGET_FILE = os.path.join(COMMANDS, "forget.md")
+FORGET_FILE = os.path.join(COMMANDS, "forget.md")
+OLD_FORGET_FILE = os.path.join(COMMANDS, "forget-session.md")
 QUEUE = os.path.join(HOME, ".cache", "mnrh", "restart")
 ZSHRC = os.path.join(os.environ.get("ZDOTDIR") or HOME, ".zshrc")
 DROP_WITH_VALUE = {"-r", "--resume", "--session-id", "--fork-session", "-p", "--print"}
@@ -256,7 +256,7 @@ def cli(args, forget=False):
             print("mnrh claude restart --no-update   без обновления")
             print("mnrh claude restart --dry-run     только показать, что будет сделано")
         print()
-        print("Обычно вызывается из Claude: " + ("/forget-session или инструментом forget_session"
+        print("Обычно вызывается из Claude: " + ("/forget или инструментом forget"
               if forget else "/restart или инструментом restart") + " из MCP-сервера mnrh")
         print("(установить: mnrh claude setup). Лог: " + tilde(LOG))
         return 0
@@ -290,7 +290,7 @@ TOOL = {
 
 
 FORGET_TOOL = {
-    "name": "forget_session",
+    "name": "forget",
     "description": ("Забыть эту сессию: Claude Code закроется, текущая переписка удалится с диска без следа "
                     "(вместе с историей запросов), и в той же папке и вкладке откроется новый чистый Claude — "
                     "как /clear, только старое не сохраняется. Вызывай только когда пользователь сам просит забыть "
@@ -323,12 +323,12 @@ def mcp():
         elif method == "tools/call":
             params = req.get("params") or {}
             tool = params.get("name")
-            if tool not in ("restart", "forget_session"):
+            if tool not in ("restart", "forget"):
                 send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": "нет такого инструмента"}})
                 continue
             update = (params.get("arguments") or {}).get("update", True)
             try:
-                if tool == "forget_session":
+                if tool == "forget":
                     p = restart(update=False, delay=2.5, forget=True)
                     text = (f"Готово: через пару секунд Claude Code закроется, сессия {p['sid']} будет удалена, "
                             f"и в {tilde(p['cwd'])} откроется новая.")
@@ -398,9 +398,11 @@ def setup(args):
         kept = [l for l in lines if marker not in l]
         if kept != lines:
             write_zshrc(kept)
-        print(f"Убрал /restart, /forget-session, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
+        print(f"Убрал /restart, /forget, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
         return 0
     os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
+    if os.path.exists(OLD_FORGET_FILE):
+        os.remove(OLD_FORGET_FILE)
     for path, text in ((COMMAND_FILE, SLASH), (FORGET_FILE, FORGET_SLASH)):
         with open(path, "w") as f:
             f.write(text)
@@ -427,7 +429,7 @@ def setup(args):
         if r.returncode != 0:
             print(f"✗ не подключил MCP: {r.stderr.strip() or r.stdout.strip()}")
             return 1
-        print(f"✓ MCP-сервер mnrh: {tilde(MNRH)} claude mcp (инструменты restart и forget_session)")
+        print(f"✓ MCP-сервер mnrh: {tilde(MNRH)} claude mcp (инструменты restart и forget)")
     print("Подхватится в новых вкладках и сессиях Claude Code; в уже открытых — после перезапуска.")
     return 0
 
