@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import glob
 import json
 import os
 import re
@@ -8,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mnrhlib import HOME, tilde
@@ -22,7 +24,11 @@ COMMAND_FILE = os.path.join(COMMANDS, "restart.md")
 FORGET_FILE = os.path.join(COMMANDS, "forget.md")
 OLD_FORGET_FILE = os.path.join(COMMANDS, "forget-session.md")
 QUEUE = os.path.join(HOME, ".cache", "mnrh", "restart")
+NOTICES = os.path.join(HOME, ".cache", "mnrh", "notice")
+NOTICE_TTL = 300
+SETTINGS = os.path.join(CLAUDE, "settings.json")
 ZSHRC = os.path.join(os.environ.get("ZDOTDIR") or HOME, ".zshrc")
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 DROP_WITH_VALUE = {"-r", "--resume", "--session-id", "--fork-session", "-p", "--print"}
 DROP = {"-c", "--continue", "-r", "--resume"}
 
@@ -208,13 +214,16 @@ def plan(update=True, forget=False):
     if forget:
         flags = drop_name(flags)
 
-    run = (["caffeinate"] + caffeinate if caffeinate is not None else []) + [CLAUDE_BIN] + ([] if forget else ["--resume", sid]) + flags
+    new_sid = str(uuid.uuid4()) if forget else sid
+    run = ((["caffeinate"] + caffeinate if caffeinate is not None else []) + [CLAUDE_BIN]
+           + (["--session-id", new_sid] if forget else ["--resume", sid]) + flags)
     update = update and not forget
     line = (f"cd {shlex.quote(cwd)} && "
             + (f"{{ {shlex.quote(CLAUDE_BIN)} update; " if update else "{ ")
             + ("clear; printf '\\033[3J'; " if forget else "") + shlex.join(run) + "; }")
     return {"pid": pid, "sid": sid, "cwd": cwd, "tty": tty, "term": term, "via": via, "line": line, "forget": forget,
-            "title": info.get("name") or sid}
+            "title": session_title(sid) or info.get("name") or sid, "new_sid": new_sid,
+            "version": claude_version()}
 
 
 def osascript(term, *args):
@@ -247,6 +256,7 @@ def watcher(p, delay):
     time.sleep(delay)
     log(f"restart {p['sid']} pid {p['pid']} tty {p['tty']} via {p['via']}")
     job = os.path.join(QUEUE, os.path.basename(p["tty"]))
+    write_notice(p, "pending" if p["forget"] else "done")
     if p["via"] == "zsh":
         with open(job, "w") as f:
             f.write(p["line"])
@@ -268,13 +278,86 @@ def watcher(p, delay):
             pass
         time.sleep(0.5)
     if p["forget"]:
-        forget_session(p["sid"])
+        ok = forget_session(p["sid"])
+        write_notice(p, "done" if ok else "failed")
     if p["via"] == "zsh":
         log(f"zsh: {p['line']}")
         return
     time.sleep(0.8)
     code, out = osascript(p["term"], p["tty"], p["line"])
     log(f"osascript {code} {out}: {p['line']}")
+
+
+def claude_version(path=None):
+    path = path or os.environ.get("CLAUDE_CODE_EXECPATH") or os.path.realpath(shutil.which("claude") or "")
+    name = os.path.basename(path)
+    return name if re.match(r"^\d+(\.\d+)+$", name) else ""
+
+
+def session_title(sid):
+    import claude_sessions
+    for path in glob.glob(os.path.join(CLAUDE, "projects", "*", sid + ".jsonl")):
+        meta = claude_sessions.read_meta(path)
+        return meta["custom"] or meta["ai"] or meta["prompt"]
+    return ""
+
+
+def write_notice(p, status):
+    os.makedirs(NOTICES, exist_ok=True)
+    data = {"kind": "forget" if p["forget"] else "restart", "status": status, "title": p["title"],
+            "old_sid": p["sid"], "version": p["version"], "at": time.time()}
+    tmp = os.path.join(NOTICES, p["new_sid"] + ".tmp")
+    with open(tmp, "w") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, os.path.join(NOTICES, p["new_sid"] + ".json"))
+
+
+def notice_text(n):
+    title = n.get("title") or n.get("old_sid", "")
+    if len(title) > 60:
+        title = title[:59] + "…"
+    now = claude_version()
+    if n["kind"] == "restart":
+        was = n.get("version")
+        if was and now and was != now:
+            ver = f"обновлён {was} → {now}"
+        else:
+            ver = f"версия {now or was}" + (", обновлений не было" if was and now else "")
+        return f"✓ mnrh: Claude Code перезапущен ({ver}). Сессия «{title}» продолжается."
+    if n.get("status") == "done":
+        return (f"✓ mnrh: прошлая сессия «{title}» удалена — переписка, история запросов и file-history. "
+                "Это новая чистая сессия.")
+    if n.get("status") == "failed":
+        return f"! mnrh: прошлую сессию «{title}» не удалось найти и удалить, проверь: mnrh claude sessions -l"
+    return f"… mnrh: прошлая сессия «{title}» ещё удаляется, проверь позже: mnrh claude sessions -l"
+
+
+def notice():
+    try:
+        sid = json.load(sys.stdin).get("session_id")
+    except (ValueError, AttributeError):
+        return 0
+    if not sid or not UUID_RE.match(sid):
+        return 0
+    path = os.path.join(NOTICES, sid + ".json")
+    n = None
+    for _ in range(30):
+        try:
+            with open(path) as f:
+                n = json.load(f)
+        except (OSError, ValueError):
+            return 0
+        if n.get("status") != "pending":
+            break
+        time.sleep(0.1)
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    if time.time() - n.get("at", 0) > NOTICE_TTL:
+        return 0
+    print(json.dumps({"systemMessage": notice_text(n)}, ensure_ascii=False))
+    return 0
 
 
 def forget_session(sid):
@@ -284,8 +367,9 @@ def forget_session(sid):
             s["running"] = None
             claude_sessions.delete(s)
             log(f"forget: удалил {sid}")
-            return
+            return True
     log(f"forget: сессии {sid} не нашёл")
+    return False
 
 
 def detach(p, delay):
@@ -459,6 +543,35 @@ def write_zshrc(lines):
         f.writelines(lines)
 
 
+def notice_hook(install):
+    try:
+        with open(SETTINGS) as f:
+            settings = json.load(f)
+    except FileNotFoundError:
+        settings = {}
+    except ValueError as e:
+        print(f"✗ {tilde(SETTINGS)} не читается как JSON ({e}), хук сообщений не трогаю")
+        return
+    hooks = settings.setdefault("hooks", {})
+    entries = [e for e in hooks.get("SessionStart", [])
+               if not any("claude notice" in h.get("command", "") for h in e.get("hooks", []))]
+    if install:
+        entries.append({"hooks": [{"type": "command", "command": f"{shlex.quote(MNRH)} claude notice", "timeout": 10}]})
+    if entries:
+        hooks["SessionStart"] = entries
+    else:
+        hooks.pop("SessionStart", None)
+    if not hooks:
+        settings.pop("hooks")
+    tmp = SETTINGS + ".mnrh-tmp"
+    with open(tmp, "w") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp, SETTINGS)
+    if install:
+        print(f"✓ сообщение после /restart и /forget → хук SessionStart в {tilde(SETTINGS)}")
+
+
 def setup(args):
     marker = "share/mnrh/restart.zsh"
     if "--remove" in args:
@@ -466,6 +579,7 @@ def setup(args):
             if os.path.exists(f):
                 os.remove(f)
         subprocess.run(["claude", "mcp", "remove", "--scope", "user", "mnrh"], capture_output=True)
+        notice_hook(False)
         lines = zshrc_lines()
         kept = [l for l in lines if marker not in l]
         if kept != lines:
@@ -480,6 +594,7 @@ def setup(args):
             f.write(text)
         print(f"✓ /{os.path.basename(path)[:-3]} → {tilde(path)}")
 
+    notice_hook(True)
     hook = hook_file()
     line = f'[ -f "{hook}" ] && source "{hook}"\n'
     lines = zshrc_lines()
@@ -510,6 +625,8 @@ if __name__ == "__main__":
     cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("restart", [])
     if cmd == "mcp":
         mcp()
+    elif cmd == "notice":
+        sys.exit(notice())
     elif cmd == "setup":
         sys.exit(setup(rest))
     else:

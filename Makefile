@@ -34,6 +34,8 @@ test:
 	@./bin/mnrh claude sessions -l >/dev/null
 	@./bin/mnrh claude restart -h >/dev/null
 	@./bin/mnrh claude forget -h >/dev/null
+	@echo junk | ./bin/mnrh claude notice | wc -c | grep -q '^ *0$$'
+	@echo '{"session_id":"00000000-0000-0000-0000-000000000000"}' | ./bin/mnrh claude notice | wc -c | grep -q '^ *0$$'
 	@zsh -n share/mnrh/restart.zsh
 	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep '"restart"' | grep -q '"forget"'
 	@./bin/mnrh gradle -h >/dev/null

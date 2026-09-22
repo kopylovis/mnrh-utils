@@ -9,7 +9,7 @@ mnrh claude root      запустить в домашнем каталоге
 mnrh claude kcalm     сразу в проекте (достаточно начала имени)
 mnrh claude sessions  сохранённые сессии с размером: продолжить, перенести в другую папку, удалить
 mnrh claude sessions clean   битые ссылки, пустые сессии, папки удалённых проектов
-mnrh claude setup     поставить /restart, /forget, MCP-сервер mnrh и хук zsh (--remove убрать)
+mnrh claude setup     поставить /restart, /forget, MCP-сервер mnrh, хуки zsh и SessionStart (--remove убрать)
 mnrh claude restart   изнутри Claude: закрыть, claude update, открыть эту же сессию снова
 mnrh claude forget    изнутри Claude: удалить эту сессию без следа и открыть чистую
 mnrh doctor           проверка системы, коротким списком с подсказками
@@ -156,6 +156,13 @@ MCP-сервер `mnrh` с инструментами `restart` и `forget` (sco
 - **AppleScript** — запасной вариант для Terminal и iTerm2, если хук в этой вкладке не
   загружен. Первый раз macOS может спросить разрешение на управление терминалом; это
   проверяется до закрытия, так что без разрешения Claude просто не закроется.
+
+После запуска Claude показывает под строкой ввода, что произошло: «Claude Code перезапущен
+(обновлён 2.1.278 → 2.1.280). Сессия «…» продолжается» или «прошлая сессия «…» удалена… Это
+новая чистая сессия». Это хук `SessionStart` в `~/.claude/settings.json` (его ставит
+`mnrh claude setup`): перед закрытием в `~/.cache/mnrh/notice/<id сессии>.json` кладётся
+записка, хук её показывает и удаляет. Модели это не отправляется. `/forget` для этого
+запускает новую сессию с заранее известным `--session-id`.
 
 Лог: `~/Library/Logs/mnrh-claude-restart.log`.
 
