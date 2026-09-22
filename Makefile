@@ -32,7 +32,7 @@ test:
 	@./bin/mnrh claude restart -h >/dev/null
 	@./bin/mnrh claude forget -h >/dev/null
 	@zsh -n share/mnrh/restart.zsh
-	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep '"restart"' | grep -q '"forget"'
+	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep '"restart"' | grep -q '"forget_session"'
 	@./bin/mnrh gradle -h >/dev/null
 	@./bin/mnrh gradle >/dev/null
 	@./bin/mnrh claude </dev/null >/dev/null 2>&1; test $$? -eq 2

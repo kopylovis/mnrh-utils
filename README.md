@@ -8,7 +8,7 @@ mnrh claude root      запустить в домашнем каталоге
 mnrh claude kcalm     сразу в проекте (достаточно начала имени)
 mnrh claude sessions  сохранённые сессии с размером: продолжить, перенести в другую папку, удалить
 mnrh claude sessions clean   битые ссылки, пустые сессии, папки удалённых проектов
-mnrh claude setup     поставить /restart, /forget, MCP-сервер mnrh и хук zsh (--remove убрать)
+mnrh claude setup     поставить /restart, /forget-session, MCP-сервер mnrh и хук zsh (--remove убрать)
 mnrh claude restart   изнутри Claude: закрыть, claude update, открыть эту же сессию снова
 mnrh claude forget    изнутри Claude: удалить эту сессию без следа и открыть чистую
 mnrh doctor           проверка системы, коротким списком с подсказками
@@ -54,7 +54,7 @@ brew install kopylovis/tap/mnrh
 mnrh claude setup
 ```
 
-`mnrh claude setup` кладёт команду `/restart` и регистрирует MCP-сервер `mnrh` в Claude Code.
+`mnrh claude setup` кладёт команды `/restart` и `/forget-session`, хук zsh и регистрирует MCP-сервер `mnrh` в Claude Code.
 Обновление: `brew upgrade mnrh`. Удаление: `brew uninstall mnrh`.
 
 ### Из исходников, для разработки
@@ -121,12 +121,12 @@ Claude Code хранит сессии в `~/.claude/projects/<путь-папк�
 
 ## Как работает перезапуск Claude Code
 
-`mnrh claude setup` кладёт `~/.claude/commands/restart.md` и `forget.md` и регистрирует
-MCP-сервер `mnrh` с инструментами `restart` и `forget` (scope user, во всех проектах). Дальше в любой сессии:
+`mnrh claude setup` кладёт `~/.claude/commands/restart.md` и `forget-session.md` и регистрирует
+MCP-сервер `mnrh` с инструментами `restart` и `forget_session` (scope user, во всех проектах). Дальше в любой сессии:
 
 - `/restart` — сразу, без участия модели; `/restart --no-update` — без обновления;
 - или попросить Claude «перезапустись» / «обновись» — он вызовет инструмент `restart`;
-- `/forget` (или «забудь эту сессию» — инструмент `forget`) — разовая сессия: Claude
+- `/forget-session` (или «забудь эту сессию» — инструмент `forget_session`) — разовая сессия: Claude
   закрывается, переписка удаляется с диска вместе с её строками в `history.jsonl`,
   `file-history` и `session-env`, и в той же папке открывается чистый Claude. В отличие
   от встроенного `/clear`, старое не остаётся в `/resume`. У самого Claude Code такого
