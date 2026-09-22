@@ -107,6 +107,35 @@ def resume_flags(args):
     return out
 
 
+SHELLS = {"zsh", "bash", "sh", "fish", "login"}
+
+
+def launcher(pid):
+    parent = ps("ppid", pid)
+    while parent and int(parent) > 1:
+        name = os.path.basename(ps("comm", int(parent))).lstrip("-")
+        if name != "caffeinate":
+            return name
+        parent = ps("ppid", int(parent))
+    return ""
+
+
+def no_hook_reason(pid, term):
+    head = f"в этом терминале ({term}) Claude возвращается во вкладку только через хук zsh, а его здесь нет: "
+    parent = launcher(pid)
+    if parent not in SHELLS:
+        return (head + f"Claude запущен не из shell, а напрямую ({parent or 'неизвестно кем'}), например вкладкой "
+                "Claude Code в IDE, и после выхода вкладке некуда вернуться. Открой обычную вкладку терминала "
+                "и запусти claude там")
+    if parent != "zsh":
+        return head + f"shell здесь {parent}, а хук есть только для zsh"
+    hooked = any("share/mnrh/restart.zsh" in l for l in zshrc_lines())
+    if not hooked:
+        return head + f"в {tilde(ZSHRC)} нет строки с хуком. Выполни mnrh claude setup и открой новую вкладку"
+    return (head + f"в {tilde(ZSHRC)} он есть, но эта вкладка открыта раньше. Открой новую вкладку терминала "
+            "и запусти claude там")
+
+
 def plan(update=True, forget=False):
     pid = find_claude()
     try:
@@ -128,9 +157,7 @@ def plan(update=True, forget=False):
     elif term in FIND_TAB:
         via = term
     else:
-        raise RestartError(f"в этом терминале ({term or os.environ.get('TERMINAL_EMULATOR') or 'неизвестный'}) "
-                           "вернуть Claude можно только через хук zsh: выполни mnrh claude setup "
-                           "и открой новую вкладку терминала")
+        raise RestartError(no_hook_reason(pid, term or os.environ.get("TERMINAL_EMULATOR") or "неизвестный"))
 
     argv = shlex.split(ps("args", pid))
     flags = resume_flags(argv[1:])
