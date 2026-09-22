@@ -67,8 +67,8 @@ mnrh claude setup
 
 1. Поднять номер в `VERSION`, закоммитить и запушить.
 2. Поставить тег: `git tag v$(cat VERSION) && git push origin v$(cat VERSION)`.
-3. В `kopylovis/homebrew-tap` в `Formula/mnrh.rb` обновить `tag:`, `revision:` (полный
-   хеш коммита с тегом) и `version`.
+3. В `kopylovis/homebrew-tap` в `Formula/mnrh.rb` обновить `tag:` и `revision:` (полный хеш
+   коммита с тегом: `git rev-parse v$(cat VERSION)^{commit}`). Версию Homebrew берёт из тега.
 
 ## Требования
 
