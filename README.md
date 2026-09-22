@@ -36,12 +36,20 @@ mnrh killdaemons -f   снять и тех, кто занят сборкой
 
 ### Через Homebrew
 
-Репозиторий приватный, поэтому сначала нужен вход в GitHub — Homebrew берёт код через git:
+Одной командой:
 
 ```bash
-gh auth login
-brew tap kopylovis/tap
-brew install mnrh
+bash <(curl -fsSL https://raw.githubusercontent.com/kopylovis/homebrew-tap/main/install.sh)
+```
+
+Скрипт по шагам ставит Homebrew и GitHub CLI, если их нет, выполняет вход в GitHub —
+репозиторий приватный, и Homebrew берёт код через git, — затем `brew install
+kopylovis/tap/mnrh` и `mnrh claude setup`. Запускать можно повторно: сделанное пропускается.
+
+Вручную, если вход уже настроен (`gh auth login` и `gh auth setup-git`):
+
+```bash
+brew install kopylovis/tap/mnrh
 mnrh claude setup
 ```
 
