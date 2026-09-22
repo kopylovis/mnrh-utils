@@ -332,13 +332,93 @@ def notice_text(n):
     return f"… mnrh: прошлая сессия «{title}» ещё удаляется, проверь позже: mnrh claude sessions -l"
 
 
-def notice():
+def hook_payload():
     try:
-        sid = json.load(sys.stdin).get("session_id")
-    except (ValueError, AttributeError):
+        payload = json.load(sys.stdin)
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def background(fn, *args):
+    if os.fork():
+        return
+    os.setsid()
+    if os.fork():
+        os._exit(0)
+    devnull = os.open(os.devnull, os.O_RDWR)
+    for fd in (0, 1, 2):
+        os.dup2(devnull, fd)
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    try:
+        fn(*args)
+    except Exception as e:
+        log(f"ошибка: {e!r}")
+    os._exit(0)
+
+
+def drop_junk(path, why):
+    import claude_sessions
+    sid = os.path.basename(path)[:-6]
+    if os.path.islink(path) or sid in claude_sessions.running_ids() or not claude_sessions.is_junk(path):
+        return False
+    for s in claude_sessions.load():
+        if s["id"] == sid and not s["link"]:
+            s["running"] = None
+            claude_sessions.delete(s)
+            log(f"пустая сессия {sid} удалена ({why})")
+            return True
+    return False
+
+
+def sweep(pdir, keep):
+    for name in os.listdir(pdir):
+        path = os.path.join(pdir, name)
+        if not name.endswith(".jsonl") or not UUID_RE.match(name[:-6]) or name[:-6] == keep:
+            continue
+        try:
+            if time.time() - os.path.getmtime(path) < 60:
+                continue
+        except OSError:
+            continue
+        drop_junk(path, "уборка при старте")
+
+
+def session_end():
+    payload = hook_payload()
+    sid, path = payload.get("session_id"), payload.get("transcript_path")
+    if not sid or not UUID_RE.match(sid) or not path or not path.endswith(sid + ".jsonl"):
         return 0
+    try:
+        pid = find_claude()
+    except RestartError:
+        pid = None
+
+    def later():
+        if payload.get("reason") == "clear" or pid is None:
+            time.sleep(2)
+        else:
+            for _ in range(100):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.1)
+            time.sleep(0.5)
+        drop_junk(path, f"закрытие: {payload.get('reason') or '?'}")
+
+    background(later)
+    return 0
+
+
+def notice():
+    payload = hook_payload()
+    sid = payload.get("session_id")
     if not sid or not UUID_RE.match(sid):
         return 0
+    path = payload.get("transcript_path")
+    if path and os.path.isdir(os.path.dirname(path)):
+        background(sweep, os.path.dirname(path), sid)
     path = os.path.join(NOTICES, sid + ".json")
     n = None
     for _ in range(30):
@@ -373,20 +453,7 @@ def forget_session(sid):
 
 
 def detach(p, delay):
-    if os.fork():
-        return
-    os.setsid()
-    if os.fork():
-        os._exit(0)
-    devnull = os.open(os.devnull, os.O_RDWR)
-    for fd in (0, 1, 2):
-        os.dup2(devnull, fd)
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
-    try:
-        watcher(p, delay)
-    except Exception as e:
-        log(f"ошибка: {e!r}")
-    os._exit(0)
+    background(watcher, p, delay)
 
 
 def restart(update=True, delay=1.5, dry=False, forget=False):
@@ -543,6 +610,9 @@ def write_zshrc(lines):
         f.writelines(lines)
 
 
+HOOKS = {"SessionStart": "claude notice", "SessionEnd": "claude session-end"}
+
+
 def notice_hook(install):
     try:
         with open(SETTINGS) as f:
@@ -550,17 +620,18 @@ def notice_hook(install):
     except FileNotFoundError:
         settings = {}
     except ValueError as e:
-        print(f"✗ {tilde(SETTINGS)} не читается как JSON ({e}), хук сообщений не трогаю")
+        print(f"✗ {tilde(SETTINGS)} не читается как JSON ({e}), хуки Claude Code не трогаю")
         return
     hooks = settings.setdefault("hooks", {})
-    entries = [e for e in hooks.get("SessionStart", [])
-               if not any("claude notice" in h.get("command", "") for h in e.get("hooks", []))]
-    if install:
-        entries.append({"hooks": [{"type": "command", "command": f"{shlex.quote(MNRH)} claude notice", "timeout": 10}]})
-    if entries:
-        hooks["SessionStart"] = entries
-    else:
-        hooks.pop("SessionStart", None)
+    for event, cmd in HOOKS.items():
+        entries = [e for e in hooks.get(event, [])
+                   if not any(cmd in h.get("command", "") for h in e.get("hooks", []))]
+        if install:
+            entries.append({"hooks": [{"type": "command", "command": f"{shlex.quote(MNRH)} {cmd}", "timeout": 10}]})
+        if entries:
+            hooks[event] = entries
+        else:
+            hooks.pop(event, None)
     if not hooks:
         settings.pop("hooks")
     tmp = SETTINGS + ".mnrh-tmp"
@@ -569,7 +640,8 @@ def notice_hook(install):
         f.write("\n")
     os.replace(tmp, SETTINGS)
     if install:
-        print(f"✓ сообщение после /restart и /forget → хук SessionStart в {tilde(SETTINGS)}")
+        print(f"✓ сообщения после /restart и /forget, удаление пустых сессий → хуки SessionStart и SessionEnd "
+              f"в {tilde(SETTINGS)}")
 
 
 def setup(args):
@@ -627,6 +699,8 @@ if __name__ == "__main__":
         mcp()
     elif cmd == "notice":
         sys.exit(notice())
+    elif cmd == "session-end":
+        sys.exit(session_end())
     elif cmd == "setup":
         sys.exit(setup(rest))
     else:

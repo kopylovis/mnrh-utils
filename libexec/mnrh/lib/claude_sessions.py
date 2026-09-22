@@ -149,6 +149,38 @@ def read_meta(path):
     return meta
 
 
+LOCAL_MARKERS = ("<command-name>", "<local-command-stdout>", "<local-command-stderr>", "<local-command-caveat>")
+
+
+def is_junk(path):
+    try:
+        f = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    with f:
+        for line in f:
+            if '"type":"assistant"' in line:
+                return False
+            if '"type":"user"' not in line:
+                continue
+            try:
+                o = json.loads(line)
+            except ValueError:
+                return False
+            if o.get("type") != "user" or o.get("isMeta"):
+                continue
+            c = (o.get("message") or {}).get("content")
+            if isinstance(c, str):
+                texts = [c]
+            elif isinstance(c, list) and all(isinstance(b, dict) and b.get("type") == "text" for b in c):
+                texts = [b.get("text", "") for b in c]
+            else:
+                return False
+            if not texts or not all(any(m in t for m in LOCAL_MARKERS) for t in texts):
+                return False
+    return True
+
+
 def load():
     running = running_ids()
     out = []

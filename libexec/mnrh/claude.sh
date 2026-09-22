@@ -35,7 +35,7 @@ EOF
 
 case "${1:-}" in
   sessions) shift; exec /usr/bin/python3 "$(dirname "$MENU")/claude_sessions.py" "$@" ;;
-  restart|forget|mcp|setup|notice) exec /usr/bin/python3 "$(dirname "$MENU")/claude_restart.py" "$@" ;;
+  restart|forget|mcp|setup|notice|session-end) exec /usr/bin/python3 "$(dirname "$MENU")/claude_restart.py" "$@" ;;
 esac
 
 target="" mode="" passthrough=()
