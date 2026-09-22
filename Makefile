@@ -30,6 +30,7 @@ test:
 	@./bin/mnrh claude sessions -h >/dev/null
 	@./bin/mnrh claude sessions -l >/dev/null
 	@./bin/mnrh claude restart -h >/dev/null
+	@zsh -n share/mnrh/restart.zsh
 	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep -q '"restart"'
 	@./bin/mnrh gradle -h >/dev/null
 	@./bin/mnrh gradle >/dev/null

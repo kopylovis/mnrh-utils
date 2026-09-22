@@ -16,7 +16,7 @@ mnrh claude ... -- <аргументы claude>   например: mnrh claude k
 mnrh claude sessions        сохранённые сессии: размер, продолжить, перенести в другую папку, удалить
                             (подробнее: mnrh claude sessions -h)
 mnrh claude restart         изнутри Claude: закрыть и открыть эту же сессию заново, с claude update
-mnrh claude setup           поставить /restart и MCP-сервер mnrh с инструментом restart (--remove убрать)
+mnrh claude setup           поставить /restart, MCP-сервер mnrh и хук zsh для перезапуска (--remove убрать)
 
 caffeinate (по умолчанию) не даёт Mac уснуть, пока идёт сессия:
 удобно для долгих задач и Remote Control с телефона. Экран при этом гаснуть может.

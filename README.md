@@ -8,7 +8,7 @@ mnrh claude root      запустить в домашнем каталоге
 mnrh claude kcalm     сразу в проекте (достаточно начала имени)
 mnrh claude sessions  сохранённые сессии с размером: продолжить, перенести в другую папку, удалить
 mnrh claude sessions clean   битые ссылки, пустые сессии, папки удалённых проектов
-mnrh claude setup     поставить /restart и MCP-сервер mnrh в Claude Code (--remove убрать)
+mnrh claude setup     поставить /restart, MCP-сервер mnrh и хук zsh для перезапуска (--remove убрать)
 mnrh claude restart   изнутри Claude: закрыть, claude update, открыть эту же сессию снова
 mnrh doctor           проверка системы, коротким списком с подсказками
 mnrh doctor --full    ещё обновления macOS и целостность Homebrew
@@ -128,13 +128,22 @@ Claude Code хранит сессии в `~/.claude/projects/<путь-папк�
 
 Что происходит: по дереву процессов находится свой `claude` и его запись в
 `~/.claude/sessions/<pid>.json` (id сессии, папка, терминал). Отдельный отвязанный
-процесс шлёт ему SIGTERM — Claude закрывается штатно, сессия уже на диске, — и через
-AppleScript набирает в той же вкладке `cd <папка> && { claude update; claude --resume <id>; }`.
+процесс шлёт ему SIGTERM — Claude закрывается штатно, сессия уже на диске, — и в той же
+вкладке выполняется `cd <папка> && { claude update; claude --resume <id>; }`.
 Флаги запуска (`--model`, `--dangerously-skip-permissions`, …) и caffeinate сохраняются.
 
-Работает в Terminal и iTerm2. Первый раз macOS может спросить разрешение на
-управление терминалом — перед закрытием это проверяется, так что без разрешения
-Claude просто не закроется. Лог: `~/Library/Logs/mnrh-claude-restart.log`.
+Как команда попадает обратно во вкладку:
+
+- **хук zsh** (основной способ, любой терминал — Android Studio, VS Code, Terminal, iTerm2).
+  `mnrh claude setup` добавляет в `~/.zshrc` строку с `share/mnrh/restart.zsh`. Перед
+  закрытием Claude в `~/.cache/mnrh/restart/<tty>` кладётся задание, и zsh выполняет его
+  перед следующим приглашением. Задания старше двух минут игнорируются. Работает во
+  вкладках, открытых после установки;
+- **AppleScript** — запасной вариант для Terminal и iTerm2, если хук в этой вкладке не
+  загружен. Первый раз macOS может спросить разрешение на управление терминалом; это
+  проверяется до закрытия, так что без разрешения Claude просто не закроется.
+
+Лог: `~/Library/Logs/mnrh-claude-restart.log`.
 
 ## Что проверяет `mnrh doctor`
 

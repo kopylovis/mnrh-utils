@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -17,6 +18,8 @@ LOG = os.path.join(HOME, "Library", "Logs", "mnrh-claude-restart.log")
 MNRH = shutil.which("mnrh") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "bin", "mnrh")
 COMMAND_FILE = os.path.join(CLAUDE, "commands", "restart.md")
+QUEUE = os.path.join(HOME, ".cache", "mnrh", "restart")
+ZSHRC = os.path.join(os.environ.get("ZDOTDIR") or HOME, ".zshrc")
 DROP_WITH_VALUE = {"-r", "--resume", "--session-id", "--fork-session", "-p", "--print"}
 DROP = {"-c", "--continue", "-r", "--resume"}
 
@@ -117,8 +120,14 @@ def plan(update=True):
         raise RestartError("у Claude нет терминала, перезапускать некуда")
     tty = "/dev/" + tty if not tty.startswith("/dev/") else tty
     term = os.environ.get("TERM_PROGRAM", "")
-    if term not in FIND_TAB:
-        raise RestartError(f"умею возвращать Claude только в Terminal и iTerm2, а тут {term or 'неизвестный терминал'}")
+    if os.environ.get("MNRH_RESTART_HOOK") == "1":
+        via = "zsh"
+    elif term in FIND_TAB:
+        via = term
+    else:
+        raise RestartError(f"в этом терминале ({term or os.environ.get('TERMINAL_EMULATOR') or 'неизвестный'}) "
+                           "вернуть Claude можно только через хук zsh: выполни mnrh claude setup "
+                           "и открой новую вкладку терминала")
 
     argv = shlex.split(ps("args", pid))
     flags = resume_flags(argv[1:])
@@ -128,7 +137,7 @@ def plan(update=True):
     run = (["caffeinate", "-is"] if caffeinate else []) + [CLAUDE_BIN, "--resume", sid] + flags
     line = (f"cd {shlex.quote(cwd)} && "
             + (f"{{ {shlex.quote(CLAUDE_BIN)} update; " if update else "{ ") + shlex.join(run) + "; }")
-    return {"pid": pid, "sid": sid, "cwd": cwd, "tty": tty, "term": term, "line": line,
+    return {"pid": pid, "sid": sid, "cwd": cwd, "tty": tty, "term": term, "via": via, "line": line,
             "title": info.get("name") or sid}
 
 
@@ -138,6 +147,9 @@ def osascript(term, *args):
 
 
 def preflight(p):
+    if p["via"] == "zsh":
+        os.makedirs(QUEUE, exist_ok=True)
+        return
     code, out = osascript(p["term"], p["tty"])
     if code != 0:
         raise RestartError("macOS не дал управлять терминалом: разреши в Системные настройки → "
@@ -157,7 +169,11 @@ def log(msg):
 
 def watcher(p, delay):
     time.sleep(delay)
-    log(f"restart {p['sid']} pid {p['pid']} tty {p['tty']}")
+    log(f"restart {p['sid']} pid {p['pid']} tty {p['tty']} via {p['via']}")
+    job = os.path.join(QUEUE, os.path.basename(p["tty"]))
+    if p["via"] == "zsh":
+        with open(job, "w") as f:
+            f.write(p["line"])
     try:
         os.kill(p["pid"], signal.SIGTERM)
     except ProcessLookupError:
@@ -175,6 +191,9 @@ def watcher(p, delay):
         except ProcessLookupError:
             pass
         time.sleep(0.5)
+    if p["via"] == "zsh":
+        log(f"zsh: {p['line']}")
+        return
     time.sleep(0.8)
     code, out = osascript(p["term"], p["tty"], p["line"])
     log(f"osascript {code} {out}: {p['line']}")
@@ -222,7 +241,7 @@ def cli(args):
         print(f"mnrh claude restart: {e}", file=sys.stderr)
         return 1
     if "--dry-run" in args:
-        print(f"закрою pid {p['pid']}, в {p['term']} {p['tty']} выполню:\n  {p['line']}")
+        print(f"закрою pid {p['pid']}, в {p['tty']} через {p['via']} выполню:\n  {p['line']}")
     else:
         print(f"Перезапускаю Claude Code через пару секунд, сессия «{p['title']}» откроется снова в этой вкладке.")
     return 0
@@ -292,18 +311,56 @@ Claude Code сейчас перезапустится сам. Ничего не 
 """
 
 
+def hook_file():
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
+    m = re.match(r"(.*)/Cellar/mnrh/[^/]+/(.*)", root)
+    if m:
+        root = f"{m.group(1)}/opt/mnrh/{m.group(2)}"
+    return os.path.join(root, "share", "mnrh", "restart.zsh")
+
+
+def zshrc_lines():
+    try:
+        with open(ZSHRC) as f:
+            return f.read().splitlines(keepends=True)
+    except OSError:
+        return []
+
+
+def write_zshrc(lines):
+    with open(ZSHRC, "w") as f:
+        f.writelines(lines)
+
+
 def setup(args):
-    remove = "--remove" in args
-    if remove:
+    marker = "share/mnrh/restart.zsh"
+    if "--remove" in args:
         if os.path.exists(COMMAND_FILE):
             os.remove(COMMAND_FILE)
         subprocess.run(["claude", "mcp", "remove", "--scope", "user", "mnrh"], capture_output=True)
-        print("Убрал /restart и MCP-сервер mnrh.")
+        lines = zshrc_lines()
+        kept = [l for l in lines if marker not in l]
+        if kept != lines:
+            write_zshrc(kept)
+        print(f"Убрал /restart, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
         return 0
     os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
     with open(COMMAND_FILE, "w") as f:
         f.write(SLASH)
     print(f"✓ /restart → {tilde(COMMAND_FILE)}")
+
+    hook = hook_file()
+    line = f'[ -f "{hook}" ] && source "{hook}"\n'
+    lines = zshrc_lines()
+    if line in lines:
+        print(f"✓ хук перезапуска уже в {tilde(ZSHRC)}")
+    else:
+        lines = [l for l in lines if marker not in l]
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+        write_zshrc(lines + [line])
+        print(f"✓ хук перезапуска → {tilde(ZSHRC)} (работает в новых вкладках терминала)")
+
     listed = subprocess.run(["claude", "mcp", "get", "mnrh"], capture_output=True, text=True)
     if listed.returncode == 0:
         print("✓ MCP-сервер mnrh уже подключён")
@@ -314,7 +371,7 @@ def setup(args):
             print(f"✗ не подключил MCP: {r.stderr.strip() or r.stdout.strip()}")
             return 1
         print(f"✓ MCP-сервер mnrh: {tilde(MNRH)} claude mcp (инструмент restart)")
-    print("Подхватится в новых сессиях Claude Code; в уже открытых — после перезапуска.")
+    print("Подхватится в новых вкладках и сессиях Claude Code; в уже открытых — после перезапуска.")
     return 0
 
 
