@@ -34,16 +34,41 @@ mnrh killdaemons -f   снять и тех, кто занят сборкой
 
 ## Установка
 
+### Через Homebrew
+
+Репозиторий приватный, поэтому сначала нужен вход в GitHub — Homebrew берёт код через git:
+
+```bash
+gh auth login
+brew tap kopylovis/tap
+brew install mnrh
+mnrh claude setup
+```
+
+`mnrh claude setup` кладёт команду `/restart` и регистрирует MCP-сервер `mnrh` в Claude Code.
+Обновление: `brew upgrade mnrh`. Удаление: `brew uninstall mnrh`.
+
+### Из исходников, для разработки
+
 ```bash
 git clone https://github.com/kopylovis/mnrh-utils ~/Developer/mnrh-utils
 cd ~/Developer/mnrh-utils
 make install
+mnrh claude setup
 ```
 
 `make install` кладёт в `~/.local/bin` символическую ссылку на проект, поэтому правки
 работают без переустановки. Другой каталог: `make install PREFIX=/usr/local`.
+Если `mnrh` не находится, добавьте `~/.local/bin` в `PATH` в `~/.zshrc`.
 
 Удаление: `make uninstall`. Проверки: `make test`.
+
+### Выпуск новой версии
+
+1. Поднять номер в `VERSION`, закоммитить и запушить.
+2. Поставить тег: `git tag v$(cat VERSION) && git push origin v$(cat VERSION)`.
+3. В `kopylovis/homebrew-tap` в `Formula/mnrh.rb` обновить `tag:`, `revision:` (полный
+   хеш коммита с тегом) и `version`.
 
 ## Требования
 
