@@ -45,6 +45,8 @@ mnrh power            зарядник и сколько даёт, скольк�
 mnrh defaults         удобные настройки macOS для разработки: что включено (apply, undo)
 mnrh defaults snap    запомнить настройки; после правки в Настройках diff даст defaults write
 mnrh outdated         что пора обновить: macOS, Homebrew, Android Studio и SDK, Gradle в проектах
+mnrh input on         раскладка под приложение: en в Android Studio, Xcode, терминале; остальным — прежняя
+mnrh input set Telegram ru   своё правило для приложения
 mnrh fix              быстрые починки без перезагрузки, список с описаниями:
                       scroll, dock, finder, menubar, wifi, sim, adb, dns, bt, audio
 mnrh killdaemons      остановить демоны Gradle и Kotlin любых версий
@@ -413,6 +415,19 @@ PAC, переменные окружения и отдельно прокси Gr
 текущими и печатает готовые `defaults write`/`delete` — так находится ключ любой
 галочки в Настройках, чтобы потом включать её скриптом. Служебные счётчики и время
 последнего запуска прячутся.
+
+## Как работает `mnrh input`
+
+Помощник на Swift (`share/mnrh/input/main.swift`), собирается и ставится в автозапуск так же,
+как `mnrh scroll` (общий код — `libexec/mnrh/lib/swiftagent.py`). Разрешений не требует:
+смену активного приложения сообщает NSWorkspace, раскладку переключает Text Input Sources.
+
+Когда приложение выходит на передний план, ему ставится раскладка по правилу, а если правила
+нет — та, на которой его оставили в прошлый раз (`remember off` — не трогать). При первом `on`
+английская назначается установленным средам разработки и терминалам: Android Studio, Xcode,
+Terminal, iTerm2, VS Code, IntelliJ, Sourcetree и т. п. Правила — в `~/.config/mnrh/input.json`,
+помощник перечитывает файл сам. `en`/`ru` — первая раскладка с этим языком, можно указать и
+название или id раскладки.
 
 ## Новая команда
 

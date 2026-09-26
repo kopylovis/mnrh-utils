@@ -174,3 +174,34 @@ def adb_path():
         if sdk and os.access(os.path.join(sdk, "platform-tools", "adb"), os.X_OK):
             return os.path.join(sdk, "platform-tools", "adb")
     return _shutil.which("adb")
+
+
+APP_DIRS = ["/Applications", os.path.join(HOME, "Applications"), "/Applications/Utilities"]
+
+
+def bundle_info(app):
+    """(bundle id, имя) из Info.plist приложения."""
+    import plistlib as _plistlib
+    try:
+        with open(os.path.join(app, "Contents", "Info.plist"), "rb") as f:
+            info = _plistlib.load(f)
+    except Exception:
+        return None, None
+    return info.get("CFBundleIdentifier"), info.get("CFBundleName") or os.path.basename(app)[:-4]
+
+
+def find_apps(query):
+    """Приложения по имени: точное совпадение, иначе все, где имя начинается с запроса или содержит его."""
+    import glob as _glob
+    q = query.lower().removesuffix(".app")
+    if os.path.isdir(query) and query.endswith(".app"):
+        return [os.path.abspath(query)]
+    candidates = []
+    for d in APP_DIRS + ["/System/Applications", "/System/Applications/Utilities", "/System/Library/CoreServices"]:
+        for app in _glob.glob(os.path.join(d, "*.app")):
+            name = os.path.basename(app)[:-4].lower()
+            if name == q:
+                return [app]
+            if q in name:
+                candidates.append(app)
+    return candidates

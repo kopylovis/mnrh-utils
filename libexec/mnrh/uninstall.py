@@ -9,7 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import HOME, OK, BAD, WARN, confirm, du_bytes, has_flag, human, paint, run, tilde
+from mnrhlib import APP_DIRS, HOME, OK, BAD, WARN, bundle_info, confirm, du_bytes, find_apps, has_flag, human, paint, run, tilde
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or not args:
@@ -22,7 +22,6 @@ assume_yes = has_flag(args, "-y", "--yes")
 dry = has_flag(args, "-n", "--dry-run")
 
 LIB = os.path.join(HOME, "Library")
-APP_DIRS = ["/Applications", os.path.join(HOME, "Applications"), "/Applications/Utilities"]
 # Где приложения оставляют данные и как там называются папки и файлы.
 BY_ID = ["Caches", "Preferences", "Containers", "Group Containers", "Saved Application State", "HTTPStorages",
          "WebKit", "Application Scripts", "Cookies", "Application Support", "Logs", "LaunchAgents",
@@ -52,35 +51,14 @@ def last_change(path):
     return newest
 
 
-def bundle_info(app):
-    try:
-        with open(os.path.join(app, "Contents", "Info.plist"), "rb") as f:
-            info = plistlib.load(f)
-    except Exception:
-        return None, None
-    return info.get("CFBundleIdentifier"), info.get("CFBundleName") or os.path.basename(app)[:-4]
-
-
 def find_app(query):
-    q = query.lower().removesuffix(".app")
-    if os.path.isdir(query) and query.endswith(".app"):
-        return os.path.abspath(query)
-    candidates = []
-    for d in APP_DIRS:
-        for app in glob.glob(os.path.join(d, "*.app")):
-            name = os.path.basename(app)[:-4].lower()
-            if name == q:
-                return app
-            if name.startswith(q) or q in name:
-                candidates.append(app)
-    if len(candidates) == 1:
-        return candidates[0]
-    if candidates:
+    candidates = [a for a in find_apps(query) if not a.startswith("/System/")]
+    if len(candidates) > 1:
         print("Подходит несколько, уточни:")
         for c in candidates:
             print(f"  {os.path.basename(c)[:-4]}")
         sys.exit(2)
-    return None
+    return candidates[0] if candidates else None
 
 
 def strip(name):
