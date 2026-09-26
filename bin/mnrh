@@ -36,6 +36,7 @@ describe() {
     outdated)    echo "что пора обновить: macOS, Homebrew, Android Studio и SDK, Gradle в проектах" ;;
     input)       echo "раскладка под приложение: en в среде разработки, остальным — с которой оставил" ;;
     kit)         echo "подборка удобных программ для Mac: что стоит, что нет (install поставить через brew)" ;;
+    audio)       echo "звуковые устройства: переключить выход и микрофон, keep-mic — наушники не портят звук" ;;
     fix)         echo "быстрые починки без перезагрузки: scroll, dock, finder, wifi, sim, adb, dns, bt, audio…" ;;
     killdaemons) echo "остановить демоны Gradle и Kotlin (-l только показать, -f и занятых)" ;;
     *)           echo "" ;;

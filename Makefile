@@ -47,6 +47,9 @@ test:
 	@! ./bin/mnrh scroll nothing >/dev/null
 	@swiftc -typecheck -swift-version 5 share/mnrh/scroll/main.swift
 	@swiftc -typecheck -swift-version 5 share/mnrh/input/main.swift
+	@swiftc -typecheck -swift-version 5 share/mnrh/audio/main.swift
+	@./bin/mnrh audio -h >/dev/null
+	@./bin/mnrh audio >/dev/null
 	@./bin/mnrh input -h >/dev/null
 	@./bin/mnrh kit -h >/dev/null
 	@! ./bin/mnrh input nothing >/dev/null
