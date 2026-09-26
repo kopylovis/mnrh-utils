@@ -17,7 +17,10 @@ from mnrhlib import BAD, HOME, OK, WARN, confirm, has_flag, paint, projects, run
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or (args and args[0] != "github"):
     print("mnrh ssh                      ключи в ~/.ssh, какие загружены, кем они представляются GitHub")
-    print("mnrh ssh github [логин]       ключ для аккаунта GitHub: выпустить, загрузить в Связку, прописать")
+    print("mnrh ssh github               пошагово: аккаунт, в который вошёл gh (или войти в другой),")
+    print("                              ключ, Связка, ~/.ssh/config, GitHub, подпись, Sourcetree (если есть)")
+    print("mnrh ssh github <логин>       то же для указанного аккаунта без вопроса")
+    print("                              подробнее: выпустить ключ, загрузить в Связку, прописать")
     print("                              в ~/.ssh/config, добавить в GitHub, подписывать им коммиты,")
     print("                              перевести репозитории аккаунта с HTTPS на SSH (спросит)")
     print("   --alias github-work        имя хоста для второго аккаунта (первый получает github.com)")
@@ -103,7 +106,7 @@ def status():
         key = run(["git", "config", "--global", "user.signingkey"]).strip()
         on = run(["git", "config", "--global", "commit.gpgsign"]).strip() == "true"
         print(f"\nПодпись коммитов: {'включена' if on else 'настроена, но выключена'}, ключ {tilde(key)}")
-    st = [a for a in sourcetree_accounts() if "github" in a["host"]]
+    st = [a for a in sourcetree_accounts() if "github" in a["host"]] if sourcetree_app() else []
     if st:
         print("Sourcetree, аккаунты GitHub: " + ", ".join(
             f"{a['user']} ({'ключ ' + os.path.basename(a['ssh_key']) if a['ssh_key'] else 'ключ не выбран'})" for a in st))
@@ -265,8 +268,19 @@ def switch_remotes(login, host):
     print(f"{OK} Переведено: {len(todo)}")
 
 
-ST_APP = "/Applications/Sourcetree.app"
+ST_IDS = ("com.torusknot.SourceTreeNotMAS", "com.torusknot.SourceTree")
 ST_ACCOUNTS = os.path.join(HOME, "Library", "Application Support", "SourceTree", "hostingservices_new.plist")
+
+
+def sourcetree_app():
+    for path in ("/Applications/Sourcetree.app", os.path.join(HOME, "Applications", "Sourcetree.app")):
+        if os.path.isdir(path):
+            return path
+    for bundle_id in ST_IDS:
+        found = run(["mdfind", f"kMDItemCFBundleIdentifier == '{bundle_id}'"], timeout=10).splitlines()
+        if found:
+            return found[0]
+    return None
 
 
 def sourcetree_accounts():
@@ -296,10 +310,7 @@ def sourcetree_accounts():
     return found
 
 
-def sourcetree_step(login, key):
-    if not os.path.isdir(ST_APP):
-        print("Sourcetree не установлен — пропускаю.")
-        return
+def sourcetree_step(login, key, app):
     name = os.path.basename(key)
 
     def mine():
@@ -315,7 +326,7 @@ def sourcetree_step(login, key):
         print(f"В Sourcetree: Settings → Accounts → {login} → Edit → Protocol: SSH, SSH Key: {name}")
         print(paint("  Ключ уже в агенте, поэтому Sourcetree сразу сможет им пользоваться.", "2"))
         if sys.stdin.isatty():
-            run(["open", "-a", ST_APP])
+            run(["open", "-a", app])
             input("Нажми Enter, когда сохранишь... ")
             acc = mine()
             if acc and name in acc["ssh_key"]:
@@ -329,24 +340,55 @@ def sourcetree_step(login, key):
         print(f"{WARN} Ещё аккаунты GitHub в Sourcetree: {', '.join(others)}. Если не нужны — Remove там же.")
 
 
-STEPS = ("ключ", "Связка ключей и агент", "~/.ssh/config", "GitHub", "подпись коммитов",
-         "проверка и репозитории", "Sourcetree")
+STEPS = ["ключ", "Связка ключей и агент", "~/.ssh/config", "GitHub", "подпись коммитов",
+         "проверка и репозитории", "Sourcetree"]
 
 
 def step(n):
     print(f"\n{paint(f'Шаг {n}/{len(STEPS)}: {STEPS[n - 1]}', '1')}")
 
 
+def ask_yes(question):
+    return input(f"{question} [Y/n] ").strip().lower() in ("", "y", "yes", "д", "да")
+
+
+def gh_login_now():
+    """Вход в GitHub через браузер: какой аккаунт выберешь там, тот и настраиваем."""
+    print("Сейчас gh покажет код и откроет GitHub: войди в нужный аккаунт.")
+    r = subprocess.run(["gh", "auth", "login", "-h", "github.com", "--web", "--git-protocol", "ssh",
+                        "--skip-ssh-key", "-s", SCOPES])
+    if r.returncode != 0:
+        sys.exit("Вход в GitHub не завершён.")
+    return run(["gh", "api", "user", "--jq", ".login"]).strip()
+
+
+def choose_login(explicit):
+    if explicit:
+        return explicit
+    if not shutil.which("gh"):
+        sys.exit("Нужен GitHub CLI: brew install gh (или укажи логин: mnrh ssh github <логин>)")
+    current = run(["gh", "api", "user", "--jq", ".login"]).strip()
+    tty = sys.stdin.isatty() and not assume_yes
+    if current and (not tty or ask_yes(f"gh вошёл в GitHub как {current}. Настраиваем его?")):
+        return current
+    if not tty:
+        sys.exit("gh не вошёл в GitHub. Запусти в Терминале: mnrh ssh github")
+    login = gh_login_now()
+    if not login:
+        sys.exit("Не удалось узнать, в какой аккаунт выполнен вход.")
+    return login
+
+
 def github():
-    rest, login = args[1:], None
+    rest, explicit = args[1:], None
     for i, a in enumerate(rest):
         if not a.startswith("-") and (i == 0 or rest[i - 1] != "--alias"):
-            login = a
+            explicit = a
             break
-    if not login:
-        login = run(["gh", "api", "user", "--jq", ".login"]).strip()
-    if not login:
-        sys.exit("Не знаю логин: mnrh ssh github <логин> (или сначала gh auth login)")
+    login = choose_login(explicit)
+    st_app = sourcetree_app()
+    if not st_app:
+        STEPS.remove("Sourcetree")
     blocks = mnrh_blocks()
     host = None
     if "--alias" in args:
@@ -429,8 +471,9 @@ def github():
     else:
         print("Пропускаю, пока ключа нет в GitHub.")
 
-    step(7)
-    sourcetree_step(login, key)
+    if st_app:
+        step(7)
+        sourcetree_step(login, key, st_app)
     if host != "github.com":
         print(f"Клонировать этим аккаунтом: git clone git@{host}:<владелец>/<репо>.git")
 
