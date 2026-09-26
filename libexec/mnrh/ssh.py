@@ -103,6 +103,10 @@ def status():
         key = run(["git", "config", "--global", "user.signingkey"]).strip()
         on = run(["git", "config", "--global", "commit.gpgsign"]).strip() == "true"
         print(f"\nПодпись коммитов: {'включена' if on else 'настроена, но выключена'}, ключ {tilde(key)}")
+    st = [a for a in sourcetree_accounts() if "github" in a["host"]]
+    if st:
+        print("Sourcetree, аккаунты GitHub: " + ", ".join(
+            f"{a['user']} ({'ключ ' + os.path.basename(a['ssh_key']) if a['ssh_key'] else 'ключ не выбран'})" for a in st))
     proto = run(["gh", "config", "get", "git_protocol", "-h", "github.com"]).strip()
     if proto:
         print(f"gh клонирует по: {proto}")
@@ -196,10 +200,15 @@ def upload(login, pub, title):
         if kind == "signing" and has_flag(args, "--no-sign"):
             continue
         code, out = sh(["gh", "api", endpoint, "--paginate", "--jq", ".[].key"], env=env)
+        if code != 0 and sys.stdin.isatty():
+            print(f"У gh нет права добавлять ключи в {login}. Сейчас gh покажет код и откроет GitHub —")
+            print("подтверди там доступ, дальше продолжу сам.")
+            subprocess.run(["gh", "auth", "refresh", "-h", "github.com", "-u", login, "-s", SCOPES])
+            env = gh_env(login) or env
+            code, out = sh(["gh", "api", endpoint, "--paginate", "--jq", ".[].key"], env=env)
         if code != 0:
-            print(f"{WARN} Нет права {scope} у gh для {login}. Один раз выполни в своём терминале:")
-            print(f"    gh auth refresh -h github.com -u {login} -s {SCOPES}")
-            print(f"  и повтори: mnrh ssh github {login}")
+            print(f"{WARN} Нет права {scope} у gh для {login}. Запусти в Терминале: mnrh ssh github {login}")
+            print(f"  (или вручную: gh auth refresh -h github.com -u {login} -s {SCOPES})")
             return False
         if material in out:
             print(f"{OK} В GitHub уже есть ключ ({'вход' if kind == 'authentication' else 'подпись'})")
@@ -256,6 +265,78 @@ def switch_remotes(login, host):
     print(f"{OK} Переведено: {len(todo)}")
 
 
+ST_APP = "/Applications/Sourcetree.app"
+ST_ACCOUNTS = os.path.join(HOME, "Library", "Application Support", "SourceTree", "hostingservices_new.plist")
+
+
+def sourcetree_accounts():
+    """Аккаунты Sourcetree только для чтения: [{host, user, ssh_key}]. Файл — его внутренний NSKeyedArchiver."""
+    try:
+        with open(ST_ACCOUNTS, "rb") as f:
+            objs = plistlib.load(f)["$objects"]
+    except Exception:
+        return []
+
+    def val(x):
+        v = objs[x.data] if isinstance(x, plistlib.UID) else x
+        if isinstance(v, dict) and "NS.relative" in v:
+            return val(v["NS.relative"])
+        if isinstance(v, dict) and "baseURL" in v:
+            return val(v["baseURL"])
+        return v
+
+    found = []
+    for o in objs:
+        if isinstance(o, dict) and "protocol" in o and "credential" in o:
+            cred = val(o["credential"])
+            user = val(cred.get("username")) if isinstance(cred, dict) else ""
+            key = val(o["sshKeyID"]) if "sshKeyID" in o else ""
+            found.append({"host": str(val(o.get("host"))), "user": str(user or ""),
+                          "ssh_key": key if isinstance(key, str) and key != "$null" else ""})
+    return found
+
+
+def sourcetree_step(login, key):
+    if not os.path.isdir(ST_APP):
+        print("Sourcetree не установлен — пропускаю.")
+        return
+    name = os.path.basename(key)
+
+    def mine():
+        return next((a for a in sourcetree_accounts()
+                     if "github" in a["host"] and a["user"].lower() == login.lower()), None)
+
+    acc = mine()
+    if acc and name in acc["ssh_key"]:
+        print(f"{OK} В аккаунте {login} уже выбран этот ключ")
+    else:
+        if not acc:
+            print(f"В Sourcetree нет аккаунта {login}: Settings → Accounts → Add → GitHub, войди как {login}.")
+        print(f"В Sourcetree: Settings → Accounts → {login} → Edit → Protocol: SSH, SSH Key: {name}")
+        print(paint("  Ключ уже в агенте, поэтому Sourcetree сразу сможет им пользоваться.", "2"))
+        if sys.stdin.isatty():
+            run(["open", "-a", ST_APP])
+            input("Нажми Enter, когда сохранишь... ")
+            acc = mine()
+            if acc and name in acc["ssh_key"]:
+                print(f"{OK} Sourcetree: у {login} выбран {name}")
+            else:
+                print(f"{WARN} Пока не вижу выбора ключа. Sourcetree пишет настройки на диск при закрытии окна")
+                print(f"  настроек; проверить потом: mnrh ssh")
+    others = sorted({a["user"] for a in sourcetree_accounts()
+                     if "github" in a["host"] and a["user"].lower() != login.lower()})
+    if others:
+        print(f"{WARN} Ещё аккаунты GitHub в Sourcetree: {', '.join(others)}. Если не нужны — Remove там же.")
+
+
+STEPS = ("ключ", "Связка ключей и агент", "~/.ssh/config", "GitHub", "подпись коммитов",
+         "проверка и репозитории", "Sourcetree")
+
+
+def step(n):
+    print(f"\n{paint(f'Шаг {n}/{len(STEPS)}: {STEPS[n - 1]}', '1')}")
+
+
 def github():
     rest, login = args[1:], None
     for i, a in enumerate(rest):
@@ -278,7 +359,9 @@ def github():
     key = os.path.join(SSH, f"github_{login}_ed25519")
     pub = key + ".pub"
     machine = socket.gethostname().split(".")[0]
+    print(f"Настройка SSH для GitHub {login} (хост {host})")
 
+    step(1)
     if os.path.exists(key):
         print(f"{OK} Ключ уже есть: {tilde(key)}")
         passphrase = ""
@@ -302,6 +385,7 @@ def github():
                 sys.exit(f"ssh-keygen не справился: {out}")
         print(f"{OK} Выпущен ключ ed25519: {tilde(key)}")
 
+    step(2)
     if fingerprint(pub) not in run(["ssh-add", "-l"]):
         if passphrase == "":
             # Ключ был раньше: пароль уже в Связке, просто подгружаем.
@@ -316,12 +400,24 @@ def github():
         print(f"{WARN} Ключ в агенте, но без пароля. Запусти mnrh ssh github {login} в Терминале — поставлю пароль в Связку")
     install_loader()
 
+    step(3)
     if write_block(host, login, key):
-        print(f"{OK} ~/.ssh/config: Host {host} -> {tilde(key)} (копия старого: config.mnrh-backup)")
-    uploaded = upload(login, pub, f"{machine} (mnrh)")
-    if uploaded and not has_flag(args, "--no-sign"):
-        setup_signing(login, pub)
+        print(f"{OK} Host {host} -> {tilde(key)} (копия старого: config.mnrh-backup)")
+    else:
+        print(f"{OK} Host {host} уже смотрит на {tilde(key)}")
 
+    step(4)
+    uploaded = upload(login, pub, f"{machine} (mnrh)")
+
+    step(5)
+    if has_flag(args, "--no-sign"):
+        print("Пропускаю: --no-sign")
+    elif uploaded:
+        setup_signing(login, pub)
+    else:
+        print("Пропускаю, пока ключа нет в GitHub: иначе коммиты были бы с пометкой Unverified.")
+
+    step(6)
     who = github_identity(host) if uploaded else None
     if who == login:
         print(f"{OK} Проверка: git@{host} входит как {who}")
@@ -330,9 +426,11 @@ def github():
         switch_remotes(login, host)
     elif uploaded:
         print(f"{BAD} git@{host} входит как {who or 'никто'}, а не {login}. mnrh ssh покажет подробности.")
+    else:
+        print("Пропускаю, пока ключа нет в GitHub.")
 
-    print(f"\n{paint('Sourcetree:', '1')} Настройки → Accounts → {login} → Edit: Protocol SSH, SSH Key "
-          f"{os.path.basename(key)}. Ключ уже в агенте, Sourcetree возьмёт его сам.")
+    step(7)
+    sourcetree_step(login, key)
     if host != "github.com":
         print(f"Клонировать этим аккаунтом: git clone git@{host}:<владелец>/<репо>.git")
 
