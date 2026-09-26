@@ -52,6 +52,8 @@ test:
 	@./bin/mnrh audio >/dev/null
 	@./bin/mnrh input -h >/dev/null
 	@./bin/mnrh kit -h >/dev/null
+	@./bin/mnrh dock -h >/dev/null
+	@./bin/mnrh dock >/dev/null
 	@! ./bin/mnrh input nothing >/dev/null
 	@./bin/mnrh fix scroll -h >/dev/null
 	@! ./bin/mnrh fix nothing >/dev/null

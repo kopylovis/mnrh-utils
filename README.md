@@ -51,6 +51,7 @@ mnrh kit              подборка удобных программ: окна
 mnrh kit install maccy alt-tab   поставить выбранные через brew
 mnrh audio            куда идёт звук и откуда микрофон; out/in <название> переключить
 mnrh audio keep-mic on   Bluetooth-наушники не забирают микрофон (иначе звук в них глухой и моно)
+mnrh dock             что закреплено в Dock; clean — убрать значки удалённых приложений, add/remove, undo
 mnrh fix              быстрые починки без перезагрузки, список с описаниями:
                       scroll, dock, finder, menubar, wifi, sim, adb, dns, bt, audio
 mnrh killdaemons      остановить демоны Gradle и Kotlin любых версий
