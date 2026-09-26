@@ -23,6 +23,8 @@ test:
 	@./bin/mnrh ram -h >/dev/null
 	@./bin/mnrh ram clean -h >/dev/null
 	@./bin/mnrh fix -h >/dev/null
+	@./bin/mnrh sleep -h >/dev/null
+	@./bin/mnrh sleep >/dev/null
 	@./bin/mnrh scroll -h >/dev/null
 	@./bin/mnrh scroll >/dev/null
 	@! ./bin/mnrh scroll nothing >/dev/null
