@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import plistlib
@@ -6,12 +5,12 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 from mnrhlib import HOME, OK, WARN, BAD, has_flag, paint, process_commands, read_config, run, write_config
+from swiftagent import SwiftAgent
 
 args = sys.argv[1:]
 ACTIONS = ("on", "off", "test", "restart", "remove")
@@ -28,41 +27,13 @@ if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
     sys.exit(0 if has_flag(args, "-h", "--help") else 2)
 cmd = args[0] if args else "status"
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SRC = os.path.join(ROOT, "share", "mnrh", "scroll", "main.swift")
-LABEL = "com.mnrh.scroll"
-APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "mnrh scroll.app")
-BIN = os.path.join(APP, "Contents", "MacOS", "mnrh-scroll")
-STAMP = os.path.join(APP, "Contents", "Resources", "source.sha256")
-PLIST = os.path.join(HOME, "Library", "LaunchAgents", f"{LABEL}.plist")
-STATE = os.path.join(HOME, ".cache", "mnrh", "scroll.json")
-LOG = os.path.join(HOME, "Library", "Logs", "mnrh-scroll.log")
-DOMAIN = f"gui/{os.getuid()}"
+agent = SwiftAgent("scroll", "mnrh scroll", "com.mnrh.scroll")
+SRC, APP, BIN, PLIST, STATE, LOG = agent.src, agent.app, agent.bin, agent.plist, agent.state_file, agent.log
 SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 SR = "Scroll Reverser"
 SR_DOMAIN = "com.pilotmoon.scroll-reverser"
 AXES = {"vh": "vh", "hv": "vh", "on": "vh", "v": "v", "h": "h", "off": "", "none": "", "": ""}
-
-
-def launchctl(*a):
-    return subprocess.run(["launchctl", *a], capture_output=True, text=True)
-
-
-def loaded():
-    return launchctl("print", f"{DOMAIN}/{LABEL}").returncode == 0
-
-
-def state():
-    try:
-        with open(STATE) as f:
-            s = json.load(f)
-    except (OSError, ValueError):
-        return None
-    try:
-        os.kill(s["pid"], 0)
-    except (OSError, KeyError):
-        return None
-    return s
+state, build, stop_agent, start_agent = agent.state, agent.build, agent.stop, agent.start
 
 
 def sr_pids():
@@ -110,84 +81,10 @@ def option(name, current):
     return AXES[value]
 
 
-def source_hash():
-    with open(SRC, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
-
-
-def build():
-    """Собирает помощника, если исходник поменялся. True, если собран заново."""
-    want = source_hash()
-    try:
-        if open(STAMP).read().strip() == want and os.access(BIN, os.X_OK):
-            return False
-    except OSError:
-        pass
-    if not shutil.which("swiftc"):
-        sys.exit("Нужен компилятор Swift из Xcode Command Line Tools: xcode-select --install")
-    print("Собираю помощника...")
-    with tempfile.TemporaryDirectory() as tmp:
-        out = os.path.join(tmp, "mnrh-scroll")
-        r = subprocess.run(["swiftc", "-O", "-swift-version", "5", SRC, "-o", out], capture_output=True, text=True)
-        if r.returncode != 0:
-            sys.exit("Сборка не удалась:\n" + r.stderr[-2000:])
-        shutil.rmtree(APP, ignore_errors=True)
-        os.makedirs(os.path.dirname(BIN))
-        os.makedirs(os.path.dirname(STAMP))
-        shutil.copy2(out, BIN)
-    with open(os.path.join(APP, "Contents", "Info.plist"), "wb") as f:
-        plistlib.dump({"CFBundleIdentifier": LABEL, "CFBundleName": "mnrh scroll",
-                       "CFBundleDisplayName": "mnrh scroll", "CFBundleExecutable": "mnrh-scroll",
-                       "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "LSUIElement": True}, f)
-    with open(STAMP, "w") as f:
-        f.write(want + "\n")
-    r = subprocess.run(["codesign", "--force", "--sign", "-", "--identifier", LABEL, APP],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        sys.exit("Не удалось подписать помощника:\n" + r.stderr)
-    return True
 
 
 def write_plist(mouse, trackpad, step):
-    os.makedirs(os.path.dirname(PLIST), exist_ok=True)
-    os.makedirs(os.path.dirname(STATE), exist_ok=True)
-    with open(PLIST, "wb") as f:
-        plistlib.dump({
-            "Label": LABEL,
-            "ProgramArguments": [BIN, "--mouse", mouse or "off", "--trackpad", trackpad or "off",
-                                 "--step", str(step), "--state", STATE],
-            "RunAtLoad": True,
-            "KeepAlive": True,
-            "ProcessType": "Interactive",
-            "StandardErrorPath": LOG,
-            "StandardOutPath": LOG,
-        }, f)
-
-
-def stop_agent():
-    if loaded():
-        launchctl("bootout", f"{DOMAIN}/{LABEL}")
-        for _ in range(20):
-            if not loaded():
-                break
-            time.sleep(0.25)
-
-
-def start_agent():
-    stop_agent()
-    try:
-        if os.path.getsize(LOG) > 1048576:
-            os.truncate(LOG, 0)
-    except OSError:
-        pass
-    r = launchctl("bootstrap", DOMAIN, PLIST)
-    if r.returncode != 0:
-        sys.exit(f"launchctl не запустил помощника: {r.stderr.strip()}")
-    for _ in range(20):
-        if state():
-            return True
-        time.sleep(0.25)
-    return False
+    agent.write_plist(["--mouse", mouse or "off", "--trackpad", trackpad or "off", "--step", str(step)])
 
 
 def quit_scroll_reverser():
@@ -269,7 +166,7 @@ def off():
 def remove():
     off()
     shutil.rmtree(APP, ignore_errors=True)
-    r = subprocess.run(["tccutil", "reset", "Accessibility", LABEL], capture_output=True, text=True)
+    r = subprocess.run(["tccutil", "reset", "Accessibility", agent.label], capture_output=True, text=True)
     print("Помощник удалён с диска" + (", доступ в настройках сброшен." if r.returncode == 0 else
                                        ". Строку «mnrh scroll» в Универсальном доступе можно удалить «−»."))
 
@@ -277,9 +174,7 @@ def remove():
 def restart():
     if not os.path.exists(PLIST):
         sys.exit("mnrh scroll не включён: mnrh scroll on")
-    launchctl("kickstart", "-k", f"{DOMAIN}/{LABEL}")
-    time.sleep(1)
-    s = state()
+    s = agent.restart()
     print(f"{OK} Помощник перезапущен." if s else f"{BAD} Помощник не поднялся. Лог: {LOG.replace(HOME, '~', 1)}")
 
 
