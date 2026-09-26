@@ -30,6 +30,8 @@ test:
 	@./bin/mnrh net -h >/dev/null
 	@./bin/mnrh login -h >/dev/null
 	@./bin/mnrh power -h >/dev/null
+	@./bin/mnrh defaults -h >/dev/null
+	@./bin/mnrh defaults >/dev/null
 	@./bin/mnrh power >/dev/null
 	@./bin/mnrh login >/dev/null
 	@! ./bin/mnrh net nothing >/dev/null

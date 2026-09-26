@@ -32,6 +32,7 @@ describe() {
     net)         echo "почему не качаются зависимости: сеть, DNS, VPN, прокси, Maven/Google/Gradle/CocoaPods" ;;
     login)       echo "что запускается при входе и в фоне: чьё, подписано ли, работает ли (off убрать)" ;;
     power)       echo "зарядник и сколько даёт, сколько тянет Mac, троттлинг, здоровье батареи" ;;
+    defaults)    echo "удобные настройки macOS для разработки с откатом; snap/diff — готовые defaults write" ;;
     fix)         echo "быстрые починки без перезагрузки: scroll, dock, finder, wifi, sim, adb, dns, bt, audio…" ;;
     killdaemons) echo "остановить демоны Gradle и Kotlin (-l только показать, -f и занятых)" ;;
     *)           echo "" ;;
