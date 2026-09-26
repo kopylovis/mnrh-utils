@@ -25,6 +25,9 @@ test:
 	@./bin/mnrh fix -h >/dev/null
 	@./bin/mnrh sleep -h >/dev/null
 	@./bin/mnrh ssh -h >/dev/null
+	@./bin/mnrh ports -h >/dev/null
+	@./bin/mnrh ports >/dev/null
+	@./bin/mnrh ports kill 1 >/dev/null
 	@! ./bin/mnrh ssh nothing >/dev/null
 	@./bin/mnrh sleep >/dev/null
 	@./bin/mnrh scroll -h >/dev/null

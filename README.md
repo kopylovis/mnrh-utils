@@ -34,6 +34,8 @@ mnrh sleep            что не даёт Mac уснуть, последние 
 mnrh sleep fix        снять зависшие caffeinate, чья программа уже закрыта
 mnrh ssh              SSH-ключи: какие есть, загружены ли, кем представляются GitHub
 mnrh ssh github       ключ для аккаунта GitHub: выпустить, в Связку, в GitHub, подпись коммитов, SSH-remote
+mnrh ports            кто слушает TCP-порты: процесс, проект, сколько идёт
+mnrh ports kill 8080  освободить порт
 mnrh fix scroll       прокрутка тачпада перевернулась после сна: перезапустить mnrh scroll или Scroll Reverser
 mnrh killdaemons      остановить демоны Gradle и Kotlin любых версий
 mnrh killdaemons -l   только показать
