@@ -1,7 +1,6 @@
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -9,7 +8,7 @@ import time
 from collections import defaultdict
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import confirm, has_flag
+from mnrhlib import adb_path, confirm, has_flag
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] != "clean"):
@@ -173,14 +172,6 @@ def show():
 def booted_simulators():
     data = json.loads(run(["xcrun", "simctl", "list", "devices", "booted", "-j"]) or "{}")
     return [d["name"] for lst in data.get("devices", {}).values() for d in lst if d.get("state") == "Booted"]
-
-
-def adb_path():
-    for sdk in (os.environ.get("ANDROID_HOME"), os.environ.get("ANDROID_SDK_ROOT"),
-                os.path.expanduser("~/Library/Android/sdk")):
-        if sdk and os.access(os.path.join(sdk, "platform-tools", "adb"), os.X_OK):
-            return os.path.join(sdk, "platform-tools", "adb")
-    return shutil.which("adb")
 
 
 def running_emulators(adb):

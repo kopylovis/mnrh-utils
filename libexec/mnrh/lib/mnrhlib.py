@@ -165,3 +165,12 @@ def remove_under_home(path):
         os.unlink(path)
     else:
         _shutil.rmtree(path, ignore_errors=True)
+
+
+def adb_path():
+    import shutil as _shutil
+    for sdk in (os.environ.get("ANDROID_HOME"), os.environ.get("ANDROID_SDK_ROOT"),
+                os.path.join(HOME, "Library", "Android", "sdk")):
+        if sdk and os.access(os.path.join(sdk, "platform-tools", "adb"), os.X_OK):
+            return os.path.join(sdk, "platform-tools", "adb")
+    return _shutil.which("adb")

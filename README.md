@@ -36,7 +36,8 @@ mnrh ssh              SSH-ключи: какие есть, загружены л
 mnrh ssh github       ключ для аккаунта GitHub: выпустить, в Связку, в GitHub, подпись коммитов, SSH-remote
 mnrh ports            кто слушает TCP-порты: процесс, проект, сколько идёт
 mnrh ports kill 8080  освободить порт
-mnrh fix scroll       прокрутка тачпада перевернулась после сна: перезапустить mnrh scroll или Scroll Reverser
+mnrh fix              быстрые починки без перезагрузки, список с описаниями:
+                      scroll, dock, finder, menubar, wifi, sim, adb, dns, bt, audio
 mnrh killdaemons      остановить демоны Gradle и Kotlin любых версий
 mnrh killdaemons -l   только показать
 mnrh killdaemons -f   снять и тех, кто занят сборкой

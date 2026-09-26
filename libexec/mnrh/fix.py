@@ -1,16 +1,14 @@
 import os
+import re
 import signal
+import subprocess
 import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import has_flag, process_commands, run
+from mnrhlib import OK, BAD, WARN, adb_path, has_flag, process_commands, run
 
 args = sys.argv[1:]
-if has_flag(args, "-h", "--help") or not args or args[0] != "scroll":
-    print("mnrh fix scroll   прокрутка тачпада перевернулась после сна: перезапустить mnrh scroll")
-    print("                  или Scroll Reverser (и похожие: Mos, LinearMouse, UnnaturalScrollWheels)")
-    sys.exit(0 if has_flag(args, "-h", "--help") or not args else 2)
 
 SCROLL_APPS = ("Scroll Reverser", "Mos", "LinearMouse", "UnnaturalScrollWheels")
 
@@ -79,4 +77,117 @@ def scroll():
     return 0 if ok else 1
 
 
-sys.exit(scroll())
+def sudo(cmd):
+    """Команда от root: в терминале sudo спросит пароль, без терминала — только подсказка."""
+    if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0 or sys.stdin.isatty():
+        return subprocess.run(["sudo", *cmd]).returncode == 0
+    print(f"{WARN} Нужен пароль администратора. Запусти в Терминале: sudo {' '.join(cmd)}")
+    return False
+
+
+def restart_process(*names):
+    running = [n for n in names if run(["pgrep", "-x", n]).strip()]
+    for n in running:
+        run(["killall", n])
+    return running
+
+
+def dock():
+    restart_process("Dock")
+    print(f"{OK} Dock перезапущен (вместе с ним Mission Control и Launchpad).")
+
+
+def finder():
+    restart_process("Finder")
+    print(f"{OK} Finder перезапущен.")
+
+
+def menubar():
+    done = restart_process("SystemUIServer", "ControlCenter")
+    print(f"{OK} Строка меню перезапущена: {', '.join(done) or 'нечего было перезапускать'}.")
+
+
+def wifi():
+    ports = run(["networksetup", "-listallhardwareports"])
+    m = re.search(r"Hardware Port: Wi-Fi\nDevice: (\S+)", ports)
+    if not m:
+        print(f"{BAD} Wi-Fi не найден.")
+        return 1
+    dev = m.group(1)
+    run(["networksetup", "-setairportpower", dev, "off"])
+    time.sleep(2)
+    run(["networksetup", "-setairportpower", dev, "on"])
+    for _ in range(20):
+        time.sleep(1)
+        if re.search(r"inet \d", run(["ifconfig", dev])):
+            print(f"{OK} Wi-Fi ({dev}) выключен и включён, адрес получен.")
+            return 0
+    print(f"{WARN} Wi-Fi ({dev}) включён, но адреса пока нет — подожди или проверь сеть: mnrh net")
+    return 1
+
+
+def sim():
+    run(["xcrun", "simctl", "shutdown", "all"], timeout=120)
+    run(["killall", "-9", "com.apple.CoreSimulator.CoreSimulatorService"])
+    time.sleep(2)
+    ok = run(["xcrun", "simctl", "list", "devices", "-j"], timeout=60).strip().startswith("{")
+    print(f"{OK} Служба симуляторов перезапущена, simctl отвечает." if ok
+          else f"{BAD} simctl не отвечает. Помогает перезапуск Xcode или Mac.")
+    return 0 if ok else 1
+
+
+def adb():
+    path = adb_path()
+    if not path:
+        print(f"{BAD} adb не найден (Android SDK: ~/Library/Android/sdk).")
+        return 1
+    run([path, "kill-server"])
+    run([path, "start-server"], timeout=60)
+    devices = [l for l in run([path, "devices"]).splitlines()[1:] if l.strip()]
+    print(f"{OK} adb перезапущен. Устройств: {len(devices)}")
+    for line in devices:
+        serial, state = line.split()[:2]
+        note = {"unauthorized": " — подтверди отладку на телефоне", "offline": " — переподключи кабель"}.get(state, "")
+        print(f"  {serial}  {state}{note}")
+    return 0
+
+
+def dns():
+    if sudo(["dscacheutil", "-flushcache"]) and sudo(["killall", "-HUP", "mDNSResponder"]):
+        print(f"{OK} Кеш DNS сброшен.")
+        return 0
+    return 1
+
+
+def bluetooth():
+    if sudo(["pkill", "bluetoothd"]):
+        print(f"{OK} Bluetooth перезапущен: устройства переподключатся через несколько секунд.")
+        return 0
+    return 1
+
+
+def audio():
+    if sudo(["killall", "coreaudiod"]):
+        print(f"{OK} Звук перезапущен (coreaudiod). Если идёт звонок — он на секунду прервётся.")
+        return 0
+    return 1
+
+
+FIXES = {
+    "scroll": ("прокрутка трекпада перевернулась после сна: перезапустить mnrh scroll или Scroll Reverser", scroll),
+    "dock": ("Dock, Mission Control или Launchpad зависли", dock),
+    "finder": ("Finder завис или не обновляет файлы", finder),
+    "menubar": ("иконки в строке меню пропали или не реагируют", menubar),
+    "wifi": ("Wi-Fi подключён, но интернета нет: выключить и включить", wifi),
+    "sim": ("симулятор не запускается, simctl висит: перезапустить CoreSimulator", sim),
+    "adb": ("adb не видит телефон или эмулятор: перезапустить сервер adb", adb),
+    "dns": ("сайты не открываются после VPN или смены сети: сбросить кеш DNS (sudo)", dns),
+    "bt": ("Bluetooth-наушники или мышь не подключаются: перезапустить Bluetooth (sudo)", bluetooth),
+    "audio": ("пропал звук или не переключается выход: перезапустить coreaudiod (sudo)", audio),
+}
+
+if not args or has_flag(args, "-h", "--help") or args[0] not in FIXES:
+    for name, (desc, _) in FIXES.items():
+        print(f"mnrh fix {name:<8} {desc}")
+    sys.exit(0 if not args or has_flag(args, "-h", "--help") else 2)
+sys.exit(FIXES[args[0]][1]() or 0)
