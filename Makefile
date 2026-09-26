@@ -22,6 +22,9 @@ test:
 	@./bin/mnrh killdaemons -l >/dev/null
 	@./bin/mnrh ram -h >/dev/null
 	@./bin/mnrh ram clean -h >/dev/null
+	@./bin/mnrh fix -h >/dev/null
+	@./bin/mnrh fix scroll -h >/dev/null
+	@! ./bin/mnrh fix nothing >/dev/null
 	@./bin/mnrh killdaemons -h >/dev/null
 	@./bin/mnrh doctor -h >/dev/null
 	@./bin/mnrh disk -h >/dev/null
