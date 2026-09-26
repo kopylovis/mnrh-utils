@@ -85,8 +85,11 @@ def load_plist(path):
 
 def save_plist(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as f:
+    # В настройках приложений бывают токены: файл только для владельца.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
         plistlib.dump(data, f)
+    os.chmod(path, 0o600)
 
 
 def restart(targets):
