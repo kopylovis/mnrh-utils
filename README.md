@@ -44,6 +44,7 @@ mnrh login off <имя>  убрать из автозапуска
 mnrh power            зарядник и сколько даёт, сколько тянет Mac, троттлинг, здоровье батареи
 mnrh defaults         удобные настройки macOS для разработки: что включено (apply, undo)
 mnrh defaults snap    запомнить настройки; после правки в Настройках diff даст defaults write
+mnrh outdated         что пора обновить: macOS, Homebrew, Android Studio и SDK, Gradle в проектах
 mnrh fix              быстрые починки без перезагрузки, список с описаниями:
                       scroll, dock, finder, menubar, wifi, sim, adb, dns, bt, audio
 mnrh killdaemons      остановить демоны Gradle и Kotlin любых версий
