@@ -34,11 +34,11 @@ def describe(cmd, name):
         return "Gradle worker"
     parts = cmd.split()
     exe = os.path.basename(parts[0]) if parts else name
-    if re.match(r"(python[\d.]*|node|ruby|bun|deno|php)$", exe):
+    if re.match(r"(python[\d.]*|node|ruby|bun|deno|php)$", exe, re.I):
         # Интерпретатор (системный python3 живёт внутри Xcode.app) — показываем, что он запустил.
         rest = [p for p in parts[1:] if not p.startswith("-")]
         target = parts[parts.index("-m") + 1] if "-m" in parts[:-1] else (os.path.basename(rest[0]) if rest else "")
-        return f"{exe} {target}".strip()
+        return f"{exe.lower()} {target}".strip()
     app = re.search(r"/([^/]+)\.app/", cmd)
     if app:
         return app.group(1)
