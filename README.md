@@ -38,6 +38,7 @@ mnrh ports            кто слушает TCP-порты: процесс, пр
 mnrh ports kill 8080  освободить порт
 mnrh uninstall Mos    удалить приложение вместе с его данными в ~/Library, в Корзину
 mnrh uninstall --orphans   остатки приложений, которых уже нет
+mnrh net              почему не качаются зависимости: сеть, DNS, VPN, прокси, репозитории (--speed скорость)
 mnrh fix              быстрые починки без перезагрузки, список с описаниями:
                       scroll, dock, finder, menubar, wifi, sim, adb, dns, bt, audio
 mnrh killdaemons      остановить демоны Gradle и Kotlin любых версий
@@ -361,6 +362,17 @@ State`, `HTTPStorages`, `WebKit`, `Cookies`, `Application Scripts`, `LaunchAgent
 Apple, консольные инструменты без `.app` (SwiftPM, Firebase, Google Updater, Gradle и т. п.) и
 всё, что менялось за последние 7 дней, — раз меняется, значит, чем-то используется.
 Показывается только то, что больше 1 МБ. `-n` — только показать.
+
+## Что проверяет `mnrh net`
+
+Для случая «Gradle sync или `pod install` не проходит»: маршрут и шлюз (с откликом — слабый
+Wi-Fi видно сразу), VPN (и системный, и туннели сторонних приложений), DNS (какие серверы,
+находятся ли и быстро ли имена репозиториев, нет ли их в `/etc/hosts`), прокси — системный,
+PAC, переменные окружения и отдельно прокси Gradle: JVM системный прокси не видит, и если он
+нужен, его надо прописать в `~/.gradle/gradle.properties`. Потом параллельно проверяет Gradle,
+плагины Gradle, Maven Central, Google Maven, JitPack, CocoaPods CDN, GitHub, Apple и npm через
+`curl` (системный Python 3.9 со старым LibreSSL зависает на части сайтов). Ошибку сертификата
+объясняет отдельно. Код возврата 1, если что-то недоступно.
 
 ## Новая команда
 

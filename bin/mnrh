@@ -29,6 +29,7 @@ describe() {
     ssh)         echo "SSH-ключи: состояние; github — выпустить ключ, добавить в GitHub, подпись коммитов" ;;
     ports)       echo "кто слушает TCP-порты: процесс, проект (kill <порт> освободить)" ;;
     uninstall)   echo "удалить приложение вместе с данными в ~/Library (--orphans остатки удалённых)" ;;
+    net)         echo "почему не качаются зависимости: сеть, DNS, VPN, прокси, Maven/Google/Gradle/CocoaPods" ;;
     fix)         echo "быстрые починки без перезагрузки: scroll, dock, finder, wifi, sim, adb, dns, bt, audio…" ;;
     killdaemons) echo "остановить демоны Gradle и Kotlin (-l только показать, -f и занятых)" ;;
     *)           echo "" ;;

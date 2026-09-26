@@ -27,6 +27,8 @@ test:
 	@./bin/mnrh ssh -h >/dev/null
 	@./bin/mnrh ports -h >/dev/null
 	@./bin/mnrh uninstall -h >/dev/null
+	@./bin/mnrh net -h >/dev/null
+	@! ./bin/mnrh net nothing >/dev/null
 	@./bin/mnrh uninstall --orphans -n >/dev/null
 	@! ./bin/mnrh uninstall no-such-app-mnrh -n >/dev/null 2>&1
 	@./bin/mnrh ports >/dev/null
