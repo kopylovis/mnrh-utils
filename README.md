@@ -47,6 +47,8 @@ mnrh defaults snap    запомнить настройки; после прав
 mnrh outdated         что пора обновить: macOS, Homebrew, Android Studio и SDK, Gradle в проектах
 mnrh input on         раскладка под приложение: en в Android Studio, Xcode, терминале; остальным — прежняя
 mnrh input set Telegram ru   своё правило для приложения
+mnrh kit              подборка удобных программ: окна, клавиатура, строка меню, экран, разработка
+mnrh kit install maccy alt-tab   поставить выбранные через brew
 mnrh fix              быстрые починки без перезагрузки, список с описаниями:
                       scroll, dock, finder, menubar, wifi, sim, adb, dns, bt, audio
 mnrh killdaemons      остановить демоны Gradle и Kotlin любых версий

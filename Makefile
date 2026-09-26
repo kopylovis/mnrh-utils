@@ -48,6 +48,7 @@ test:
 	@swiftc -typecheck -swift-version 5 share/mnrh/scroll/main.swift
 	@swiftc -typecheck -swift-version 5 share/mnrh/input/main.swift
 	@./bin/mnrh input -h >/dev/null
+	@./bin/mnrh kit -h >/dev/null
 	@! ./bin/mnrh input nothing >/dev/null
 	@./bin/mnrh fix scroll -h >/dev/null
 	@! ./bin/mnrh fix nothing >/dev/null
