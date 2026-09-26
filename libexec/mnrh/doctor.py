@@ -217,6 +217,27 @@ def check_security():
         item("ok", "Time Machine настроен")
     if "NOPASSWD: ALL" in run(["sudo", "-n", "-l"], timeout=5):
         item("warn", "sudo работает без пароля для всех команд")
+    if "assessments enabled" in run(["spctl", "--status"]):
+        item("ok", "Gatekeeper включён")
+    else:
+        item("bad", "Gatekeeper выключен: запускается любая неподписанная программа", "sudo spctl --master-enable")
+    listening = {l.rsplit(".", 1)[-1] for l in (line.split()[3] for line in run(["netstat", "-anp", "tcp"]).splitlines()
+                                                 if line.endswith("LISTEN") and len(line.split()) > 3)}
+    shared = [name for port, name in (("22", "удалённый вход по SSH"), ("5900", "общий экран"),
+                                      ("3283", "удалённое управление"), ("445", "общие файлы (SMB)"),
+                                      ("548", "общие файлы (AFP)")) if port in listening]
+    if shared:
+        item("warn", "открыт доступ из сети: " + ", ".join(shared), "Настройки -> Основные -> Общий доступ")
+    su = run(["defaults", "read", "/Library/Preferences/com.apple.SoftwareUpdate"])
+    if re.search(r"CriticalUpdateInstall = 0", su) or re.search(r"ConfigDataInstall = 0", su):
+        item("warn", "обновления безопасности не ставятся сами",
+             "Настройки -> Основные -> Обновление ПО -> Автоматические обновления")
+    exts = re.findall(r"^\s*\*?\s*\*\s+\S+\s+\S+ \([^)]*\)\s+(.+?)\s+\[([^\]]+)\]", run(["systemextensionsctl", "list"]), re.M)
+    if exts:
+        item("ok", "системные расширения: " + ", ".join(f"{n}" + (" (ждёт разрешения)" if "waiting" in st else "")
+                                                     for n, st in exts))
+    if "MDM enrollment: Yes" in run(["profiles", "status", "-type", "enrollment"]):
+        item("warn", "Mac под управлением MDM: организация может менять настройки и ставить программы")
 
 
 def check_battery():
