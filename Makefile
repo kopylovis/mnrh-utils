@@ -26,6 +26,9 @@ test:
 	@./bin/mnrh sleep -h >/dev/null
 	@./bin/mnrh ssh -h >/dev/null
 	@./bin/mnrh ports -h >/dev/null
+	@./bin/mnrh uninstall -h >/dev/null
+	@./bin/mnrh uninstall --orphans -n >/dev/null
+	@! ./bin/mnrh uninstall no-such-app-mnrh -n >/dev/null 2>&1
 	@./bin/mnrh ports >/dev/null
 	@./bin/mnrh ports kill 1 >/dev/null
 	@! ./bin/mnrh ssh nothing >/dev/null

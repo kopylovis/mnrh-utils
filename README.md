@@ -36,6 +36,8 @@ mnrh ssh              SSH-ключи: какие есть, загружены л
 mnrh ssh github       ключ для аккаунта GitHub: выпустить, в Связку, в GitHub, подпись коммитов, SSH-remote
 mnrh ports            кто слушает TCP-порты: процесс, проект, сколько идёт
 mnrh ports kill 8080  освободить порт
+mnrh uninstall Mos    удалить приложение вместе с его данными в ~/Library, в Корзину
+mnrh uninstall --orphans   остатки приложений, которых уже нет
 mnrh fix              быстрые починки без перезагрузки, список с описаниями:
                       scroll, dock, finder, menubar, wifi, sim, adb, dns, bt, audio
 mnrh killdaemons      остановить демоны Gradle и Kotlin любых версий
@@ -343,6 +345,22 @@ caffeinate, живые блокировки не трогает.
    (`hostingservices_new.plist`). Сам файл не меняет — это внутренняя база Sourcetree.
    Заодно называет остальные аккаунты GitHub в Sourcetree, если они не нужны.
 `mnrh ssh` без аргументов показывает ключи, загружены ли они и кем представляются GitHub.
+
+## Как `mnrh uninstall` находит данные приложения
+
+По идентификатору из `Info.plist`: в `~/Library` это папки и файлы с тем же именем —
+`Caches`, `Preferences` (и `ByHost`), `Containers`, `Group Containers`, `Saved Application
+State`, `HTTPStorages`, `WebKit`, `Cookies`, `Application Scripts`, `LaunchAgents`, — плюс
+`Application Support`, `Caches` и `Logs` с именем самого приложения. Перед удалением
+показывает всё с размерами и спрашивает. Всё уходит в Корзину через Finder, поэтому
+работает «Вернуть». Приложение, поставленное через brew, удаляется `brew uninstall --cask`,
+чтобы brew не считал его установленным. Системные приложения не трогаются, Xcode можно.
+
+`--orphans` ищет в `~/Library` папки с именами-идентификаторами, которым не соответствует ни
+одно установленное приложение (по Spotlight и по папкам приложений). Не считаются остатками:
+Apple, консольные инструменты без `.app` (SwiftPM, Firebase, Google Updater, Gradle и т. п.) и
+всё, что менялось за последние 7 дней, — раз меняется, значит, чем-то используется.
+Показывается только то, что больше 1 МБ. `-n` — только показать.
 
 ## Новая команда
 
