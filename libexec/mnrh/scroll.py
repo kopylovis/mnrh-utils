@@ -18,8 +18,8 @@ ACTIONS = ("on", "off", "test", "restart", "remove")
 if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
     print("mnrh scroll                 состояние: работает ли, есть ли доступ, что переворачивается")
     print("mnrh scroll on              включить: мышь переворачивается, трекпад нет (вместо Scroll Reverser)")
-    print("   --mouse vh|v|h|off       какие оси мыши переворачивать (по умолчанию из Scroll Reverser, иначе v)")
-    print("   --trackpad vh|v|h|off    то же для трекпада (по умолчанию off)")
+    print("   --mouse vh|v|h|on|off    какие оси мыши переворачивать (on = vh) (по умолчанию из Scroll Reverser, иначе v)")
+    print("   --trackpad vh|v|h|on|off то же для трекпада (по умолчанию off)")
     print("   --step N                 строк за щелчок колеса мыши, 1 — как в macOS (по умолчанию 3)")
     print("mnrh scroll off             выключить и убрать из автозапуска")
     print("mnrh scroll test            20 секунд показывать, что пришло: мышь или трекпад и что с ним сделано")
@@ -41,7 +41,7 @@ DOMAIN = f"gui/{os.getuid()}"
 SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 SR = "Scroll Reverser"
 SR_DOMAIN = "com.pilotmoon.scroll-reverser"
-AXES = {"vh": "vh", "hv": "vh", "v": "v", "h": "h", "off": "", "none": "", "": ""}
+AXES = {"vh": "vh", "hv": "vh", "on": "vh", "v": "v", "h": "h", "off": "", "none": "", "": ""}
 
 
 def launchctl(*a):
@@ -106,7 +106,7 @@ def option(name, current):
             sys.exit("mnrh scroll: --step от 1 до 20")
         return int(value)
     if value not in AXES:
-        sys.exit(f"mnrh scroll: {name} принимает vh, v, h или off")
+        sys.exit(f"mnrh scroll: {name} принимает vh, v, h, on или off")
     return AXES[value]
 
 
