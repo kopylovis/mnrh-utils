@@ -24,6 +24,7 @@ describe() {
     sim)         echo "симуляторы: что запущено, stop, clean (--runtimes старые runtime)" ;;
     ram)         echo "кто ест оперативную память, по приложениям (-p по процессам, clean освободить)" ;;
     gradle)      echo "версии Gradle по проектам, кеши, демоны, build/ (clean удалить лишнее)" ;;
+    scroll)      echo "перевернуть прокрутку мыши, не трогая трекпад (on, off, test) — вместо Scroll Reverser" ;;
     fix)         echo "быстрые починки: scroll — прокрутка тачпада перевернулась после сна" ;;
     killdaemons) echo "остановить демоны Gradle и Kotlin (-l только показать, -f и занятых)" ;;
     *)           echo "" ;;

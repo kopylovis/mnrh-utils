@@ -8,8 +8,8 @@ from mnrhlib import has_flag, process_commands, run
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or not args or args[0] != "scroll":
-    print("mnrh fix scroll   прокрутка тачпада перевернулась после сна: перезапустить Scroll Reverser")
-    print("                  (и похожие: Mos, LinearMouse, UnnaturalScrollWheels), без перезагрузки Mac")
+    print("mnrh fix scroll   прокрутка тачпада перевернулась после сна: перезапустить mnrh scroll")
+    print("                  или Scroll Reverser (и похожие: Mos, LinearMouse, UnnaturalScrollWheels)")
     sys.exit(0 if has_flag(args, "-h", "--help") or not args else 2)
 
 SCROLL_APPS = ("Scroll Reverser", "Mos", "LinearMouse", "UnnaturalScrollWheels")
@@ -58,7 +58,13 @@ def restart(name, found):
 
 
 def scroll():
+    agent = os.path.expanduser("~/Library/LaunchAgents/com.mnrh.scroll.plist")
+    if os.path.exists(agent):
+        run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.mnrh.scroll"])
+        print("mnrh scroll перезапущен. Состояние: mnrh scroll")
     running = [(name, found) for name in SCROLL_APPS if (found := app_pids(name))]
+    if os.path.exists(agent) and not running:
+        return 0
     if not running:
         print("Scroll Reverser и похожие программы не запущены — переворачивает не они.")
         print("Попробуй выключить и включить «Естественную прокрутку»: Настройки → Трекпад → Прокрутка и масштаб.")
