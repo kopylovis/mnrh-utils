@@ -41,6 +41,7 @@ mnrh uninstall --orphans   остатки приложений, которых �
 mnrh net              почему не качаются зависимости: сеть, DNS, VPN, прокси, репозитории (--speed скорость)
 mnrh login            что запускается при входе и в фоне: чьё, подписано ли, работает ли
 mnrh login off <имя>  убрать из автозапуска
+mnrh power            зарядник и сколько даёт, сколько тянет Mac, троттлинг, здоровье батареи
 mnrh fix              быстрые починки без перезагрузки, список с описаниями:
                       scroll, dock, finder, menubar, wifi, sim, adb, dns, bt, audio
 mnrh killdaemons      остановить демоны Gradle и Kotlin любых версий
