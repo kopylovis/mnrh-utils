@@ -20,6 +20,7 @@ test:
 	@./bin/mnrh help -a >/dev/null
 	@MNRH_NO_MENU=1 ./bin/mnrh >/dev/null
 	@./bin/mnrh path clean -n >/dev/null
+	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep -q open_claude
 	@for c in $$(ls libexec/mnrh | sed 's/\..*//' | grep -v '^lib$$'); do grep -q "	$$c	" share/mnrh/commands.tsv || { echo "нет в commands.tsv: $$c"; exit 1; }; done
 	@./bin/mnrh --version >/dev/null
 	@./bin/mnrh ram -n 1 >/dev/null

@@ -13,6 +13,7 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mnrhlib import HOME, tilde
+import claude_open
 
 CLAUDE = os.environ.get("MNRH_CLAUDE_HOME", os.path.join(HOME, ".claude"))
 CLAUDE_BIN = os.environ.get("MNRH_CLAUDE_BIN", "claude")
@@ -542,10 +543,18 @@ def mcp():
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "mnrh", "version": "1.0.0"}}})
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": rid, "result": {"tools": [TOOL, FORGET_TOOL]}})
+            send({"jsonrpc": "2.0", "id": rid, "result": {"tools": [TOOL, FORGET_TOOL, claude_open.TOOL]}})
         elif method == "tools/call":
             params = req.get("params") or {}
             tool = params.get("name")
+            if tool == "open_claude":
+                try:
+                    text, err = claude_open.open_claude(params.get("arguments") or {}, MNRH)
+                except Exception as e:  # сервер должен жить дальше, что бы ни случилось с osascript
+                    text, err = f"Не получилось: {e}", True
+                send({"jsonrpc": "2.0", "id": rid,
+                      "result": {"content": [{"type": "text", "text": text}], "isError": err}})
+                continue
             if tool not in ("restart", "forget"):
                 send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": "нет такого инструмента"}})
                 continue
