@@ -15,15 +15,23 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib
 from mnrhlib import BAD, HOME, OK, WARN, confirm, git_versions, has_flag, paint, projects, run, tilde, version_key
 
 args = sys.argv[1:]
-if has_flag(args, "-h", "--help") or (args and args[0] != "github"):
-    print("mnrh ssh                      ключи в ~/.ssh, какие загружены, кем они представляются GitHub")
+PROVIDERS = {
+    "github": {"title": "GitHub", "host": "github.com", "greet": r"Hi ([^!]+)!",
+               "keys_page": "https://github.com/settings/ssh/new"},
+    "gitlab": {"title": "GitLab", "host": "gitlab.com", "greet": r"Welcome to GitLab, @([^!]+)!",
+               "keys_page": "https://gitlab.com/-/user_settings/ssh_keys"},
+}
+if has_flag(args, "-h", "--help") or (args and args[0] not in PROVIDERS):
+    print("mnrh ssh                      ключи в ~/.ssh, какие загружены, кем они представляются GitHub и GitLab")
     print("mnrh ssh github               пошагово: аккаунт, в который вошёл gh (или войти в другой),")
     print("                              ключ, Связка, ~/.ssh/config, GitHub, подпись, Sourcetree (если есть)")
     print("mnrh ssh github <логин>       то же для указанного аккаунта без вопроса")
     print("                              подробнее: выпустить ключ, загрузить в Связку, прописать")
     print("                              в ~/.ssh/config, добавить в GitHub, подписывать им коммиты,")
     print("                              перевести репозитории аккаунта с HTTPS на SSH (спросит)")
-    print("   --alias github-work        имя хоста для второго аккаунта (первый получает github.com)")
+    print("mnrh ssh gitlab [логин]       то же для GitLab: ключ добавляется через glab, а без него — копируется")
+    print("                              в буфер, открывается страница SSH Keys и проверяется вход")
+    print("   --alias github-work        имя хоста для второго аккаунта (первый получает github.com / gitlab.com)")
     print("   --no-sign                  не подписывать коммиты этим ключом")
     print("   --ask-passphrase           задать пароль самому; по умолчанию он случайный и живёт только в Связке")
     print("   -y                         не спрашивать про перевод репозиториев")
@@ -36,6 +44,7 @@ LOADER = os.path.join(HOME, "Library", "LaunchAgents", f"{LOADER_LABEL}.plist")
 ALLOWED = os.path.join(HOME, ".config", "git", "allowed_signers")
 SCOPES = "admin:public_key,admin:ssh_signing_key"
 assume_yes = has_flag(args, "-y", "--yes")
+P = PROVIDERS.get(args[0]) if args else None
 
 
 def sh(cmd, env=None, inp=None, timeout=60):
@@ -51,25 +60,24 @@ def fingerprint(path):
     return out[1] if len(out) > 1 else ""
 
 
-def github_identity(host, key=None):
+def identity(host, provider="github"):
+    """Кем нас видит сервер: GitHub и GitLab здороваются по логину."""
     cmd = ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new"]
-    if key:
-        cmd += ["-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none", "-i", key]
     _, out = sh(cmd + [f"git@{host}"], timeout=20)
-    m = re.search(r"Hi ([^!]+)!", out)
+    m = re.search(PROVIDERS[provider]["greet"], out)
     return m.group(1) if m else None
 
 
 def mnrh_blocks():
-    """{хост: (логин, ключ)} из блоков, которые записал mnrh."""
+    """{хост: (провайдер, логин, ключ)} из блоков, которые записал mnrh."""
     try:
         text = open(CONFIG).read()
     except OSError:
         return {}
     found = {}
-    for m in re.finditer(r"# mnrh ssh github (\S+)\nHost (\S+)\n(.*?)# /mnrh ssh", text, re.S):
-        key = re.search(r"IdentityFile (\S+)", m.group(3))
-        found[m.group(2)] = (m.group(1), key.group(1) if key else "")
+    for m in re.finditer(r"# mnrh ssh (github|gitlab) (\S+)\nHost (\S+)\n(.*?)# /mnrh ssh", text, re.S):
+        key = re.search(r"IdentityFile (\S+)", m.group(4))
+        found[m.group(3)] = (m.group(1), m.group(2), key.group(1) if key else "")
     return found
 
 
@@ -91,14 +99,14 @@ def status():
             weak = kind == "RSA" and bits.isdigit() and int(bits) < 3072 or kind in ("DSA", "ECDSA")
             print(f"  {WARN if weak else ' '} {os.path.basename(k):<32} {kind} {bits}, {year}, {in_agent}")
     if blocks:
-        print(f"\n{paint('GitHub через mnrh:', '1')}")
-        for host, (login, key) in blocks.items():
-            who = github_identity(host)
+        print(f"\n{paint('Настроено через mnrh:', '1')}")
+        for host, (prov, login, key) in blocks.items():
+            who = identity(host, prov)
             mark = OK if who == login else BAD
             print(f"  {mark} git@{host} -> {who or 'не пускает'}" + ("" if who == login else f" (ожидался {login})")
                   + paint(f"   {key}", "2"))
-    else:
-        who = github_identity("github.com")
+    if not any(b[0] == "github" for b in blocks.values()):
+        who = identity("github.com", "github")
         print(f"\ngit@github.com сейчас представляется как: {who or 'никто (ключа нет)'}"
               + paint("   -> mnrh ssh github", "2"))
     signing = run(["git", "config", "--global", "gpg.format"]).strip()
@@ -106,10 +114,13 @@ def status():
         key = run(["git", "config", "--global", "user.signingkey"]).strip()
         on = run(["git", "config", "--global", "commit.gpgsign"]).strip() == "true"
         print(f"\nПодпись коммитов: {'включена' if on else 'настроена, но выключена'}, ключ {tilde(key)}")
-    st = [a for a in sourcetree_accounts() if "github" in a["host"]] if sourcetree_app() else []
+    for host, path in re.findall(r"includeif\.hasconfig:remote\.\*\.url:git@([^:]+):\*/\*\*\.path (\S+)",
+                                 run(["git", "config", "--global", "--get-regexp", "^includeif"]), re.I):
+        print(f"  в репозиториях git@{host} — своим ключом ({tilde(path)})")
+    st = [a for a in sourcetree_accounts() if "github" in a["host"] or "gitlab" in a["host"]] if sourcetree_app() else []
     if st:
-        print("Sourcetree, аккаунты GitHub: " + ", ".join(
-            f"{a['user']} ({'SSH' if a['ssh'] else 'HTTPS'})" for a in st))
+        print("Sourcetree: " + ", ".join(
+            f"{a['user']}@{a['host'].split('//')[-1]} ({'SSH' if a['ssh'] else 'HTTPS'})" for a in st))
     proto = run(["gh", "config", "get", "git_protocol", "-h", "github.com"]).strip()
     if proto:
         print(f"gh клонирует по: {proto}")
@@ -159,14 +170,14 @@ def add_to_keychain(key, passphrase):
 
 
 def write_block(host, login, key):
-    block = (f"# mnrh ssh github {login}\nHost {host}\n  HostName github.com\n  User git\n"
+    block = (f"# mnrh ssh {args[0]} {login}\nHost {host}\n  HostName {P['host']}\n  User git\n"
              f"  IdentityFile {tilde(key)}\n  IdentitiesOnly yes\n  AddKeysToAgent yes\n  UseKeychain yes\n"
              "# /mnrh ssh\n")
     try:
         text = open(CONFIG).read()
     except OSError:
         text = ""
-    new = re.sub(r"# mnrh ssh github \S+\nHost " + re.escape(host) + r"\n.*?# /mnrh ssh\n\n?", "", text, flags=re.S)
+    new = re.sub(r"# mnrh ssh \S+ \S+\nHost " + re.escape(host) + r"\n.*?# /mnrh ssh\n\n?", "", text, flags=re.S)
     # В начало: у ssh побеждает первое найденное значение, так наш блок не перебьёт «Host *» ниже.
     new = block + "\n" + new
     if new == text:
@@ -225,6 +236,65 @@ def upload(login, pub, title):
     return done
 
 
+def upload_gitlab(login, pub, host, title):
+    """GitLab: через glab, если он вошёл; иначе ключ в буфер, страница SSH Keys и проверка входа."""
+    if identity(host, "gitlab") == login:
+        print(f"{OK} В GitLab ключ уже есть: git@{host} входит как {login}")
+        return True
+    if shutil.which("glab") and sh(["glab", "auth", "status"])[0] == 0:
+        for extra in (["--usage-type", "auth_and_signing"], []):
+            code, out = sh(["glab", "ssh-key", "add", pub, "--title", title, *extra])
+            if code == 0:
+                print(f"{OK} Ключ добавлен в GitLab через glab (вход и подпись)")
+                return identity(host, "gitlab") == login
+        print(f"{WARN} glab не добавил ключ: {out}")
+    subprocess.run(["pbcopy"], input=open(pub).read().strip(), text=True)
+    print(f"Ключ скопирован в буфер. На странице GitLab, которая сейчас откроется (войди как {login}):")
+    print("  Add new key → вставь в поле Key (⌘V) → Usage type: Authentication & Signing → Add key")
+    if not sys.stdin.isatty():
+        print(f"  {P['keys_page']}\n  Потом повтори в Терминале: mnrh ssh gitlab {login}")
+        return False
+    run(["open", P["keys_page"]])
+    for attempt in range(3):
+        input("Нажми Enter, когда добавишь... ")
+        who = identity(host, "gitlab")
+        if who == login:
+            print(f"{OK} GitLab принял ключ: git@{host} входит как {login}")
+            return True
+        print(f"{WARN} Пока " + (f"входит как {who}" if who else "не пускает") + " — проверь, что ключ добавлен в "
+              f"аккаунт {login}" + (", и нажми Enter ещё раз" if attempt < 2 else ""))
+    return False
+
+
+def setup_signing_for_host(host, login, pub):
+    """Подпись в репозиториях с remote на этом хосте — своим ключом, через includeIf в ~/.gitconfig."""
+    path = os.path.join(HOME, ".config", "git", f"mnrh-{args[0]}-{login}.gitconfig")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(f"# mnrh ssh {args[0]} {login}: подпись в репозиториях git@{host}\n"
+                f"[user]\n\tsigningkey = {pub}\n[gpg]\n\tformat = ssh\n\tssh.allowedSignersFile = {ALLOWED}\n"
+                "[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n")
+    subprocess.run(["git", "config", "--global", f"includeIf.hasconfig:remote.*.url:git@{host}:*/**.path", path])
+    add_allowed_signer(pub)
+    email = run(["git", "config", "--global", "user.email"]).strip()
+    print(f"{OK} В репозиториях git@{host} коммиты подписываются ключом {login} ({tilde(path)})")
+    if email:
+        print(paint(f"  «Verified» в {P['title']} будет, если {email} подтверждён в аккаунте {login}.", "2"))
+
+
+def add_allowed_signer(pub):
+    email = run(["git", "config", "--global", "user.email"]).strip()
+    os.makedirs(os.path.dirname(ALLOWED), exist_ok=True)
+    line = f"{email} {' '.join(open(pub).read().split()[:2])}\n"
+    try:
+        existing = open(ALLOWED).read()
+    except OSError:
+        existing = ""
+    if line not in existing:
+        with open(ALLOWED, "a") as f:
+            f.write(line)
+
+
 def old_gits():
     return [(p, v) for p, v in git_versions() if version_key(v) < [2, 34]]
 
@@ -244,15 +314,7 @@ def setup_signing(login, pub):
     for k, v in (("gpg.format", "ssh"), ("user.signingkey", pub), ("commit.gpgsign", "true"),
                  ("tag.gpgsign", "true"), ("gpg.ssh.allowedSignersFile", ALLOWED)):
         subprocess.run(["git", "config", "--global", k, v])
-    os.makedirs(os.path.dirname(ALLOWED), exist_ok=True)
-    line = f"{email} {' '.join(open(pub).read().split()[:2])}\n"
-    try:
-        existing = open(ALLOWED).read()
-    except OSError:
-        existing = ""
-    if line not in existing:
-        with open(ALLOWED, "a") as f:
-            f.write(line)
+    add_allowed_signer(pub)
     print(f"{OK} Коммиты и теги подписываются этим ключом (для {email or 'user.email не задан!'})")
     if email:
         print(paint(f"  «Verified» на GitHub будет, если {email} подтверждён в аккаунте {login}.", "2"))
@@ -262,8 +324,8 @@ def switch_remotes(login, host):
     todo = []
     for proj in projects():
         url = run(["git", "-C", proj, "remote", "get-url", "origin"]).strip()
-        m = re.match(r"https://github\.com/([^/]+)/(.+?)(?:\.git)?/?$", url)
-        if m and m.group(1).lower() == login.lower():
+        m = re.match(r"https://" + re.escape(P["host"]) + r"/(.+)/([^/]+?)(?:\.git)?/?$", url)
+        if m and m.group(1).split("/")[0].lower() == login.lower():
             todo.append((proj, f"git@{host}:{m.group(1)}/{m.group(2)}.git"))
     if not todo:
         print("Репозиториев аккаунта на HTTPS в папке проектов нет.")
@@ -272,7 +334,7 @@ def switch_remotes(login, host):
     for proj, url in todo:
         print(f"  {os.path.basename(proj):<28} -> {url}")
     if not assume_yes and not sys.stdin.isatty():
-        print("Перевести: mnrh ssh github " + login + " -y")
+        print(f"Перевести: mnrh ssh {args[0]} {login} -y")
         return
     if not confirm("Перевести их на SSH?", assume_yes):
         print("Оставил как есть.")
@@ -331,17 +393,19 @@ def sourcetree_step(login, app):
     # переключить аккаунт на SSH, чтобы новые клоны шли по SSH.
     def mine():
         return next((a for a in sourcetree_accounts()
-                     if "github" in a["host"] and a["user"].lower() == login.lower()), None)
+                     if args[0] in a["host"] and a["user"].lower() == login.lower()), None)
 
     acc = mine()
     if acc and acc["ssh"]:
         print(f"{OK} Аккаунт {login} в Sourcetree работает по SSH")
     else:
         if not acc:
-            print(f"В Sourcetree нет аккаунта {login}: Settings → Accounts → Add → GitHub, войди как {login}.")
-        print(f"В Sourcetree: Settings → Accounts → {login} → Edit → Protocol: SSH → Save")
-        print(paint("  Connect Account не нажимай: после входа Sourcetree считает правку новым аккаунтом и пишет\n"
-                    "  «You already have a similar account». Если так случилось — Cancel и заново только Protocol.", "2"))
+            print(f"В Sourcetree нет аккаунта {login}: Settings → Accounts → Add… → Host: {P['title']}, Auth Type: OAuth,")
+            print(f"  Protocol: SSH → Connect Account → войди как {login} → Save")
+        else:
+            print(f"В Sourcetree: Settings → Accounts → {login} → Edit → Protocol: SSH → Save")
+            print(paint("  Connect Account не нажимай: после входа Sourcetree считает правку новым аккаунтом и пишет\n"
+                        "  «You already have a similar account». Если так случилось — Cancel и заново только Protocol.", "2"))
         if sys.stdin.isatty():
             run(["open", "-a", app])
             input("Нажми Enter, когда сохранишь... ")
@@ -351,12 +415,12 @@ def sourcetree_step(login, app):
     print(paint("  В окне аккаунта будет написано «SSH Key: id_rsa.pub» — это надпись, а не выбор: Sourcetree для Mac\n"
                 "  всегда показывает id_rsa. Git в нём идёт через системный ssh и берёт ключ из ~/.ssh/config.", "2"))
     others = sorted({a["user"] for a in sourcetree_accounts()
-                     if "github" in a["host"] and a["user"].lower() != login.lower()})
+                     if args[0] in a["host"] and a["user"].lower() != login.lower()})
     if others:
-        print(f"{WARN} Ещё аккаунты GitHub в Sourcetree: {', '.join(others)}. Если не нужны — Remove там же.")
+        print(f"{WARN} Ещё аккаунты {P['title']} в Sourcetree: {', '.join(others)}. Если не нужны — Remove там же.")
 
 
-STEPS = ["ключ", "Связка ключей и агент", "~/.ssh/config", "GitHub", "подпись коммитов",
+STEPS = ["ключ", "Связка ключей и агент", "~/.ssh/config", P["title"] if P else "", "подпись коммитов",
          "проверка и репозитории", "Sourcetree"]
 
 
@@ -378,9 +442,32 @@ def gh_login_now():
     return run(["gh", "api", "user", "--jq", ".login"]).strip()
 
 
+def glab_user():
+    code, out = sh(["glab", "api", "user"])
+    m = re.search(r'"username"\s*:\s*"([^"]+)"', out) if code == 0 else None
+    return m.group(1) if m else None
+
+
 def choose_login(explicit):
     if explicit:
         return explicit
+    if args[0] == "gitlab":
+        tty = sys.stdin.isatty() and not assume_yes
+        if shutil.which("glab"):
+            current = glab_user()
+            if current and (not tty or ask_yes(f"glab вошёл в GitLab как {current}. Настраиваем его?")):
+                return current
+            if tty and ask_yes("Войти в GitLab через glab (браузер)? Тогда ключ добавится сам"):
+                subprocess.run(["glab", "auth", "login", "--hostname", "gitlab.com", "--web", "--git-protocol", "ssh"])
+                current = glab_user()
+                if current:
+                    return current
+        if not sys.stdin.isatty():
+            sys.exit("Укажи логин: mnrh ssh gitlab <логин>")
+        login = input("Логин в GitLab (как в адресе профиля gitlab.com/<логин>): ").strip().lstrip("@")
+        if not login:
+            sys.exit("Логин не указан.")
+        return login
     if not shutil.which("gh"):
         sys.exit("Нужен GitHub CLI: brew install gh (или укажи логин: mnrh ssh github <логин>)")
     current = run(["gh", "api", "user", "--jq", ".login"]).strip()
@@ -395,7 +482,7 @@ def choose_login(explicit):
     return login
 
 
-def github():
+def setup():
     rest, explicit = args[1:], None
     for i, a in enumerate(rest):
         if not a.startswith("-") and (i == 0 or rest[i - 1] != "--alias"):
@@ -412,12 +499,12 @@ def github():
             sys.exit("mnrh ssh: после --alias нужно имя хоста")
         host = args[args.index("--alias") + 1]
     if not host:
-        owner = blocks.get("github.com", (login,))[0]
-        host = "github.com" if owner == login else f"github-{login.lower()}"
-    key = os.path.join(SSH, f"github_{login}_ed25519")
+        owner = blocks.get(P["host"], (args[0], login))[1]
+        host = P["host"] if owner == login else f"{args[0]}-{login.lower()}"
+    key = os.path.join(SSH, f"{args[0]}_{login}_ed25519")
     pub = key + ".pub"
     machine = socket.gethostname().split(".")[0]
-    print(f"Настройка SSH для GitHub {login} (хост {host})")
+    print(f"Настройка SSH для {P['title']} {login} (хост {host})")
 
     step(1)
     if os.path.exists(key):
@@ -430,7 +517,7 @@ def github():
             sh(["ssh-keygen", "-p", "-q", "-P", "", "-N", passphrase, "-f", key])
     else:
         os.makedirs(SSH, mode=0o700, exist_ok=True)
-        comment = f"{login}@github {machine} mnrh {time.strftime('%Y-%m-%d')}"
+        comment = f"{login}@{args[0]} {machine} mnrh {time.strftime('%Y-%m-%d')}"
         if has_flag(args, "--ask-passphrase"):
             if not sys.stdin.isatty():
                 sys.exit("--ask-passphrase работает только в терминале")
@@ -455,7 +542,7 @@ def github():
     elif encrypted(key):
         print(f"{OK} Ключ в агенте, пароль в Связке ключей")
     else:
-        print(f"{WARN} Ключ в агенте, но без пароля. Запусти mnrh ssh github {login} в Терминале — поставлю пароль в Связку")
+        print(f"{WARN} Ключ в агенте, но без пароля. Запусти mnrh ssh {args[0]} {login} в Терминале — поставлю пароль в Связку")
     install_loader()
 
     step(3)
@@ -465,33 +552,40 @@ def github():
         print(f"{OK} Host {host} уже смотрит на {tilde(key)}")
 
     step(4)
-    uploaded = upload(login, pub, f"{machine} (mnrh)")
+    if args[0] == "github":
+        uploaded = upload(login, pub, f"{machine} (mnrh)")
+    else:
+        uploaded = upload_gitlab(login, pub, host, f"{machine} (mnrh)")
 
     step(5)
     if has_flag(args, "--no-sign"):
         print("Пропускаю: --no-sign")
-    elif uploaded:
+    elif not uploaded:
+        print(f"Пропускаю, пока ключа нет в {P['title']}: иначе коммиты были бы с пометкой Unverified.")
+    elif old_gits():
+        setup_signing(login, pub)  # объяснит, какой git мешает
+    elif args[0] == "github" and host == "github.com":
         setup_signing(login, pub)
     else:
-        print("Пропускаю, пока ключа нет в GitHub: иначе коммиты были бы с пометкой Unverified.")
+        setup_signing_for_host(host, login, pub)
 
     step(6)
-    who = github_identity(host) if uploaded else None
+    who = identity(host, args[0]) if uploaded else None
     if who == login:
         print(f"{OK} Проверка: git@{host} входит как {who}")
-        if host == "github.com":
+        if host == "github.com" and args[0] == "github":
             subprocess.run(["gh", "config", "set", "git_protocol", "ssh", "-h", "github.com"], capture_output=True)
         switch_remotes(login, host)
     elif uploaded:
         print(f"{BAD} git@{host} входит как {who or 'никто'}, а не {login}. mnrh ssh покажет подробности.")
     else:
-        print("Пропускаю, пока ключа нет в GitHub.")
+        print(f"Пропускаю, пока ключа нет в {P['title']}.")
 
     if st_app:
         step(7)
         sourcetree_step(login, st_app)
-    if host != "github.com":
+    if host != P["host"]:
         print(f"Клонировать этим аккаунтом: git clone git@{host}:<владелец>/<репо>.git")
 
 
-github() if args else status()
+setup() if args else status()
