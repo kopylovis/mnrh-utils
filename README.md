@@ -52,6 +52,7 @@ mnrh login            что запускается при входе и в фо
 mnrh login off <имя>  убрать из автозапуска
 mnrh power            зарядник и сколько даёт, сколько тянет Mac, троттлинг, здоровье батареи
 mnrh defaults         удобные настройки macOS для разработки: что включено (apply, undo)
+mnrh defaults apply no-lang-popup   раскладка без задержки: убрать значок языка у курсора (с Sonoma из-за него лаг)
 mnrh defaults snap    запомнить настройки; после правки в Настройках diff даст defaults write
 mnrh outdated         что пора обновить: macOS, Homebrew, Android Studio и SDK, Gradle в проектах
 mnrh input on         раскладка под приложение: en в Android Studio, Xcode, терминале; остальным — прежняя

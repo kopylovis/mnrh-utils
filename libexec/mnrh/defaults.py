@@ -38,6 +38,10 @@ PRESET = [
     ("key-repeat", "быстрый повтор клавиш (нужен выход из системы)", G, "KeyRepeat", 2, "logout"),
     ("key-delay", "короткая задержка перед повтором (нужен выход из системы)", G, "InitialKeyRepeat", 15, "logout"),
     ("no-press-hold", "зажатая клавиша повторяется, а не показывает меню с «ё», «é»", G, "ApplePressAndHoldEnabled", False, "logout"),
+    # С Sonoma раскладка меняется, только когда исчезнет значок языка у курсора: первая буква
+    # успевает набраться в старой. Без значка переключение мгновенное, язык виден в строке меню.
+    ("no-lang-popup", "раскладка переключается сразу, без значка языка у курсора (нужен выход)", G,
+     "TSMLanguageIndicatorEnabled", False, "logout"),
     ("no-smart-quotes", "без «умных» кавычек: код из заметок и чатов не ломается", G, "NSAutomaticQuoteSubstitutionEnabled", False, None),
     ("no-smart-dashes", "без автозамены -- на тире", G, "NSAutomaticDashSubstitutionEnabled", False, None),
     ("no-autocorrect", "без автоисправления слов", G, "NSAutomaticSpellingCorrectionEnabled", False, None),
