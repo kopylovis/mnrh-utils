@@ -14,35 +14,7 @@ resolve_root() {
 ROOT=$(resolve_root)
 COMMANDS="$ROOT/libexec/mnrh"
 
-describe() {
-  case "$1" in
-    claude)      echo "запустить Claude Code в одном из проектов (root — в домашнем, sessions — сессии)" ;;
-    disk)        echo "что можно почистить на диске (--apply удалить безопасное)" ;;
-    init)        echo "первая настройка: папка с проектами и подключение к Claude Code" ;;
-    doctor)      echo "проверка системы: диск, память, оболочка, ссылки, автозапуск, безопасность" ;;
-    repos)       echo "состояние всех git-проектов в папке проектов (--fetch со свежими данными)" ;;
-    sim)         echo "симуляторы: что запущено, stop, clean (--runtimes старые runtime)" ;;
-    ram)         echo "кто ест оперативную память, по приложениям (-p по процессам, clean освободить)" ;;
-    gradle)      echo "версии Gradle по проектам, кеши, демоны, build/ (clean удалить лишнее)" ;;
-    scroll)      echo "перевернуть прокрутку мыши, не трогая трекпад (on, off, test) — вместо Scroll Reverser" ;;
-    sleep)       echo "что не даёт Mac уснуть, последние засыпания и пробуждения (fix снять зависшие caffeinate)" ;;
-    ssh)         echo "SSH-ключи: состояние; github — выпустить ключ, добавить в GitHub, подпись коммитов" ;;
-    ports)       echo "кто слушает TCP-порты: процесс, проект (kill <порт> освободить)" ;;
-    uninstall)   echo "удалить приложение вместе с данными в ~/Library (--orphans остатки удалённых)" ;;
-    net)         echo "почему не качаются зависимости: сеть, DNS, VPN, прокси, Maven/Google/Gradle/CocoaPods" ;;
-    login)       echo "что запускается при входе и в фоне: чьё, подписано ли, работает ли (off убрать)" ;;
-    power)       echo "зарядник и сколько даёт, сколько тянет Mac, троттлинг, здоровье батареи" ;;
-    defaults)    echo "удобные настройки macOS для разработки с откатом; snap/diff — готовые defaults write" ;;
-    outdated)    echo "что пора обновить: macOS, Homebrew, Android Studio и SDK, Gradle в проектах" ;;
-    input)       echo "раскладка под приложение: en в среде разработки, остальным — с которой оставил" ;;
-    kit)         echo "подборка удобных программ для Mac: что стоит, что нет (install поставить через brew)" ;;
-    audio)       echo "звуковые устройства: переключить выход и микрофон, keep-mic — наушники не портят звук" ;;
-    dock)        echo "что закреплено в Dock: clean убрать удалённые, add/remove, undo" ;;
-    fix)         echo "быстрые починки без перезагрузки: scroll, dock, finder, wifi, sim, adb, dns, bt, audio…" ;;
-    killdaemons) echo "остановить демоны Gradle и Kotlin (-l только показать, -f и занятых)" ;;
-    *)           echo "" ;;
-  esac
-}
+REGISTRY="$ROOT/share/mnrh/commands.tsv"
 
 available() {
   local f
@@ -53,16 +25,10 @@ available() {
   done
 }
 
+# Список по группам из share/mnrh/commands.tsv; команд, которых там нет, — в «Другое».
 usage() {
-  local c
-  echo "mnrh $(cat "$ROOT/VERSION" 2>/dev/null) — утилиты для обслуживания Mac"
-  echo
-  for c in $(available); do
-    printf '  mnrh %-14s %s\n' "$c" "$(describe "$c")"
-  done
-  echo
-  echo "  mnrh <команда> -h   справка по команде"
-  echo "  mnrh --version      версия"
+  /usr/bin/python3 "$ROOT/libexec/mnrh/lib/launcher.py" help "$REGISTRY" "$(available | tr '\n' ' ')" \
+    "$(cat "$ROOT/VERSION" 2>/dev/null)" "${1:-}"
 }
 
 run() {
@@ -82,8 +48,15 @@ run() {
   exit 2
 }
 
+if [ $# -eq 0 ] && [ -t 0 ] && [ -t 1 ] && [ -z "${MNRH_NO_MENU:-}" ]; then
+  choice=$(/usr/bin/python3 "$ROOT/libexec/mnrh/lib/launcher.py" menu "$REGISTRY" "$(available | tr '\n' ' ')" "$(cat "$ROOT/VERSION" 2>/dev/null)") || exit 0
+  [ -n "$choice" ] || exit 0
+  eval "set -- $choice"
+  printf '\033[2m$ mnrh %s\033[0m\n' "$choice"
+fi
+
 case "${1:-help}" in
-  help|-h|--help) usage ;;
+  help|-h|--help) [ "${2:-}" = "-a" ] && usage all || usage ;;
   --version|-v)   cat "$ROOT/VERSION" ;;
   mem)            shift; run ram "$@" ;;
   kd)             shift; run killdaemons "$@" ;;

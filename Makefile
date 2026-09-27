@@ -17,6 +17,10 @@ test:
 	@for f in libexec/mnrh/*.sh; do bash -n "$$f" || exit 1; done
 	@for f in libexec/mnrh/*.py libexec/mnrh/lib/*.py; do /usr/bin/python3 -m py_compile "$$f" || exit 1; done
 	@./bin/mnrh help >/dev/null
+	@./bin/mnrh help -a >/dev/null
+	@MNRH_NO_MENU=1 ./bin/mnrh >/dev/null
+	@./bin/mnrh path clean -n >/dev/null
+	@for c in $$(ls libexec/mnrh | sed 's/\..*//' | grep -v '^lib$$'); do grep -q "	$$c	" share/mnrh/commands.tsv || { echo "нет в commands.tsv: $$c"; exit 1; }; done
 	@./bin/mnrh --version >/dev/null
 	@./bin/mnrh ram -n 1 >/dev/null
 	@./bin/mnrh killdaemons -l >/dev/null
@@ -26,6 +30,8 @@ test:
 	@./bin/mnrh sleep -h >/dev/null
 	@./bin/mnrh ssh -h >/dev/null
 	@./bin/mnrh ports -h >/dev/null
+	@./bin/mnrh path -h >/dev/null
+	@! ./bin/mnrh path nothing >/dev/null
 	@./bin/mnrh uninstall -h >/dev/null
 	@./bin/mnrh net -h >/dev/null
 	@./bin/mnrh login -h >/dev/null

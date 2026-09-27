@@ -13,6 +13,7 @@ DOWN = ("\x1b[B", "\x1bOB", "\x0e", "\t")
 HOME = ("\x1b[H", "\x1bOH", "\x1b[1~")
 END = ("\x1b[F", "\x1bOF", "\x1b[4~")
 DIGIT_PAUSE = 0.8
+FROM_RU = str.maketrans("йцукенгшщзхъфывапролджэячсмитьбю", "qwertyuiop[]asdfghjkl;'zxcvbnm,.")
 
 
 class Cancel(Exception):
@@ -38,7 +39,8 @@ class Menu:
 
     def view(self):
         q = self.query.lower()
-        return [i for i, (key, _) in enumerate(self.items) if q in key.lower()]
+        en = q.translate(FROM_RU)  # набрали в русской раскладке: «ыыр» -> «ssh»
+        return [i for i, (key, _) in enumerate(self.items) if q in key.lower() or en in key.lower()]
 
     def size(self):
         try:
