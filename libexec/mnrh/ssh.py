@@ -320,8 +320,8 @@ def sourcetree_accounts():
             user = val(cred.get("username")) if isinstance(cred, dict) else ""
             proto = val(o["protocol"])
             found.append({"host": str(val(o.get("host"))), "user": str(user or ""),
-                          # 0 — SSH, 1 — HTTPS (так Sourcetree пишет выбор из поля Protocol)
-                          "ssh": proto == 0 or proto is False})
+                          # 0 — HTTPS, 1 — SSH (так Sourcetree пишет выбор из поля Protocol)
+                          "ssh": proto == 1 or proto is True})
     return found
 
 
