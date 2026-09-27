@@ -272,10 +272,16 @@ def setup_signing_for_host(host, login, pub):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write(f"# mnrh ssh {args[0]} {login}: подпись в репозиториях git@{host}\n"
-                f"[user]\n\tsigningkey = {pub}\n[gpg]\n\tformat = ssh\n\tssh.allowedSignersFile = {ALLOWED}\n"
+                f"[user]\n\tsigningkey = {pub}\n[gpg]\n\tformat = ssh\n"
+                f"[gpg \"ssh\"]\n\tallowedSignersFile = {ALLOWED}\n"
                 "[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n")
-    subprocess.run(["git", "config", "--global", f"includeIf.hasconfig:remote.*.url:git@{host}:*/**.path", path])
+    # Битый файл в includeIf ломает git во всех репозиториях — проверяем до подключения.
+    if sh(["git", "config", "-f", path, "--list"])[0] != 0:
+        os.unlink(path)
+        print(f"{BAD} Файл подписи получился некорректным, не подключаю. Это ошибка mnrh.")
+        return
     add_allowed_signer(pub)
+    subprocess.run(["git", "config", "--global", f"includeIf.hasconfig:remote.*.url:git@{host}:*/**.path", path])
     email = run(["git", "config", "--global", "user.email"]).strip()
     print(f"{OK} В репозиториях git@{host} коммиты подписываются ключом {login} ({tilde(path)})")
     if email:
@@ -284,6 +290,8 @@ def setup_signing_for_host(host, login, pub):
 
 def add_allowed_signer(pub):
     email = run(["git", "config", "--global", "user.email"]).strip()
+    if not email:
+        return
     os.makedirs(os.path.dirname(ALLOWED), exist_ok=True)
     line = f"{email} {' '.join(open(pub).read().split()[:2])}\n"
     try:
@@ -399,6 +407,24 @@ def sourcetree_step(login, app):
     if acc and acc["ssh"]:
         print(f"{OK} Аккаунт {login} в Sourcetree работает по SSH")
     else:
+        if not acc and args[0] == "gitlab":
+            # Для GitLab.com Sourcetree умеет только Private Token. Права read_api хватает: он только читает список.
+            token_page = "https://gitlab.com/-/user_settings/personal_access_tokens?name=Sourcetree&scopes=read_api"
+            print(f"В Sourcetree нет аккаунта {login}. Для GitLab он входит только по токену:")
+            print(f"  1. Создай токен (страница откроется с именем Sourcetree и правом read_api) → скопируй его")
+            print(f"  2. Sourcetree → Settings → Accounts → Add… → Host: GitLab.com, Username: {login},")
+            print(f"     Private Token: вставь, Protocol: SSH → Save")
+            print(paint("  Это необязательно: git работает и без аккаунта, он нужен только для списка репозиториев в Sourcetree.", "2"))
+            if sys.stdin.isatty():
+                run(["open", token_page])
+                run(["open", "-a", app])
+                input("Нажми Enter, когда сохранишь... ")
+                acc = mine()
+                print(f"{OK} Аккаунт {login} в Sourcetree работает по SSH" if acc and acc["ssh"]
+                      else f"{WARN} Пока не вижу аккаунт {login}: Sourcetree пишет настройки при закрытии окна настроек")
+            else:
+                print(f"  {token_page}")
+            return
         if not acc:
             print(f"В Sourcetree нет аккаунта {login}: Settings → Accounts → Add… → Host: {P['title']}, Auth Type: OAuth,")
             print(f"  Protocol: SSH → Connect Account → войди как {login} → Save")
@@ -460,8 +486,10 @@ def choose_login(explicit):
             if tty and ask_yes("Войти в GitLab через glab (браузер)? Тогда ключ добавится сам"):
                 subprocess.run(["glab", "auth", "login", "--hostname", "gitlab.com", "--web", "--git-protocol", "ssh"])
                 current = glab_user()
-                if current:
+                if current and ask_yes(f"Вошёл как {current}. Настраиваем его?"):
                     return current
+                if current:
+                    sys.exit("Выйди в браузере из этого аккаунта GitLab, войди в нужный и повтори: glab auth login")
         if not sys.stdin.isatty():
             sys.exit("Укажи логин: mnrh ssh gitlab <логин>")
         login = input("Логин в GitLab (как в адресе профиля gitlab.com/<логин>): ").strip().lstrip("@")
@@ -501,6 +529,11 @@ def setup():
     if not host:
         owner = blocks.get(P["host"], (args[0], login))[1]
         host = P["host"] if owner == login else f"{args[0]}-{login.lower()}"
+        if host != P["host"]:
+            print(f"{WARN} {P['host']} уже закреплён за {owner}, поэтому {login} получит отдельный хост {host}.")
+            print(paint(f"  Если {login} теперь основной: mnrh ssh {args[0]} {login} --alias {P['host']}", "2"))
+            if sys.stdin.isatty() and not assume_yes and not ask_yes("Продолжить так?"):
+                sys.exit("Отменено.")
     key = os.path.join(SSH, f"{args[0]}_{login}_ed25519")
     pub = key + ".pub"
     machine = socket.gethostname().split(".")[0]
