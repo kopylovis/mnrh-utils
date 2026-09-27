@@ -109,7 +109,7 @@ def status():
     st = [a for a in sourcetree_accounts() if "github" in a["host"]] if sourcetree_app() else []
     if st:
         print("Sourcetree, аккаунты GitHub: " + ", ".join(
-            f"{a['user']} ({'ключ ' + os.path.basename(a['ssh_key']) if a['ssh_key'] else 'ключ не выбран'})" for a in st))
+            f"{a['user']} ({'SSH' if a['ssh'] else 'HTTPS'})" for a in st))
     proto = run(["gh", "config", "get", "git_protocol", "-h", "github.com"]).strip()
     if proto:
         print(f"gh клонирует по: {proto}")
@@ -304,36 +304,36 @@ def sourcetree_accounts():
         if isinstance(o, dict) and "protocol" in o and "credential" in o:
             cred = val(o["credential"])
             user = val(cred.get("username")) if isinstance(cred, dict) else ""
-            key = val(o["sshKeyID"]) if "sshKeyID" in o else ""
+            proto = val(o["protocol"])
             found.append({"host": str(val(o.get("host"))), "user": str(user or ""),
-                          "ssh_key": key if isinstance(key, str) and key != "$null" else ""})
+                          # 0 — SSH, 1 — HTTPS (так Sourcetree пишет выбор из поля Protocol)
+                          "ssh": proto == 0 or proto is False})
     return found
 
 
-def sourcetree_step(login, key, app):
-    name = os.path.basename(key)
-
+def sourcetree_step(login, app):
+    # Sourcetree для Mac не выбирает ключ: в окне аккаунта всегда написано id_rsa.pub, а git он
+    # запускает через системный OpenSSH, и тот берёт ключ из ~/.ssh/config (шаг 3). Остаётся только
+    # переключить аккаунт на SSH, чтобы новые клоны шли по SSH.
     def mine():
         return next((a for a in sourcetree_accounts()
                      if "github" in a["host"] and a["user"].lower() == login.lower()), None)
 
     acc = mine()
-    if acc and name in acc["ssh_key"]:
-        print(f"{OK} В аккаунте {login} уже выбран этот ключ")
+    if acc and acc["ssh"]:
+        print(f"{OK} Аккаунт {login} в Sourcetree работает по SSH")
     else:
         if not acc:
             print(f"В Sourcetree нет аккаунта {login}: Settings → Accounts → Add → GitHub, войди как {login}.")
-        print(f"В Sourcetree: Settings → Accounts → {login} → Edit → Protocol: SSH, SSH Key: {name}")
-        print(paint("  Ключ уже в агенте, поэтому Sourcetree сразу сможет им пользоваться.", "2"))
+        print(f"В Sourcetree: Settings → Accounts → {login} → Edit → Protocol: SSH → Save")
         if sys.stdin.isatty():
             run(["open", "-a", app])
             input("Нажми Enter, когда сохранишь... ")
             acc = mine()
-            if acc and name in acc["ssh_key"]:
-                print(f"{OK} Sourcetree: у {login} выбран {name}")
-            else:
-                print(f"{WARN} Пока не вижу выбора ключа. Sourcetree пишет настройки на диск при закрытии окна")
-                print(f"  настроек; проверить потом: mnrh ssh")
+            print(f"{OK} Аккаунт {login} в Sourcetree работает по SSH" if acc and acc["ssh"]
+                  else f"{WARN} Пока не вижу SSH у {login}: Sourcetree пишет настройки при закрытии окна настроек")
+    print(paint("  В окне аккаунта будет написано «SSH Key: id_rsa.pub» — это надпись, а не выбор: Sourcetree для Mac\n"
+                "  всегда показывает id_rsa. Git в нём идёт через системный ssh и берёт ключ из ~/.ssh/config.", "2"))
     others = sorted({a["user"] for a in sourcetree_accounts()
                      if "github" in a["host"] and a["user"].lower() != login.lower()})
     if others:
@@ -473,7 +473,7 @@ def github():
 
     if st_app:
         step(7)
-        sourcetree_step(login, key, st_app)
+        sourcetree_step(login, st_app)
     if host != "github.com":
         print(f"Клонировать этим аккаунтом: git clone git@{host}:<владелец>/<репо>.git")
 
