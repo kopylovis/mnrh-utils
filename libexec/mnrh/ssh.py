@@ -12,7 +12,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import BAD, HOME, OK, WARN, confirm, has_flag, paint, projects, run, tilde
+from mnrhlib import BAD, HOME, OK, WARN, confirm, git_versions, has_flag, paint, projects, run, tilde, version_key
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or (args and args[0] != "github"):
@@ -225,7 +225,21 @@ def upload(login, pub, title):
     return done
 
 
+def old_gits():
+    return [(p, v) for p, v in git_versions() if version_key(v) < [2, 34]]
+
+
 def setup_signing(login, pub):
+    old = old_gits()
+    if old:
+        # git до 2.34 не знает gpg.format ssh и из-за него перестаёт читать ~/.gitconfig целиком.
+        print(f"{WARN} Подпись не включаю: git старше 2.34 не понимает SSH-подпись и сломается целиком.")
+        for path, v in old:
+            print(f"  {path}: git {v}")
+        if os.path.exists("/usr/local/git/uninstall.sh"):
+            print(paint("  Это старый установщик git-osx-installer. Убрать: sudo /usr/local/git/uninstall.sh,", "2"))
+            print(paint("  после этого работает системный git, и mnrh ssh github включит подпись.", "2"))
+        return
     email = run(["git", "config", "--global", "user.email"]).strip()
     for k, v in (("gpg.format", "ssh"), ("user.signingkey", pub), ("commit.gpgsign", "true"),
                  ("tag.gpgsign", "true"), ("gpg.ssh.allowedSignersFile", ALLOWED)):

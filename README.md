@@ -352,7 +352,10 @@ caffeinate, живые блокировки не трогает.
    `admin:public_key,admin:ssh_signing_key`; если их нет, мастер сам запускает
    `gh auth refresh` — он показывает код и открывает GitHub для подтверждения.
 5. Включает подпись коммитов и тегов этим ключом (`gpg.format ssh`, `allowed_signers` для
-   `git log --show-signature`). `--no-sign` — без подписи.
+   `git log --show-signature`). `--no-sign` — без подписи. Если в системе есть git старше
+   2.34 (например, старый git-osx-installer в `/usr/local/bin`), подпись не включается:
+   такой git не знает `gpg.format ssh` и перестаёт читать `~/.gitconfig` целиком.
+   `mnrh doctor` тоже предупреждает, если старый git заслоняет системный.
 6. Проверяет `ssh -T` — GitHub должен поздороваться нужным логином, — ставит `gh` на SSH и
    предлагает перевести `origin` репозиториев этого аккаунта в папке проектов с HTTPS на SSH.
 

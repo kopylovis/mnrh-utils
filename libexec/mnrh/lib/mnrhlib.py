@@ -205,3 +205,28 @@ def find_apps(query):
             if q in name:
                 candidates.append(app)
     return candidates
+
+
+def login_path():
+    """PATH, как в новой вкладке Терминала: login и interactive zsh."""
+    env = {"HOME": HOME, "TERM": "xterm", "SHELL": "/bin/zsh"}
+    out = run(["/bin/zsh", "-l", "-i", "-c", "echo $PATH"], timeout=20, env=env).strip().splitlines()
+    return out[-1].split(":") if out else []
+
+
+def git_versions():
+    """[(путь, версия)] всех git, которыми пользуются терминал, IDE и Sourcetree; первый — тот, что в PATH."""
+    found, seen = [], set()
+    candidates = [os.path.join(d, "git") for d in login_path()]
+    candidates += ["/usr/bin/git", "/Applications/Sourcetree.app/Contents/Resources/git_local/bin/git"]
+    for path in candidates:
+        if not os.access(path, os.X_OK) or os.path.isdir(path):
+            continue
+        real = os.path.realpath(path)
+        if real in seen:
+            continue
+        seen.add(real)
+        m = re.search(r"git version (\d+(?:\.\d+)+)", run([path, "--version"]))
+        if m:
+            found.append((path, m.group(1)))
+    return found

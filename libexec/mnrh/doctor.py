@@ -8,7 +8,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import BAD, HOME, OK, WARN, human, has_flag, paint, run, tilde
+from mnrhlib import BAD, HOME, OK, WARN, git_versions, human, has_flag, paint, run, tilde, version_key
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help"):
@@ -117,6 +117,13 @@ def check_shell():
         item("warn", f"в PATH дубликаты: {', '.join(tilde(p) for p in dups)}")
     if not dead and not dups:
         item("ok", f"PATH чистый, {len(entries)} элементов")
+    gits = git_versions()
+    if gits:
+        first_path, first = gits[0]
+        system = next((v for p, v in gits if p == "/usr/bin/git"), None)
+        if system and first_path != "/usr/bin/git" and version_key(first) < version_key(system):
+            hint = "sudo /usr/local/git/uninstall.sh" if os.path.exists("/usr/local/git/uninstall.sh") else "убери его из PATH"
+            item("warn", f"в PATH первым старый git {first} ({tilde(first_path)}), системный — {system}", hint)
 
 
 def check_links():
