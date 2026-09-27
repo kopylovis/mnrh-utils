@@ -340,6 +340,8 @@ def sourcetree_step(login, app):
         if not acc:
             print(f"В Sourcetree нет аккаунта {login}: Settings → Accounts → Add → GitHub, войди как {login}.")
         print(f"В Sourcetree: Settings → Accounts → {login} → Edit → Protocol: SSH → Save")
+        print(paint("  Connect Account не нажимай: после входа Sourcetree считает правку новым аккаунтом и пишет\n"
+                    "  «You already have a similar account». Если так случилось — Cancel и заново только Protocol.", "2"))
         if sys.stdin.isatty():
             run(["open", "-a", app])
             input("Нажми Enter, когда сохранишь... ")
