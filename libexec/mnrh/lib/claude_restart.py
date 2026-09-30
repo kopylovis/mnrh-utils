@@ -657,7 +657,9 @@ def write_zshrc(lines):
         f.writelines(lines)
 
 
-HOOKS = {"SessionStart": "claude notice", "SessionEnd": "claude session-end"}
+HOOKS = [("SessionStart", "claude notice", False), ("SessionEnd", "claude session-end", False),
+         ("UserPromptSubmit", "claude notify-hook", True), ("Stop", "claude notify-hook", True),
+         ("Notification", "claude notify-hook", True)]
 
 
 def notice_hook(install):
@@ -670,11 +672,14 @@ def notice_hook(install):
         print(f"✗ {tilde(SETTINGS)} не читается как JSON ({e}), хуки Claude Code не трогаю")
         return
     hooks = settings.setdefault("hooks", {})
-    for event, cmd in HOOKS.items():
+    for event, cmd, run_async in HOOKS:
         entries = [e for e in hooks.get(event, [])
                    if not any(cmd in h.get("command", "") for h in e.get("hooks", []))]
         if install:
-            entries.append({"hooks": [{"type": "command", "command": f"{shlex.quote(MNRH)} {cmd}", "timeout": 10}]})
+            hook = {"type": "command", "command": f"{shlex.quote(MNRH)} {cmd}", "timeout": 10}
+            if run_async:
+                hook["async"] = True
+            entries.append({"hooks": [hook]})
         if entries:
             hooks[event] = entries
         else:
@@ -698,6 +703,8 @@ def notice_hook(install):
     if install:
         print(f"✓ сообщения после /restart и /forget, удаление пустых сессий → хуки SessionStart и SessionEnd "
               f"в {tilde(SETTINGS)}")
+        print("✓ уведомления, когда Claude ждёт тебя → хуки UserPromptSubmit, Stop и Notification "
+              "(mnrh claude notify -h)")
         print(f"✓ без вопроса о разрешении: {', '.join(READ_ONLY)} (они только читают)")
 
 
@@ -746,6 +753,11 @@ def setup(args):
             print(f"✗ не подключил MCP: {r.stderr.strip() or r.stdout.strip()}")
             return 1
         print(f"✓ MCP-сервер mnrh: {tilde(MNRH)} claude mcp (инструменты: {', '.join(t['name'] for t in tools())})")
+    import claude_notify
+    if claude_notify.ensure_app():
+        print(f"✓ приложение уведомлений → {tilde(claude_notify.AGENT.app)}; проверить: mnrh claude notify test")
+    else:
+        print("✗ не собрал приложение уведомлений: нужен swiftc (xcode-select --install)")
     print("Подхватится в новых вкладках и сессиях Claude Code; в уже открытых — после перезапуска.")
     return 0
 

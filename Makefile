@@ -55,6 +55,11 @@ test:
 	@swiftc -typecheck -swift-version 5 share/mnrh/scroll/main.swift
 	@swiftc -typecheck -swift-version 5 share/mnrh/input/main.swift
 	@swiftc -typecheck -swift-version 5 share/mnrh/audio/main.swift
+	@swiftc -typecheck -swift-version 5 share/mnrh/notify/main.swift
+	@./bin/mnrh claude notify -h >/dev/null
+	@./bin/mnrh claude notify >/dev/null
+	@echo junk | ./bin/mnrh claude notify-hook | wc -c | grep -q '^ *0$$'
+	@echo '{"session_id":"00000000-0000-0000-0000-000000000000","hook_event_name":"UserPromptSubmit","user_input":"x"}' | ./bin/mnrh claude notify-hook | wc -c | grep -q '^ *0$$'
 	@./bin/mnrh audio -h >/dev/null
 	@./bin/mnrh audio >/dev/null
 	@./bin/mnrh input -h >/dev/null

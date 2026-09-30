@@ -27,6 +27,7 @@ mnrh claude sessions        сохранённые сессии: размер, �
                             (подробнее: mnrh claude sessions -h)
 mnrh claude restart         изнутри Claude: закрыть и открыть эту же сессию заново, с claude update
 mnrh claude forget          изнутри Claude: удалить эту сессию без следа и открыть чистую в той же папке
+mnrh claude notify          уведомления, когда Claude ждёт тебя (on, off, after <сек>, test)
 mnrh claude setup           поставить /restart, MCP-сервер mnrh и хук zsh для перезапуска (--remove убрать)
 
 caffeinate (по умолчанию) не даёт Mac уснуть, пока идёт сессия:
@@ -36,6 +37,7 @@ EOF
 
 case "${1:-}" in
   sessions) shift; exec /usr/bin/python3 "$(dirname "$MENU")/claude_sessions.py" "$@" ;;
+  notify|notify-hook|focus) exec /usr/bin/python3 "$(dirname "$MENU")/claude_notify.py" "$@" ;;
   restart|forget|mcp|setup|notice|session-end) exec /usr/bin/python3 "$(dirname "$MENU")/claude_restart.py" "$@" ;;
 esac
 
