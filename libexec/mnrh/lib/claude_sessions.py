@@ -27,6 +27,10 @@ def usage():
     print("mnrh claude sessions clean [-y]       битые ссылки, сессии без единого ответа, папки удалённых проектов")
     print("mnrh claude sessions search <слова>   поиск по всем сессиям; -p <проект>, -d <дней>")
     print("mnrh claude sessions show <id> [N]    прочитать сессию с сообщения N (из search), -N — с конца")
+    print("mnrh claude sessions slim             что даст сжатие старых частей сессий (скриншоты, длинные выводы)")
+    print("mnrh claude sessions slim <id> [-y]   сжать; --copy — сжатую копию с новым id для проверки;")
+    print("                                      --undo — вернуть оригинал; --keep N — не трогать N последних")
+    print("                                      отрезков между /compact (по умолчанию 2)")
     print()
     print("<id> — начало id из списка, 4–8 символов обычно хватает.")
     print("Перенос переписывает cwd внутри сессии, так что `claude --resume` найдёт её уже в новой папке.")
@@ -619,6 +623,80 @@ def choose_session(cwd):
     return 0
 
 
+def slim_report(st):
+    return (f"{fmt_size(st['before'])} → {fmt_size(st['after'])}: скриншотов {st['images']}, "
+            f"обрезано длинных выводов {st['texts']}, изменено строк {st['changed']}")
+
+
+def slim_cmd(args, yes):
+    import claude_slim
+    keep = 2
+    if "--keep" in args:
+        try:
+            keep = max(1, int(args[args.index("--keep") + 1]))
+        except (IndexError, ValueError):
+            sys.exit("mnrh claude sessions: после --keep нужно число")
+    ids = [a for a in args if not a.startswith("-") and not (args.index(a) > 0 and args[args.index(a) - 1] == "--keep")]
+    ss = load()
+    if not ids:
+        found = []
+        for s in ss:
+            if s["running"] or s["link"] or s["size"] < 20 << 20:
+                continue
+            _, prot, st = claude_slim.plan(s["path"], keep)
+            if st and st["before"] - st["after"] >= 5 << 20:
+                found.append((s, st))
+        if not found:
+            print("Сжимать нечего: нет закрытых сессий, где старая часть занимает заметное место.")
+            return 0
+        total = sum(st["before"] - st["after"] for _, st in found)
+        print(f"Можно освободить {fmt_size(total)}:")
+        for s, st in found:
+            print(f"  {s['id'][:8]}  {clip(folder(s['cwd']), 20):<20}  {fmt_size(st['before']):>7} → "
+                  f"{fmt_size(st['after']):>7}  {clip(s['title'] or '—', 50)}")
+        print(paint(f"Сжать: mnrh claude sessions slim <id>. Проверить сначала на копии: slim <id> --copy", "2"))
+        return 0
+    s = find(ss, ids[0])
+    if s["link"]:
+        sys.exit("mnrh claude sessions: это ссылка на другую сессию, сжимай оригинал")
+    if s["running"]:
+        sys.exit("mnrh claude sessions: сессия сейчас открыта, сначала закрой её")
+    try:
+        if "--undo" in args:
+            added = claude_slim.undo(s["path"], s["id"])
+            claude_search.drop(s["id"])
+            print(f"Оригинал возвращён" + (f", новые сообщения после сжатия сохранены ({fmt_size(added)})" if added else ""))
+            return 0
+        if "--copy" in args:
+            st = claude_slim.copy(s["path"], s["id"], s["title"] or s["id"][:8], keep)
+            print(f"Сжатая копия: {slim_report(st)}. Проверка: всё, что уходит модели, совпадает побайтно.")
+            print(f"Открой её и спроси про последнюю работу: cd {shlex_quote(s['cwd'])} && claude --resume {st['new_sid']}")
+            print(paint(f"Удалить копию потом: mnrh claude sessions rm {st['new_sid'][:8]}", "2"))
+            return 0
+        _, prot, st = claude_slim.plan(s["path"], keep)
+        if not st:
+            print(f"В сессии меньше {keep} сжатий /compact, сжимать нечего.")
+            return 0
+        print(f"«{s['title'] or s['id']}»: {slim_report(st)}")
+        print(f"Не трогаю {st['guarded']} строк: всё после {keep}-го с конца /compact (из {st['bounds']}) и "
+              "сообщения, которые /compact сохранил. Сообщения Claude и историю файлов не трогаю.")
+        if not confirm("Сжать? Оригинал сохранится на 14 дней, вернуть: --undo", yes):
+            print("Отменено.")
+            return 0
+        st = claude_slim.apply(s["path"], s["id"], keep)
+        claude_search.drop(s["id"])
+        print(f"Готово: {slim_report(st)}. Проверка пройдена: всё, что уходит модели, совпадает побайтно.")
+        print(paint(f"Оригинал: {tilde(st['backup'])}", "2"))
+    except claude_slim.SlimError as e:
+        sys.exit(f"mnrh claude sessions slim: {e}. Ничего не изменено.")
+    return 0
+
+
+def shlex_quote(s):
+    import shlex
+    return shlex.quote(s)
+
+
 def main():
     args = sys.argv[1:]
     if has_flag(args, "-h", "--help"):
@@ -655,6 +733,8 @@ def main():
             print("Удалено.")
     elif cmd == "clean":
         clean(yes)
+    elif cmd == "slim":
+        return slim_cmd(args[1:], yes)
     elif cmd == "search" and len(args) >= 2:
         rest, opts = [], {}
         i = 1
