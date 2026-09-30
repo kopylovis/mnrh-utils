@@ -10,6 +10,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mnrhlib import DEV, HOME, confirm, has_flag, paint, projects, tilde
 from menu import pick
+import claude_search
 
 CLAUDE = os.environ.get("MNRH_CLAUDE_HOME", os.path.join(HOME, ".claude"))
 PROJECTS = os.path.join(CLAUDE, "projects")
@@ -24,6 +25,8 @@ def usage():
     print("mnrh claude sessions mv <id> <папка>  перенести в другую папку: путь, имя проекта из папки проектов или root")
     print("mnrh claude sessions rm <id>... [-y]  удалить вместе с историей запросов этой сессии")
     print("mnrh claude sessions clean [-y]       битые ссылки, сессии без единого ответа, папки удалённых проектов")
+    print("mnrh claude sessions search <слова>   поиск по всем сессиям; -p <проект>, -d <дней>")
+    print("mnrh claude sessions show <id> [N]    прочитать сессию с сообщения N (из search), -N — с конца")
     print()
     print("<id> — начало id из списка, 4–8 символов обычно хватает.")
     print("Перенос переписывает cwd внутри сессии, так что `claude --resume` найдёт её уже в новой папке.")
@@ -375,6 +378,7 @@ def delete(s):
             if os.path.isdir(p) and not os.path.islink(p):
                 shutil.rmtree(p)
         forget_history(s["id"])
+    claude_search.drop(s["id"])
     remove_if_empty(s["pdir"])
 
 
@@ -604,6 +608,34 @@ def main():
             print("Удалено.")
     elif cmd == "clean":
         clean(yes)
+    elif cmd == "search" and len(args) >= 2:
+        rest, opts = [], {}
+        i = 1
+        while i < len(args):
+            if args[i] in ("-p", "-d") and i + 1 < len(args):
+                opts[args[i]] = args[i + 1]
+                i += 2
+                continue
+            rest.append(args[i])
+            i += 1
+        days = opts.get("-d")
+        if days is not None and not days.isdigit():
+            sys.exit("mnrh claude sessions: после -d нужно число дней")
+        text, err = claude_search.search(" ".join(rest), project=opts.get("-p"), days=int(days) if days else None,
+                                         exclude=[os.environ["CLAUDE_CODE_SESSION_ID"]]
+                                         if os.environ.get("CLAUDE_CODE_SESSION_ID") else None)
+        print(text.replace("session_read с id и at=<номер после #>", "mnrh claude sessions show <id> <номер после #>"))
+        return 1 if err else 0
+    elif cmd == "show" and len(args) in (2, 3):
+        at = None
+        if len(args) == 3:
+            try:
+                at = int(args[2].lstrip("#"))
+            except ValueError:
+                sys.exit("mnrh claude sessions: номер сообщения — число, например 120 или -10")
+        text, err = claude_search.read(args[1], at=at)
+        print(text)
+        return 1 if err else 0
     else:
         usage()
         return 2

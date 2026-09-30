@@ -13,7 +13,9 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mnrhlib import HOME, tilde
+import claude_mac
 import claude_open
+import claude_search
 
 CLAUDE = os.environ.get("MNRH_CLAUDE_HOME", os.path.join(HOME, ".claude"))
 CLAUDE_BIN = os.environ.get("MNRH_CLAUDE_BIN", "claude")
@@ -372,6 +374,11 @@ def drop_junk(path, why):
     return False
 
 
+def warm_up(pdir, keep):
+    sweep(pdir, keep)
+    claude_search.refresh()
+
+
 def sweep(pdir, keep):
     for name in os.listdir(pdir):
         path = os.path.join(pdir, name)
@@ -419,7 +426,7 @@ def notice():
         return 0
     path = payload.get("transcript_path")
     if path and os.path.isdir(os.path.dirname(path)):
-        background(sweep, os.path.dirname(path), sid)
+        background(warm_up, os.path.dirname(path), sid)
     path = os.path.join(NOTICES, sid + ".json")
     n = None
     for _ in range(30):
@@ -523,6 +530,53 @@ FORGET_TOOL = {
 }
 
 
+def mnrh_version():
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
+    try:
+        with open(os.path.join(root, "VERSION")) as f:
+            return f.read().strip() or "0"
+    except OSError:
+        return "0"
+
+
+def current_sid():
+    try:
+        with open(session_file(find_claude())) as f:
+            return json.load(f).get("sessionId")
+    except (RestartError, OSError, ValueError):
+        return None
+
+
+def call_restart(tool, a):
+    update = a.get("update", True)
+    try:
+        if tool == "forget":
+            p = restart(update=False, delay=2.5, forget=True)
+            return (f"Готово: через пару секунд Claude Code закроется, сессия {p['sid']} будет удалена, "
+                    f"и в {tilde(p['cwd'])} откроется новая."), False
+        p = restart(update=bool(update), delay=2.5)
+        return (f"Перезапуск запущен: через пару секунд Claude Code закроется"
+                f"{', обновится' if update else ''} и снова откроет сессию {p['sid']} в {tilde(p['cwd'])}."), False
+    except RestartError as e:
+        return f"Не получилось: {e}", True
+
+
+HANDLERS = {
+    "restart": lambda a: call_restart("restart", a),
+    "forget": lambda a: call_restart("forget", a),
+    "open_claude": lambda a: claude_open.open_claude(a, MNRH),
+    "session_search": lambda a: claude_search.handle("session_search", a, current_sid()),
+    "session_read": lambda a: claude_search.handle("session_read", a),
+    "mac_status": lambda a: claude_mac.handle("mac_status", a, MNRH),
+    "free_memory": lambda a: claude_mac.handle("free_memory", a, MNRH),
+}
+READ_ONLY = [t["name"] for t in claude_search.TOOLS + claude_mac.TOOLS if t["annotations"].get("readOnlyHint")]
+
+
+def tools():
+    return [TOOL, FORGET_TOOL, claude_open.TOOL] + claude_search.TOOLS + claude_mac.TOOLS
+
+
 def mcp():
     def send(msg):
         sys.stdout.write(json.dumps(msg, ensure_ascii=False) + "\n")
@@ -541,36 +595,20 @@ def mcp():
             send({"jsonrpc": "2.0", "id": rid, "result": {
                 "protocolVersion": ver,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "mnrh", "version": "1.0.0"}}})
+                "serverInfo": {"name": "mnrh", "version": mnrh_version()}}})
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": rid, "result": {"tools": [TOOL, FORGET_TOOL, claude_open.TOOL]}})
+            send({"jsonrpc": "2.0", "id": rid, "result": {"tools": tools()}})
         elif method == "tools/call":
             params = req.get("params") or {}
-            tool = params.get("name")
-            if tool == "open_claude":
-                try:
-                    text, err = claude_open.open_claude(params.get("arguments") or {}, MNRH)
-                except Exception as e:  # сервер должен жить дальше, что бы ни случилось с osascript
-                    text, err = f"Не получилось: {e}", True
-                send({"jsonrpc": "2.0", "id": rid,
-                      "result": {"content": [{"type": "text", "text": text}], "isError": err}})
-                continue
-            if tool not in ("restart", "forget"):
+            handler = HANDLERS.get(params.get("name"))
+            if not handler:
                 send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": "нет такого инструмента"}})
                 continue
-            update = (params.get("arguments") or {}).get("update", True)
+            args = params.get("arguments")
             try:
-                if tool == "forget":
-                    p = restart(update=False, delay=2.5, forget=True)
-                    text = (f"Готово: через пару секунд Claude Code закроется, сессия {p['sid']} будет удалена, "
-                            f"и в {tilde(p['cwd'])} откроется новая.")
-                else:
-                    p = restart(update=bool(update), delay=2.5)
-                    text = (f"Перезапуск запущен: через пару секунд Claude Code закроется"
-                            f"{', обновится' if update else ''} и снова откроет сессию {p['sid']} в {tilde(p['cwd'])}.")
-                err = False
-            except RestartError as e:
-                text, err = f"Не получилось: {e}", True
+                text, err = handler(args if isinstance(args, dict) else {})
+            except Exception as e:
+                text, err = f"Не получилось: {e!r}", True
             send({"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": text}], "isError": err}})
         elif method == "ping":
             send({"jsonrpc": "2.0", "id": rid, "result": {}})
@@ -643,6 +681,15 @@ def notice_hook(install):
             hooks.pop(event, None)
     if not hooks:
         settings.pop("hooks")
+    allow_rules = [f"mcp__mnrh__{name}" for name in READ_ONLY]
+    perms = settings.setdefault("permissions", {})
+    allow = [r for r in perms.get("allow", []) if r not in allow_rules] + (allow_rules if install else [])
+    if allow:
+        perms["allow"] = allow
+    else:
+        perms.pop("allow", None)
+    if not perms:
+        settings.pop("permissions")
     tmp = SETTINGS + ".mnrh-tmp"
     with open(tmp, "w") as f:
         json.dump(settings, f, ensure_ascii=False, indent=2)
@@ -651,6 +698,7 @@ def notice_hook(install):
     if install:
         print(f"✓ сообщения после /restart и /forget, удаление пустых сессий → хуки SessionStart и SessionEnd "
               f"в {tilde(SETTINGS)}")
+        print(f"✓ без вопроса о разрешении: {', '.join(READ_ONLY)} (они только читают)")
 
 
 def setup(args):
@@ -697,7 +745,7 @@ def setup(args):
         if r.returncode != 0:
             print(f"✗ не подключил MCP: {r.stderr.strip() or r.stdout.strip()}")
             return 1
-        print(f"✓ MCP-сервер mnrh: {tilde(MNRH)} claude mcp (инструменты restart и forget)")
+        print(f"✓ MCP-сервер mnrh: {tilde(MNRH)} claude mcp (инструменты: {', '.join(t['name'] for t in tools())})")
     print("Подхватится в новых вкладках и сессиях Claude Code; в уже открытых — после перезапуска.")
     return 0
 

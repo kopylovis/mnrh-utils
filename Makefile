@@ -75,6 +75,11 @@ test:
 	@./bin/mnrh init </dev/null >/dev/null 2>&1; test $$? -eq 2
 	@./bin/mnrh claude sessions -h >/dev/null
 	@./bin/mnrh claude sessions -l >/dev/null
+	@./bin/mnrh claude sessions search mnrh-no-such-word-zq >/dev/null
+	@! ./bin/mnrh claude sessions show no-such-session >/dev/null
+	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep '"session_search"' | grep '"session_read"' | grep '"mac_status"' | grep -q '"free_memory"'
+	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | ./bin/mnrh claude mcp | grep -q "\"version\": \"$$(cat VERSION)\""
+	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mac_status","arguments":{"parts":["ports"]}}}' | ./bin/mnrh claude mcp | grep -q '"isError": false'
 	@./bin/mnrh claude restart -h >/dev/null
 	@./bin/mnrh claude forget -h >/dev/null
 	@echo junk | ./bin/mnrh claude notice | wc -c | grep -q '^ *0$$'
