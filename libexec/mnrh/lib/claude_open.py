@@ -156,7 +156,7 @@ def open_claude(args, mnrh):
         return f"Режим бывает caffeinate или normal, а не «{mode}».", True
 
     name = "~" if target == HOME else os.path.basename(target)
-    cmd = [mnrh, "claude", name, MODES[mode]]
+    cmd = [mnrh, "claude", name, MODES[mode], "--new"]
     rc = args.get("remote_control", True) is not False
     # имя у --remote-control необязательное: без него первый запрос принялся бы за имя
     extra = (["--remote-control", "home" if name == "~" else name] if rc else []) + \

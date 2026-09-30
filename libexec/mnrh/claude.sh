@@ -21,6 +21,7 @@ mnrh claude root            запустить в домашнем катало�
 mnrh claude <имя>           сразу в проекте (достаточно начала имени)
 mnrh claude ... -n          обычная сессия без вопроса
 mnrh claude ... -k          caffeinate без вопроса
+mnrh claude ... --new       новая сессия, не предлагать продолжить сохранённые
 mnrh claude ... -- <аргументы claude>   например: mnrh claude kcalm -- --continue
 mnrh claude sessions        сохранённые сессии: размер, продолжить, перенести в другую папку, удалить
                             (подробнее: mnrh claude sessions -h)
@@ -38,12 +39,13 @@ case "${1:-}" in
   restart|forget|mcp|setup|notice|session-end) exec /usr/bin/python3 "$(dirname "$MENU")/claude_restart.py" "$@" ;;
 esac
 
-target="" mode="" passthrough=()
+target="" mode="" new=0 passthrough=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) help; exit 0 ;;
     -n|--normal) mode=normal ;;
     -k|--caffeinate) mode=caffeinate ;;
+    --new) new=1 ;;
     --) shift; passthrough=("$@"); break ;;
     -*) echo "mnrh claude: неизвестный флаг $1" >&2; exit 2 ;;
     *) [ -z "$target" ] && target="$1" || { echo "mnrh claude: лишний аргумент $1" >&2; exit 2; } ;;
@@ -106,6 +108,17 @@ elif [ "$target" = "root" ] || [ "$target" = "~" ]; then
   dir="$HOME"
 else
   dir=$(match "$target") || exit 1
+fi
+
+for a in ${passthrough[@]+"${passthrough[@]}"}; do
+  case "$a" in
+    -c|--continue|-r|--resume|--resume=*|--session-id|--session-id=*|-p|--print|--teleport|--teleport=*|--from-pr|--from-pr=*) new=1 ;;
+  esac
+done
+
+if [ "$new" -eq 0 ]; then
+  sid=$(/usr/bin/python3 "$LIB/claude_sessions.py" choose "$dir") || exit 1
+  [ -n "$sid" ] && [ "$sid" != new ] && passthrough=(--resume "$sid" ${passthrough[@]+"${passthrough[@]}"})
 fi
 
 if [ -z "$mode" ]; then

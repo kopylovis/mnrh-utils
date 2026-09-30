@@ -574,11 +574,58 @@ def interactive():
                 print("Удалено.")
 
 
+def project_sessions(cwd):
+    pdir = os.path.join(PROJECTS, encode(os.path.abspath(cwd)))
+    running = running_ids()
+    out, busy = [], 0
+    try:
+        names = os.listdir(pdir)
+    except OSError:
+        return out, busy
+    for f in names:
+        sid = f[:-6]
+        path = os.path.join(pdir, f)
+        if not f.endswith(".jsonl") or not UUID.match(sid) or os.path.islink(path) or not os.path.isfile(path):
+            continue
+        if sid in running:
+            busy += 1
+            continue
+        if is_junk(path):
+            continue
+        data = claude_search.update(sid, path)
+        if not data:
+            continue
+        out.append({"id": sid, "title": claude_search.title(sid, data), "mtime": os.stat(path).st_mtime,
+                    "size": os.lstat(path).st_size + tree_size(os.path.join(pdir, sid)),
+                    "msgs": sum(1 for m in data["msgs"] if m[0] in ("user", "claude"))})
+    out.sort(key=lambda x: x["mtime"], reverse=True)
+    return out, busy
+
+
+def choose_session(cwd):
+    ss, busy = project_sessions(cwd)
+    if not ss:
+        print("new")
+        return 0
+    items = [("новая", "+ новая сессия")]
+    for x in ss:
+        items.append((x["title"], f"{ago(x['mtime']):>13}  {fmt_size(x['size']):>7}  {x['msgs']:>5} сообщ.  "
+                                  f"{clip(x['title'], 60)}"))
+    note = f" (ещё {busy} открыты в других окнах)" if busy else ""
+    i = pick(items, title=f"Сессии в {folder(os.path.abspath(cwd))}{note}:", label="Сессия", start=0)
+    if i is None:
+        return 130
+    print("new" if i == 0 else ss[i - 1]["id"])
+    return 0
+
+
 def main():
     args = sys.argv[1:]
     if has_flag(args, "-h", "--help"):
         usage()
         return 0
+    if args[:1] == ["choose"] and len(args) == 2:
+        return choose_session(args[1])
     if not os.path.isdir(PROJECTS):
         print(f"Нет {tilde(PROJECTS)}, сессий нет.")
         return 0
