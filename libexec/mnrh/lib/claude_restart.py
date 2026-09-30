@@ -16,6 +16,7 @@ from mnrhlib import HOME, tilde
 import claude_mac
 import claude_open
 import claude_search
+import gradle_deps
 
 CLAUDE = os.environ.get("MNRH_CLAUDE_HOME", os.path.join(HOME, ".claude"))
 CLAUDE_BIN = os.environ.get("MNRH_CLAUDE_BIN", "claude")
@@ -569,12 +570,14 @@ HANDLERS = {
     "session_read": lambda a: claude_search.handle("session_read", a),
     "mac_status": lambda a: claude_mac.handle("mac_status", a, MNRH),
     "free_memory": lambda a: claude_mac.handle("free_memory", a, MNRH),
+    "deps_outdated": lambda a: gradle_deps.handle(a),
 }
-READ_ONLY = [t["name"] for t in claude_search.TOOLS + claude_mac.TOOLS if t["annotations"].get("readOnlyHint")]
+EXTRA_TOOLS = claude_search.TOOLS + claude_mac.TOOLS + [gradle_deps.TOOL]
+READ_ONLY = [t["name"] for t in EXTRA_TOOLS if t["annotations"].get("readOnlyHint")]
 
 
 def tools():
-    return [TOOL, FORGET_TOOL, claude_open.TOOL] + claude_search.TOOLS + claude_mac.TOOLS
+    return [TOOL, FORGET_TOOL, claude_open.TOOL] + EXTRA_TOOLS
 
 
 def mcp():
@@ -657,9 +660,11 @@ def write_zshrc(lines):
         f.writelines(lines)
 
 
-HOOKS = [("SessionStart", "claude notice", False), ("SessionEnd", "claude session-end", False),
-         ("UserPromptSubmit", "claude notify-hook", True), ("Stop", "claude notify-hook", True),
-         ("Notification", "claude notify-hook", True)]
+HOOKS = [("SessionStart", "claude notice", False, None), ("SessionEnd", "claude session-end", False, None),
+         ("UserPromptSubmit", "claude notify-hook", True, None), ("Stop", "claude notify-hook", True, None),
+         ("Notification", "claude notify-hook", True, None),
+         ("PreToolUse", "claude guard-hook", False, "Bash|Read|Edit|Write|MultiEdit|NotebookEdit")]
+STATUS_CMD = "claude statusline"
 
 
 def notice_hook(install):
@@ -672,20 +677,29 @@ def notice_hook(install):
         print(f"✗ {tilde(SETTINGS)} не читается как JSON ({e}), хуки Claude Code не трогаю")
         return
     hooks = settings.setdefault("hooks", {})
-    for event, cmd, run_async in HOOKS:
+    for event, cmd, run_async, matcher in HOOKS:
         entries = [e for e in hooks.get(event, [])
                    if not any(cmd in h.get("command", "") for h in e.get("hooks", []))]
         if install:
             hook = {"type": "command", "command": f"{shlex.quote(MNRH)} {cmd}", "timeout": 10}
             if run_async:
                 hook["async"] = True
-            entries.append({"hooks": [hook]})
+            entries.append(dict({"matcher": matcher} if matcher else {}, hooks=[hook]))
         if entries:
             hooks[event] = entries
         else:
             hooks.pop(event, None)
     if not hooks:
         settings.pop("hooks")
+    line = settings.get("statusLine")
+    ours = isinstance(line, dict) and STATUS_CMD in str(line.get("command", ""))
+    if install and (not line or ours):
+        settings["statusLine"] = {"type": "command", "command": f"{shlex.quote(MNRH)} {STATUS_CMD}",
+                                  "padding": 0, "refreshInterval": 10}
+    elif not install and ours:
+        settings.pop("statusLine")
+    status_note = ("✓ строка состояния → statusLine" if install and (not line or ours) else
+                   "! строка состояния: у тебя уже своя statusLine, не трогаю" if install else "")
     allow_rules = [f"mcp__mnrh__{name}" for name in READ_ONLY]
     perms = settings.setdefault("permissions", {})
     allow = [r for r in perms.get("allow", []) if r not in allow_rules] + (allow_rules if install else [])
@@ -703,6 +717,8 @@ def notice_hook(install):
     if install:
         print(f"✓ сообщения после /restart и /forget, удаление пустых сессий → хуки SessionStart и SessionEnd "
               f"в {tilde(SETTINGS)}")
+        print(status_note)
+        print("✓ защита от опасных команд и чтения секретов → хук PreToolUse (mnrh claude guard)")
         print("✓ уведомления, когда Claude ждёт тебя → хуки UserPromptSubmit, Stop и Notification "
               "(mnrh claude notify -h)")
         print(f"✓ без вопроса о разрешении: {', '.join(READ_ONLY)} (они только читают)")

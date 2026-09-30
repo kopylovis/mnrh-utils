@@ -21,6 +21,8 @@ mnrh claude setup     поставить /restart, /forget, MCP-сервер mnr
 mnrh claude restart   изнутри Claude: закрыть, claude update, открыть эту же сессию снова
 mnrh claude forget    изнутри Claude: удалить эту сессию без следа и открыть чистую
 mnrh claude notify    уведомления, когда Claude ждёт тебя: on, off, after <сек>, sound, test
+mnrh claude guard     защита от опасных команд и чтения секретов: on, off, skip <правило>, test, log
+mnrh deps             устаревшие зависимости Gradle в libs.versions.toml (этот проект или все)
 mnrh doctor           проверка системы, коротким списком с подсказками
 mnrh doctor --full    ещё обновления macOS и целостность Homebrew
 mnrh disk             что можно почистить на диске
@@ -192,6 +194,16 @@ Claude Code хранит сессии в `~/.claude/projects/<путь-папк�
 Индекс обновляется в фоне при старте каждой сессии (хук `SessionStart`). У удалённых сессий,
 в том числе через `/forget` и `sessions rm`, индекс удаляется сразу.
 
+## Устаревшие зависимости: `mnrh deps`
+
+Разбирает `gradle/libs.versions.toml` (версии, библиотеки, плагины), сверяет с Google Maven,
+Maven Central и Gradle Plugin Portal и показывает, что обновилось, насколько (мажорная,
+минорная, патч) и какие библиотеки на этой версии. Ещё — версию Gradle wrapper и что
+обновлять вместе: Kotlin и KSP, AGP и Gradle, Compose Multiplatform и Kotlin. Варианты
+вроде `-jre`/`-android` сравниваются только между собой, alpha/beta/rc — с `--pre`.
+Без аргументов — текущий проект, а если в нём нет каталога, все проекты. Ответы
+репозиториев кешируются на 6 часов. Для Claude то же самое — инструмент `deps_outdated`.
+
 ## Состояние Mac для Claude
 
 MCP-инструмент `mac_status` показывает Claude то же, что `mnrh ram`, `gradle`, `sim` и
@@ -200,7 +212,7 @@ MCP-инструмент `mac_status` показывает Claude то же, ч�
 занят, Claude может посмотреть сам. `free_memory` — это `mnrh ram clean`: останавливает
 простаивающие демоны сборки и симуляторы (по желанию эмулятор Android). Claude Code
 спрашивает разрешение перед каждым его вызовом, а читающие инструменты (`session_search`,
-`session_read`, `mac_status`) `mnrh claude setup` разрешает сразу в `permissions.allow`
+`session_read`, `mac_status`, `deps_outdated`) `mnrh claude setup` разрешает сразу в `permissions.allow`
 в `~/.claude/settings.json`.
 
 ## Как работает перезапуск Claude Code
@@ -257,6 +269,45 @@ MCP-сервер `mnrh` с инструментами `restart`, `forget`, `open
 закрыли крестиком и хук не успел, при следующем старте в этом же проекте хук `SessionStart`
 в фоне убирает такие пустые сессии старше минуты, которые не открыты в других окнах.
 Сессию с разговором это не трогает никогда, `!`-команды тоже считаются разговором.
+
+### Строка состояния
+
+`mnrh claude setup` ставит `statusLine` (если своей ещё нет). Две строки под вводом:
+
+```
+Opus 5.5 · контекст 64% · 5 ч 55% (до 00:49) · неделя 12%
+master ↑3 ±5 · память 9.9/16 ГБ · swap 1.5 · Gradle 2 (3.1 ГБ) · сессия 467 МБ
+```
+
+Лимиты подписки 5 ч и неделя показываются, когда Claude Code их отдаёт (Pro и Max), время
+сброса — с 50 %. Git: ветка, сколько коммитов не запушено (↑) и не забрано (↓), «не
+запушена» для ветки без upstream, ± — изменённые файлы. Mac: занятая память и swap,
+демоны Gradle и Kotlin с их памятью, запущенные симуляторы и эмулятор. Размер сессии —
+от 50 МБ. Жёлтым и красным отмечено то, на что пора посмотреть. Данные о Mac кешируются
+на 5 с, git на 3 с, строка обновляется ещё и раз в 10 с (`refreshInterval`). Своя строка
+состояния, если она уже была, не заменяется.
+
+### Защита: `mnrh claude guard`
+
+Хук `PreToolUse` на Bash, Read, Edit, Write останавливает:
+
+| Правило | Что |
+|---|---|
+| `force-push` | `git push --force` и `+ветка` в main, master, develop, release/* |
+| `discard` | `git reset --hard`, `git clean -f`, `git checkout -- .`, `git restore`, когда есть что терять; `git stash drop/clear`, `git branch -D` |
+| `rm` | `rm -r` за пределами проекта, `/tmp`, `/var/folders` и scratchpad сессии, сам проект, `~` и `/`; путь, который не раскрыть заранее |
+| `release` | лейны fastlane с release, beta, upload, deploy, store, testflight, …; `gradle publish`; `gh release create`; `firebase deploy/appdistribution`; скрипты `*distribute*`, `*deploy*`, `*release*`, `*publish*` |
+| `secrets` | чтение и правка `.env*` (кроме `.example` и т. п.), `*.p8`, `*.p12`, `*.jks`, `*.keystore`, приватных ключей SSH, `*service-account*.json`, `keystore.properties`, `.netrc`; `security find-*-password -w` |
+| `sql` | `DROP TABLE/DATABASE`, `TRUNCATE`, `DELETE` без `WHERE` |
+| `remote` | `ssh` с reboot, `systemctl stop/restart`, `docker compose down`, `rm -r` |
+| `pipe-shell` | `curl … \| sh` |
+
+В обычном режиме Claude Code просто спросит разрешение с объяснением. В режимах `auto` и
+`--dangerously-skip-permissions` ответ «спросить» Claude Code превращает в «запретить» или
+«разрешить», поэтому guard запрещает вызов и просит Claude спросить тебя: чтобы разрешить,
+ты сам пишешь в чате четырёхзначный код из его вопроса (код привязан к команде и сессии,
+модель не может написать его за тебя). `mnrh claude guard skip release` выключает правило,
+`guard test '<команда>'` показывает решение, `guard log` — последние срабатывания.
 
 ### Уведомления, когда Claude ждёт тебя
 
