@@ -108,12 +108,18 @@ class Menu:
             if self.items[i][0] is None:
                 lines.append(cut(f"  \x1b[{SUBTITLE}m{self.items[i][1]}\x1b[0m", cols - 1))
                 continue
-            box = "" if self.marks is None else ("◉ " if i in self.marks else "○ ")
-            text = f"{self.pick_able.index(i) + self.start:>3}) {box}{self.items[i][1]}"
+            num = f"{self.pick_able.index(i) + self.start:>3}) "
+            on = self.marks is not None and i in self.marks
+            box = "" if self.marks is None else ("◉ " if on else "○ ")
+            body = self.items[i][1]
             if i == self.sel:
-                lines.append(f"\x1b[1;36m❯ {ANSI.sub('', text)[: cols - 3]}\x1b[0m")
+                plain = ANSI.sub("", body)[: max(0, cols - 3 - len(num) - len(box))]
+                mark = f"\x1b[1;32m{box}\x1b[0;1;36m" if on else box
+                lines.append(f"\x1b[1;36m❯ {num}{mark}{plain}\x1b[0m")
+            elif on:
+                lines.append("  " + cut(f"{num}\x1b[32m{box}{body}", cols - 3))
             else:
-                lines.append("  " + cut(text, cols - 3))
+                lines.append("  " + cut(f"{num}{box}{body}", cols - 3))
         rest = len(view) - self.top - len(shown)
         if rest > 0:
             lines.append(f"\x1b[2m     ↓ ещё {rest}\x1b[0m")
