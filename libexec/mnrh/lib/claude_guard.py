@@ -14,13 +14,14 @@ from mnrhlib import HOME, read_config, tilde, write_config
 LOG = os.path.join(HOME, "Library", "Logs", "mnrh-guard.log")
 PROTECTED = re.compile(r"^(main|master|develop|dev|release([/-].*)?|prod(uction)?)$")
 SAFE_ROOTS = ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]
+INSIDE_ONLY = [os.path.join(HOME, ".cache")]
 TAIL = 4 << 20
 
 RULES = {
     "force-push": "git push --force в защищённую ветку (main, master, develop, release/*)",
     "discard": "git reset --hard, git clean, git checkout/restore файлов, git stash drop/clear, "
                "git branch -D — когда есть что потерять",
-    "rm": "rm -r за пределами проекта, временных папок и scratchpad, а также сам проект, ~ и /",
+    "rm": "rm -r за пределами проекта, временных папок, scratchpad и содержимого ~/.cache, а также сам проект, ~ и /",
     "release": "выкладка: лейны fastlane с release/beta/upload/deploy/…, gradle publish, "
                "gh release create, firebase deploy/appdistribution, скрипты distribute/deploy/release/publish",
     "secrets": "чтение и правка секретов: .env, *.p8, *.p12, *.jks, *.keystore, приватные ключи SSH, "
@@ -171,6 +172,8 @@ def check_rm(ws, cwd, env, project, scratch):
             return "rm", f"rm -r {t}: путь не раскрыть заранее, проверь, что там"
         if p in ("/", HOME, project) or p == os.path.dirname(project):
             return "rm", f"rm -r {tilde(p)} — это {'проект целиком' if p == project else 'корень или домашний каталог'}"
+        if any(p.startswith(r + "/") for r in INSIDE_ONLY):
+            continue
         if not any(p == r or p.startswith(r.rstrip("/") + "/") for r in roots):
             return "rm", f"rm -r {tilde(p)} — за пределами проекта и временных папок"
     return None

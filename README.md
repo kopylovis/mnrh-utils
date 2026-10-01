@@ -344,7 +344,7 @@ master ↑3 ±5 · память 9.9/16 ГБ · swap 1.5 · Gradle 2 (3.1 ГБ) �
 |---|---|
 | `force-push` | `git push --force` и `+ветка` в main, master, develop, release/* |
 | `discard` | `git reset --hard`, `git clean -f`, `git checkout -- .`, `git restore`, когда есть что терять; `git stash drop/clear`, `git branch -D` |
-| `rm` | `rm -r` за пределами проекта, `/tmp`, `/var/folders` и scratchpad сессии, сам проект, `~` и `/`; путь, который не раскрыть заранее |
+| `rm` | `rm -r` за пределами проекта, `/tmp`, `/var/folders`, scratchpad сессии и содержимого `~/.cache` (саму `~/.cache` — нельзя), сам проект, `~` и `/`; путь, который не раскрыть заранее |
 | `release` | лейны fastlane с release, beta, upload, deploy, store, testflight, …; `gradle publish`; `gh release create`; `firebase deploy/appdistribution`; скрипты `*distribute*`, `*deploy*`, `*release*`, `*publish*` |
 | `secrets` | чтение и правка `.env*` (кроме `.example` и т. п.), `*.p8`, `*.p12`, `*.jks`, `*.keystore`, приватных ключей SSH, `*service-account*.json`, `keystore.properties`, `.netrc`; `security find-*-password -w` |
 | `sql` | `DROP TABLE/DATABASE`, `TRUNCATE`, `DELETE` без `WHERE` |

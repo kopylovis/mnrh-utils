@@ -62,6 +62,8 @@ test:
 	@./bin/mnrh claude guard -h >/dev/null
 	@cd /tmp && $(CURDIR)/bin/mnrh claude guard test 'git push -f origin master' | grep -q force-push
 	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/Documents' | grep -q '(rm'
+	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/.cache/mnrh/statusline' | grep -q пропущу
+	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/.cache' | grep -q '(rm'
 	@$(CURDIR)/bin/mnrh claude guard test 'bundle exec fastlane beta' | grep -q release
 	@$(CURDIR)/bin/mnrh claude guard test 'cat fastlane/.env.default' | grep -q secrets
 	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf build && ./gradlew assembleRelease' | grep -q пропущу
