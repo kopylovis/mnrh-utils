@@ -304,6 +304,15 @@ def macports_broken():
     return "mismatch" in (r.stdout + r.stderr) or r.returncode != 0
 
 
+def brew_leftovers():
+    if not os.path.exists(BREW):
+        return []
+    installed = set(run([BREW, "list", "--formula", "-1"]).split())
+    etc = os.path.join(os.path.dirname(os.path.dirname(BREW)), "etc")
+    return [os.path.join(etc, old) for old, _ in OLD_BREW
+            if old not in installed and os.path.isdir(os.path.join(etc, old))]
+
+
 def old_brew():
     if not os.path.exists(BREW):
         return []
@@ -412,8 +421,10 @@ def trash(target):
     if os.path.lexists(dest):
         dest += time.strftime(" %H-%M-%S")
     cmd = ["mv", target, dest]
-    if os.access(os.path.dirname(target), os.W_OK):
-        return subprocess.run(cmd).returncode == 0
+    mine = os.access(os.path.dirname(target.rstrip("/")) or "/", os.W_OK) and \
+        (os.path.islink(target) or not os.path.isdir(target) or os.access(target, os.W_OK))
+    if mine and subprocess.run(cmd, stderr=subprocess.DEVNULL).returncode == 0:
+        return True
     return subprocess.run(["sudo"] + cmd).returncode == 0
 
 
@@ -443,7 +454,8 @@ def clean(path):
         if not gone:
             continue
         what = "файл станет пустым — в Корзину" if not text else f"убрать строк: {len(gone)}"
-        plan.append((f"{tilde(f)}: {what}" + "".join(f"\n        {g[:90]}" for g in gone), None))
+        plan.append((f"{tilde(f)}: {what}" + "".join(f"\n        {g if len(g) <= 100 else g[:99] + '…'}"
+                                                    for g in gone), None))
     if moved:
         zshenv = os.path.join(HOME, ".zshenv")
         empty = zshenv in edits and not edits[zshenv][0]
@@ -461,13 +473,17 @@ def clean(path):
                 plan.append((f"{f} — старый go, работает go из Homebrew", lambda f=f: trash(f)))
     if macports_broken():
         plan.append((f"MacPorts не работает на этой macOS: /opt/local ({human(du_bytes('/opt/local'))})", macports_remove))
+    elif os.path.isdir("/Applications/MacPorts") and not os.path.isdir("/opt/local"):
+        plan.append(("/Applications/MacPorts — остаток удалённого MacPorts", macports_remove))
     for v, name, home in spare_jdks(list_jdks()):
         plan.append((f"{tilde(home)} — {name if v in name else name + ' ' + v}, для Java {v.split('.')[0]} выбирается другая JDK",
                      lambda h=home: trash(h)))
     for old, why, used in old_brew():
         if not used:
-            plan.append((f"Homebrew: {old} — {why}, ни от чего не зависит",
-                         lambda o=old: subprocess.run([BREW, "uninstall", o]).returncode == 0))
+            plan.append((f"Homebrew: {old} — {why}, ни от чего не зависит (и его настройки в etc)",
+                         lambda o=old: brew_uninstall(o)))
+    for d in brew_leftovers():
+        plan.append((f"{d} — настройки уже удалённой формулы {os.path.basename(d)}", lambda d=d: trash(d)))
 
     if not plan:
         print(f"{OK} Чистить нечего.")
@@ -491,13 +507,20 @@ def clean(path):
     print(paint("Открой новую вкладку Терминала, чтобы PATH обновился. Проверить: mnrh path", "2"))
 
 
+def brew_uninstall(name):
+    if subprocess.run([BREW, "uninstall", name]).returncode != 0:
+        return False
+    etc = os.path.join(os.path.dirname(os.path.dirname(BREW)), "etc", name)
+    return trash(etc) if os.path.isdir(etc) else True
+
+
 def macports_remove():
     for plist in glob.glob("/Library/LaunchDaemons/org.macports.*.plist"):
         subprocess.run(["sudo", "launchctl", "bootout", "system", plist], capture_output=True)
         trash(plist)
-    ok = trash("/opt/local")
+    ok = trash("/opt/local") if os.path.isdir("/opt/local") else True
     if os.path.isdir("/Applications/MacPorts"):
-        trash("/Applications/MacPorts")
+        ok = trash("/Applications/MacPorts") and ok
     return ok
 
 
