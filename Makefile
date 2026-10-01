@@ -68,6 +68,7 @@ test:
 	@echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | ./bin/mnrh claude guard-hook | wc -c | grep -q '^ *0$$'
 	@echo '{"tool_name":"Read","permission_mode":"auto","session_id":"x","tool_input":{"file_path":"/x/.env"}}' | ./bin/mnrh claude guard-hook | grep -q '"deny"'
 	@echo '{}' | ./bin/mnrh claude statusline >/dev/null
+	@echo '{"workspace":{"current_dir":"/tmp"},"context_window":{"used_percentage":5}}' | COLUMNS=20 ./bin/mnrh claude statusline | grep -q 'контекст'
 	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep -q '"deps_outdated"'
 	@./bin/mnrh claude notify >/dev/null
 	@echo junk | ./bin/mnrh claude notify-hook | wc -c | grep -q '^ *0$$'
