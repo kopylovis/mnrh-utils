@@ -760,6 +760,11 @@ def setup(args):
         print(f"✓ хук перезапуска → {tilde(ZSHRC)} (работает в новых вкладках терминала)")
 
     listed = subprocess.run(["claude", "mcp", "get", "mnrh"], capture_output=True, text=True)
+    registered = re.search(r"^\s*Command:\s*(.+?)\s*$", listed.stdout, re.M)
+    if listed.returncode == 0 and registered and registered.group(1) != MNRH:
+        subprocess.run(["claude", "mcp", "remove", "--scope", "user", "mnrh"], capture_output=True)
+        print(f"✓ MCP-сервер mnrh был подключён к {tilde(registered.group(1))}, переключаю на {tilde(MNRH)}")
+        listed = subprocess.CompletedProcess(listed.args, 1)
     if listed.returncode == 0:
         print("✓ MCP-сервер mnrh уже подключён")
     else:
