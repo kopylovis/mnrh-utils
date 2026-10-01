@@ -27,6 +27,7 @@ mnrh claude sessions        сохранённые сессии: размер, �
                             (подробнее: mnrh claude sessions -h)
 mnrh claude restart         изнутри Claude: закрыть и открыть эту же сессию заново, с claude update
 mnrh claude forget          изнутри Claude: удалить эту сессию без следа и открыть чистую в той же папке
+mnrh claude slim            изнутри Claude: сжать эту сессию (старые скриншоты, длинные выводы) и открыть снова
 mnrh claude guard           защита от опасных команд и чтения секретов (on, off, skip <правило>, test)
 mnrh claude notify          уведомления, когда Claude ждёт тебя (on, off, after <сек>, test)
 mnrh claude setup           поставить /restart, MCP-сервер mnrh и хук zsh для перезапуска (--remove убрать)
@@ -41,7 +42,7 @@ case "${1:-}" in
   statusline) exec /usr/bin/python3 "$(dirname "$MENU")/claude_status.py" ;;
   guard|guard-hook) exec /usr/bin/python3 "$(dirname "$MENU")/claude_guard.py" "$@" ;;
   notify|notify-hook|focus) exec /usr/bin/python3 "$(dirname "$MENU")/claude_notify.py" "$@" ;;
-  restart|forget|mcp|setup|notice|session-end) exec /usr/bin/python3 "$(dirname "$MENU")/claude_restart.py" "$@" ;;
+  restart|forget|slim|mcp|setup|notice|session-end) exec /usr/bin/python3 "$(dirname "$MENU")/claude_restart.py" "$@" ;;
 esac
 
 target="" mode="" new=0 passthrough=()

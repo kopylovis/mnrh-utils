@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import collections
+import glob
 import json
 import os
 import re
@@ -628,8 +629,56 @@ def slim_report(st):
             f"обрезано длинных выводов {st['texts']}, изменено строк {st['changed']}")
 
 
+def fast_session(sid):
+    for path in glob.glob(os.path.join(glob.escape(PROJECTS), "*", sid + ".jsonl")):
+        pdir = os.path.dirname(path)
+        data = claude_search.update(sid, path) if not os.path.islink(path) else None
+        title = claude_search.title(sid, data) if data else ""
+        return {"id": sid, "path": path, "link": os.path.islink(path), "running": running_ids().get(sid),
+                "title": "" if title == "без названия" else title,
+                "cwd": decode(os.path.basename(pdir)) or (data or {}).get("cwd") or HOME}
+    return None
+
+
+def slim_notice(sid, **fields):
+    path = os.path.join(HOME, ".cache", "mnrh", "notice", sid + ".json")
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return
+    data.update(fields, at=time.time())
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def slim_in_tab(sid):
+    import claude_slim
+    s = fast_session(sid)
+    try:
+        if not s:
+            raise claude_slim.SlimError("сессия не найдена")
+        if s["running"]:
+            raise claude_slim.SlimError("сессия всё ещё открыта")
+        print(f"mnrh: сжимаю «{s['title'] or sid}»…", flush=True)
+        st = claude_slim.apply(s["path"], sid)
+        claude_search.drop(sid)
+    except claude_slim.SlimError as e:
+        print(f"mnrh: не сжал: {e}. Открываю как есть.")
+        slim_notice(sid, status="failed", error=str(e))
+        return 1
+    print(f"mnrh: {slim_report(st)}")
+    slim_notice(sid, status="done", before=fmt_size(st["before"]), after=fmt_size(st["after"]), images=st["images"])
+    return 0
+
+
 def slim_cmd(args, yes):
     import claude_slim
+    if "--notice" in args:
+        ids = [a for a in args if UUID.match(a)]
+        return slim_in_tab(ids[0]) if ids else 2
     keep = 2
     if "--keep" in args:
         try:
@@ -637,7 +686,7 @@ def slim_cmd(args, yes):
         except (IndexError, ValueError):
             sys.exit("mnrh claude sessions: после --keep нужно число")
     ids = [a for a in args if not a.startswith("-") and not (args.index(a) > 0 and args[args.index(a) - 1] == "--keep")]
-    ss = load()
+    ss = load() if not ids or not UUID.match(ids[0]) else []
     if not ids:
         found = []
         for s in ss:
@@ -656,7 +705,9 @@ def slim_cmd(args, yes):
                   f"{fmt_size(st['after']):>7}  {clip(s['title'] or '—', 50)}")
         print(paint(f"Сжать: mnrh claude sessions slim <id>. Проверить сначала на копии: slim <id> --copy", "2"))
         return 0
-    s = find(ss, ids[0])
+    s = fast_session(ids[0]) if UUID.match(ids[0]) else find(ss, ids[0])
+    if not s:
+        sys.exit(f"mnrh claude sessions: сессии «{ids[0]}» нет")
     if s["link"]:
         sys.exit("mnrh claude sessions: это ссылка на другую сессию, сжимай оригинал")
     if s["running"]:
@@ -685,6 +736,9 @@ def slim_cmd(args, yes):
             return 0
         st = claude_slim.apply(s["path"], s["id"], keep)
         claude_search.drop(s["id"])
+        if not st["backup"]:
+            print("Менять нечего: старая часть уже сжата.")
+            return 0
         print(f"Готово: {slim_report(st)}. Проверка пройдена: всё, что уходит модели, совпадает побайтно.")
         print(paint(f"Оригинал: {tilde(st['backup'])}", "2"))
     except claude_slim.SlimError as e:

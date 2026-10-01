@@ -27,6 +27,8 @@ COMMANDS = os.path.join(CLAUDE, "commands")
 COMMAND_FILE = os.path.join(COMMANDS, "restart.md")
 FORGET_FILE = os.path.join(COMMANDS, "forget.md")
 OLD_FORGET_FILE = os.path.join(COMMANDS, "forget-session.md")
+SLIM_FILE = os.path.join(COMMANDS, "slim.md")
+SLIM_MIN = 5 << 20
 QUEUE = os.path.join(HOME, ".cache", "mnrh", "restart")
 NOTICES = os.path.join(HOME, ".cache", "mnrh", "notice")
 NOTICE_TTL = 300
@@ -188,7 +190,7 @@ def no_hook_reason(pid, term):
             "и запусти claude там")
 
 
-def plan(update=True, forget=False):
+def plan(update=True, forget=False, slim=False):
     pid = find_claude()
     try:
         with open(session_file(pid)) as f:
@@ -221,11 +223,14 @@ def plan(update=True, forget=False):
     new_sid = str(uuid.uuid4()) if forget else sid
     run = ((["caffeinate"] + caffeinate if caffeinate is not None else []) + [CLAUDE_BIN]
            + (["--session-id", new_sid] if forget else ["--resume", sid]) + flags)
-    update = update and not forget
+    update = update and not forget and not slim
     line = (f"cd {shlex.quote(cwd)} && "
             + (f"{{ {shlex.quote(CLAUDE_BIN)} update; " if update else "{ ")
-            + ("clear; printf '\\033[3J'; " if forget else "") + shlex.join(run) + "; }")
+            + ("clear; printf '\\033[3J'; " if forget else "")
+            + (f"{shlex.quote(MNRH)} claude sessions slim {sid} -y --notice; " if slim else "")
+            + shlex.join(run) + "; }")
     return {"pid": pid, "sid": sid, "cwd": cwd, "tty": tty, "term": term, "via": via, "line": line, "forget": forget,
+            "slim": slim,
             "title": session_title(sid) or info.get("name") or sid, "new_sid": new_sid,
             "version": claude_version()}
 
@@ -260,7 +265,7 @@ def watcher(p, delay):
     time.sleep(delay)
     log(f"restart {p['sid']} pid {p['pid']} tty {p['tty']} via {p['via']}")
     job = os.path.join(QUEUE, os.path.basename(p["tty"]))
-    write_notice(p, "pending" if p["forget"] else "done")
+    write_notice(p, "pending" if p["forget"] or p.get("slim") else "done")
     if p["via"] == "zsh":
         with open(job, "w") as f:
             f.write(p["line"])
@@ -298,17 +303,22 @@ def claude_version(path=None):
     return name if re.match(r"^\d+(\.\d+)+$", name) else ""
 
 
+def session_path(sid):
+    found = glob.glob(os.path.join(glob.escape(os.path.join(CLAUDE, "projects")), "*", sid + ".jsonl"))
+    return found[0] if found else None
+
+
 def session_title(sid):
-    import claude_sessions
-    for path in glob.glob(os.path.join(CLAUDE, "projects", "*", sid + ".jsonl")):
-        meta = claude_sessions.read_meta(path)
-        return meta["custom"] or meta["ai"] or meta["prompt"]
-    return ""
+    path = session_path(sid)
+    data = claude_search.update(sid, path) if path else None
+    title = claude_search.title(sid, data) if data else ""
+    return "" if title == "без названия" else title
 
 
 def write_notice(p, status):
     os.makedirs(NOTICES, exist_ok=True)
-    data = {"kind": "forget" if p["forget"] else "restart", "status": status, "title": p["title"],
+    kind = "forget" if p["forget"] else "slim" if p.get("slim") else "restart"
+    data = {"kind": kind, "status": status, "title": p["title"],
             "old_sid": p["sid"], "version": p["version"], "at": time.time()}
     tmp = os.path.join(NOTICES, p["new_sid"] + ".tmp")
     with open(tmp, "w") as f:
@@ -321,6 +331,14 @@ def notice_text(n):
     if len(title) > 60:
         title = title[:59] + "…"
     now = claude_version()
+    if n["kind"] == "slim":
+        if n.get("status") == "done":
+            return (f"✓ mnrh: сессия «{title}» сжата: {n.get('before')} → {n.get('after')}, скриншотов убрано "
+                    f"{n.get('images', 0)}. То, что видит модель, не менялось. Вернуть: "
+                    f"mnrh claude sessions slim {n.get('old_sid', '')[:8]} --undo")
+        if n.get("status") == "failed":
+            return f"! mnrh: сессию «{title}» сжать не удалось ({n.get('error')}). Она открыта без изменений."
+        return f"… mnrh: сессия «{title}» открыта, но сжатие не отчиталось — проверь: mnrh claude sessions slim"
     if n["kind"] == "restart":
         was = n.get("version")
         if was and now and was != now:
@@ -465,8 +483,8 @@ def detach(p, delay):
     background(watcher, p, delay)
 
 
-def restart(update=True, delay=1.5, dry=False, forget=False):
-    p = plan(update, forget)
+def restart(update=True, delay=1.5, dry=False, forget=False, slim=False):
+    p = plan(update, forget, slim)
     preflight(p)
     if dry:
         return p
@@ -504,6 +522,61 @@ def cli(args, forget=False):
         print(f"Через пару секунд Claude Code закроется, сессия «{p['title']}» будет удалена, и откроется чистая.")
     else:
         print(f"Перезапускаю Claude Code через пару секунд, сессия «{p['title']}» откроется снова в этой вкладке.")
+    return 0
+
+
+def fmt_mb(n):
+    return f"{n / 1048576:.0f} МБ" if n >= 10 << 20 else f"{n / 1048576:.1f} МБ"
+
+
+def slim_current(dry=False, delay=1.5):
+    import claude_slim
+    pid = find_claude()
+    try:
+        with open(session_file(pid)) as f:
+            sid = json.load(f).get("sessionId")
+    except (OSError, ValueError):
+        sid = None
+    path = session_path(sid) if sid else None
+    if not path:
+        raise RestartError("не нашёл файл этой сессии")
+    _, _, st = claude_slim.plan(path)
+    if not st:
+        return "Сжимать нечего: в сессии меньше двух /compact, а последние два отрезка не трогаются.", False
+    if st["before"] - st["after"] < SLIM_MIN:
+        return (f"Сжимать почти нечего: {fmt_mb(st['before'])} → {fmt_mb(st['after'])}. "
+                "Старые скриншоты и выводы уже маленькие."), False
+    what = (f"«{session_title(sid) or sid}»: {fmt_mb(st['before'])} → {fmt_mb(st['after'])}, "
+            f"скриншотов {st['images']}, длинных выводов {st['texts']}")
+    if dry:
+        return f"Сожму {what}.", False
+    restart(update=False, delay=delay, slim=True)
+    return (f"Сжимаю {what}. Claude Code сейчас закроется, сессия сожмётся в этой вкладке и откроется снова; "
+            "то, что видит модель, не меняется."), True
+
+
+def cli_slim(args):
+    import claude_sessions
+    if "-h" in args or "--help" in args:
+        print("mnrh claude slim            изнутри Claude Code: закрыть его, сжать эту сессию (старые скриншоты и")
+        print("                            длинные выводы до двух последних /compact) и открыть её снова")
+        print("mnrh claude slim --dry-run  только посчитать")
+        print("mnrh claude slim list       что можно сжать среди закрытых сессий")
+        print("mnrh claude slim <id>       сжать закрытую сессию (вернуть: mnrh claude sessions slim <id> --undo)")
+        print()
+        print("Обычно вызывается из Claude: /slim или инструментом slim из MCP-сервера mnrh.")
+        return 0
+    rest = [a for a in args if a != "--dry-run"]
+    if rest[:1] == ["list"]:
+        return claude_sessions.slim_cmd([], True)
+    if rest:
+        return claude_sessions.slim_cmd(rest, True)
+    try:
+        text, _ = slim_current(dry="--dry-run" in args)
+    except RestartError as e:
+        print(f"mnrh claude slim: {e}", file=sys.stderr)
+        return 1
+    print(text)
     return 0
 
 
@@ -562,9 +635,30 @@ def call_restart(tool, a):
         return f"Не получилось: {e}", True
 
 
+SLIM_TOOL = {
+    "name": "slim",
+    "description": ("Сжать эту сессию: Claude Code закроется, из старой части сессии (до двух последних /compact) "
+                    "уберутся скриншоты и длинные выводы инструментов, и сессия откроется снова в той же вкладке. "
+                    "То, что получает модель, не меняется, оригинал хранится 14 дней. Если сжимать нечего, "
+                    "ничего не закрывается. Вызывай только когда пользователь сам просит сжать сессию; если ответ "
+                    "говорит, что Claude закроется, больше ничего не делай."),
+    "inputSchema": {"type": "object", "properties": {
+        "dry_run": {"type": "boolean", "description": "только посчитать, сколько освободится"}}},
+}
+
+
+def call_slim(a):
+    try:
+        text, _ = slim_current(dry=bool(a.get("dry_run")), delay=2.5)
+        return text, False
+    except RestartError as e:
+        return f"Не получилось: {e}", True
+
+
 HANDLERS = {
     "restart": lambda a: call_restart("restart", a),
     "forget": lambda a: call_restart("forget", a),
+    "slim": call_slim,
     "open_claude": lambda a: claude_open.open_claude(a, MNRH),
     "session_search": lambda a: claude_search.handle("session_search", a, current_sid()),
     "session_read": lambda a: claude_search.handle("session_read", a),
@@ -577,7 +671,7 @@ READ_ONLY = [t["name"] for t in EXTRA_TOOLS if t["annotations"].get("readOnlyHin
 
 
 def tools():
-    return [TOOL, FORGET_TOOL, claude_open.TOOL] + EXTRA_TOOLS
+    return [TOOL, FORGET_TOOL, SLIM_TOOL, claude_open.TOOL] + EXTRA_TOOLS
 
 
 def mcp():
@@ -617,6 +711,17 @@ def mcp():
             send({"jsonrpc": "2.0", "id": rid, "result": {}})
         else:
             send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"не умею {method}"}})
+
+
+SLIM_SLASH = """---
+description: Сжать эту сессию (старые скриншоты и длинные выводы) и открыть её снова; list — другие сессии
+allowed-tools: Bash(mnrh claude slim:*)
+---
+!`mnrh claude slim $ARGUMENTS`
+
+Если выше написано «Сжимаю», Claude Code сейчас закроется сам: ничего не делай и ответь одним словом: «Сжимаю».
+Иначе коротко перескажи пользователю, что написано выше, без своих действий.
+"""
 
 
 FORGET_SLASH = """---
@@ -727,7 +832,7 @@ def notice_hook(install):
 def setup(args):
     marker = "share/mnrh/restart.zsh"
     if "--remove" in args:
-        for f in (COMMAND_FILE, FORGET_FILE, OLD_FORGET_FILE):
+        for f in (COMMAND_FILE, FORGET_FILE, SLIM_FILE, OLD_FORGET_FILE):
             if os.path.exists(f):
                 os.remove(f)
         subprocess.run(["claude", "mcp", "remove", "--scope", "user", "mnrh"], capture_output=True)
@@ -736,12 +841,12 @@ def setup(args):
         kept = [l for l in lines if marker not in l]
         if kept != lines:
             write_zshrc(kept)
-        print(f"Убрал /restart, /forget, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
+        print(f"Убрал /restart, /forget, /slim, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
         return 0
     os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
     if os.path.exists(OLD_FORGET_FILE):
         os.remove(OLD_FORGET_FILE)
-    for path, text in ((COMMAND_FILE, SLASH), (FORGET_FILE, FORGET_SLASH)):
+    for path, text in ((COMMAND_FILE, SLASH), (FORGET_FILE, FORGET_SLASH), (SLIM_FILE, SLIM_SLASH)):
         with open(path, "w") as f:
             f.write(text)
         print(f"✓ /{os.path.basename(path)[:-3]} → {tilde(path)}")
@@ -793,5 +898,7 @@ if __name__ == "__main__":
         sys.exit(session_end())
     elif cmd == "setup":
         sys.exit(setup(rest))
+    elif cmd == "slim":
+        sys.exit(cli_slim(rest))
     else:
         sys.exit(cli(rest, forget=cmd == "forget"))

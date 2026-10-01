@@ -264,6 +264,9 @@ def apply(path, sid, keep=2):
     tmp = path + ".mnrh-slim"
     try:
         stats = write_slim(path, tmp, info, prot)
+        if not stats["changed"]:
+            stats.update(before=os.path.getsize(path), after=os.path.getsize(path), backup=None)
+            return stats
         verify(path, tmp, info, prot, keep)
         shutil.copystat(path, tmp)
         stats["before"] = os.path.getsize(path)

@@ -20,6 +20,7 @@ mnrh claude sessions show <id> [N]            прочитать сессию с
 mnrh claude setup     поставить /restart, /forget, MCP-сервер mnrh, хук zsh и хуки Claude (--remove убрать)
 mnrh claude restart   изнутри Claude: закрыть, claude update, открыть эту же сессию снова
 mnrh claude forget    изнутри Claude: удалить эту сессию без следа и открыть чистую
+mnrh claude slim      изнутри Claude: сжать эту сессию и открыть её снова (/slim)
 mnrh claude notify    уведомления, когда Claude ждёт тебя: on, off, after <сек>, sound, test
 mnrh claude guard     защита от опасных команд и чтения секретов: on, off, skip <правило>, test, log
 mnrh deps             устаревшие зависимости Gradle в libs.versions.toml (этот проект или все)
@@ -206,6 +207,14 @@ mnrh claude sessions slim <id>         сжать (спросит подтвер
 mnrh claude sessions slim <id> --undo  вернуть оригинал
 ```
 
+Изнутри Claude Code — `/slim` (или попросить «сожми эту сессию», инструмент `slim` в MCP).
+Открытую сессию сжимать нельзя, поэтому `/slim` работает как `/restart`: сначала считает,
+сколько освободится, и если меньше 5 МБ — ничего не закрывает и просто говорит об этом.
+Иначе Claude закрывается, во вкладке выполняется `mnrh claude sessions slim <id> -y`,
+и сессия открывается снова с теми же флагами и caffeinate. После открытия Claude
+показывает, сколько было и стало, или почему сжать не вышло (тогда сессия открыта как
+была). `/slim list` — что можно сжать среди закрытых сессий, `/slim <id>` — сжать одну из них.
+
 Чего не будет после сжатия: старых скриншотов при прокрутке вверх, а при `/rewind` в
 точку до этих двух `/compact` — картинок и полных длинных выводов в том старом разговоре.
 
@@ -248,8 +257,8 @@ MCP-инструмент `mac_status` показывает Claude то же, ч�
 
 ## Как работает перезапуск Claude Code
 
-`mnrh claude setup` кладёт `~/.claude/commands/restart.md` и `forget.md` и регистрирует
-MCP-сервер `mnrh` с инструментами `restart`, `forget`, `open_claude`, `session_search`,
+`mnrh claude setup` кладёт `~/.claude/commands/restart.md`, `forget.md` и `slim.md` и регистрирует
+MCP-сервер `mnrh` с инструментами `restart`, `forget`, `slim`, `open_claude`, `session_search`,
 `session_read`, `mac_status` и `free_memory` (scope user, во всех проектах). Дальше в любой сессии:
 
 - `/restart` — сразу, без участия модели; `/restart --no-update` — без обновления;

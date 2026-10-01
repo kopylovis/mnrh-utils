@@ -98,6 +98,8 @@ test:
 	@./bin/mnrh claude sessions search mnrh-no-such-word-zq >/dev/null
 	@./bin/mnrh claude sessions choose /nonexistent-mnrh | grep -qx new
 	@./bin/mnrh claude sessions -h | grep -q slim
+	@./bin/mnrh claude slim -h >/dev/null
+	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep -q '"slim"'
 	@! ./bin/mnrh claude sessions slim no-such-session >/dev/null 2>&1
 	@! ./bin/mnrh claude sessions show no-such-session >/dev/null
 	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep '"session_search"' | grep '"session_read"' | grep '"mac_status"' | grep -q '"free_memory"'
