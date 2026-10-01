@@ -8,7 +8,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import BAD, CONFIG, HOME, OK, WARN, confirm, du_bytes, has_flag, human, login_path, paint, run, tilde
+from mnrhlib import (BAD, CONFIG, HOME, OK, WARN, confirm, du_bytes, has_flag, human, login_path, paint, projects,
+                     projects_dir, run, tilde, version_key)
 
 args = sys.argv[1:]
 FLAGS = ("-a", "--all", "-n", "--dry-run", "-y", "--yes")
@@ -371,6 +372,203 @@ def check_versions():
         say(WARN, f"Homebrew: {old} — {why}", f"нужен для: {', '.join(used)}" if used else f"brew uninstall {old}")
 
 
+# ---------- лишние версии, копии и архивы ----------
+
+MANAGERS = {
+    "node": ("nvm", "~/.nvm/versions/node", "~/.nvm/alias/default", (".nvmrc", ".node-version"), "nodejs"),
+    "ruby": ("rbenv", "~/.rbenv/versions", "~/.rbenv/version", (".ruby-version",), "ruby"),
+    "python": ("pyenv", "~/.pyenv/versions", "~/.pyenv/version", (".python-version",), "python"),
+}
+PIN_DIRS = ("", "web", "frontend", "client", "app", "site", "iosApp", "fastlane", "server", "backend")
+BREW_KEEP = ("git", "node", "ruby", "openjdk", "python@", "openssl@3", "gradle", "kotlin")
+
+
+def read_first(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return [l.strip() for l in f if l.strip() and not l.lstrip().startswith("#")]
+    except OSError:
+        return []
+
+
+def pins(kind):
+    manager, _, glob_file, names, tool_name = MANAGERS[kind]
+    found = []
+    for root in projects() + [projects_dir(), HOME]:
+        for sub in PIN_DIRS:
+            base = os.path.join(root, sub)
+            for n in names:
+                lines = read_first(os.path.join(base, n))
+                if lines:
+                    found.append((lines[0].split()[0], tilde(os.path.join(base, n))))
+            for line in read_first(os.path.join(base, ".tool-versions")):
+                parts = line.split()
+                if len(parts) > 1 and parts[0] == tool_name:
+                    found.append((parts[1], tilde(os.path.join(base, ".tool-versions"))))
+    if kind != "python" or hooked(manager):
+        for line in read_first(os.path.expanduser(glob_file)):
+            found.append((line.split()[0], "глобальная"))
+    return found
+
+
+def matching(installed, spec):
+    spec = spec.strip().lstrip("v")
+    if spec in ("system",):
+        return []
+    if not re.match(r"^\d+(\.\d+)*$", spec):
+        exact = [v for v in installed if v.lstrip("v") == spec]
+        return exact or None
+    return [v for v in installed if v.lstrip("v") == spec or v.lstrip("v").startswith(spec + ".")]
+
+
+def hooked(manager):
+    rc_text = "\n".join(line for _, _, line in rc_lines())
+    return manager in rc_text
+
+
+def spare_versions(kind):
+    manager, vdir, _, _, _ = MANAGERS[kind]
+    vdir = os.path.expanduser(vdir)
+    try:
+        installed = sorted((d for d in os.listdir(vdir) if os.path.isdir(os.path.join(vdir, d))
+                            and not os.path.islink(os.path.join(vdir, d))), key=version_key)
+    except OSError:
+        return [], None
+    if not installed:
+        return [], None
+    found = pins(kind)
+    keep, why = set(), {}
+    for spec, src in found:
+        m = matching(installed, spec)
+        if m is None:
+            return [], f"{src}: «{spec}» — не разобрать, версии {manager} не трогаю"
+        keep.update(m)
+        for v in m:
+            why.setdefault(v, src)
+    if kind == "python" and not hooked("pyenv") and not keep:
+        return installed, "pyenv не подключён в оболочке и ни один проект не просит Python через него"
+    if not keep:
+        keep.add(installed[-1])
+    return [v for v in installed if v not in keep], None
+
+
+def kept_versions(kind, spare):
+    vdir = os.path.expanduser(MANAGERS[kind][1])
+    try:
+        return sorted((d for d in os.listdir(vdir) if os.path.isdir(os.path.join(vdir, d)) and d not in spare),
+                      key=version_key) or ["—"]
+    except OSError:
+        return ["—"]
+
+
+def formula_bins(formula):
+    bins = set()
+    for d in glob.glob(f"/opt/homebrew/Cellar/{glob.escape(formula)}/*/bin"):
+        bins.update(os.listdir(d))
+    return bins
+
+
+def first_in_path(path, name):
+    for d in path:
+        f = os.path.join(d, name)
+        if os.path.isfile(f) and os.access(f, os.X_OK):
+            return f
+    return None
+
+
+def shadowed_brew(path):
+    if not os.path.exists(BREW):
+        return []
+    found, _ = copies(path)
+    out = []
+    for tool, files in found.items():
+        for f in files[1:]:
+            m = re.match(r"/opt/homebrew/Cellar/([^/]+)/", os.path.realpath(f))
+            if not m or m.group(1).startswith(BREW_KEEP) or m.group(1) in [o for o, _ in out]:
+                continue
+            formula = m.group(1)
+            bins = formula_bins(formula)
+            winners = {b: first_in_path(path, b) for b in bins}
+            if not bins or any(w and os.path.realpath(w).startswith(f"/opt/homebrew/Cellar/{formula}/")
+                               for w in winners.values()):
+                continue
+            if run([BREW, "uses", "--installed", formula]).split():
+                continue
+            winner = tilde(files[0])
+            out.append((formula, f"{tool} работает из {winner}, копия из Homebrew перекрыта и ни от чего не зависит"))
+    return out
+
+
+def stale_gem_stubs():
+    shims = os.path.expanduser("~/.rbenv/shims")
+    out = []
+    if not os.path.isdir(shims):
+        return out
+    for f in sorted(glob.glob("/usr/local/bin/*")):
+        name = os.path.basename(f)
+        if os.path.islink(f) or not os.path.isfile(f) or not os.path.exists(os.path.join(shims, name)):
+            continue
+        try:
+            with open(f, "rb") as fh:
+                head = fh.read(400).decode("utf-8", "replace")
+        except OSError:
+            continue
+        if head.startswith("#!") and ("/usr/bin/ruby" in head.splitlines()[0] or "Ruby.framework" in head.splitlines()[0]) \
+                and ("RubyGems" in head or "Gem" in head):
+            out.append(f)
+    return out
+
+
+def jdk_archives():
+    d = os.path.expanduser("~/.gradle/jdks")
+    if not os.path.isdir(d):
+        return []
+    dirs = [n for n in os.listdir(d) if os.path.isdir(os.path.join(d, n))]
+    out = []
+    for n in os.listdir(d):
+        if not re.search(r"\.(tar\.gz|zip)$", n):
+            continue
+        m = re.search(r"(?:JDK|jdk|jre)[-_]?(\d+)", n)
+        major = m.group(1) if m else None
+        if major and any(re.search(rf"(^|[-_]){major}([-_.]|$)", x) for x in dirs):
+            out.append(os.path.join(d, n))
+    return out
+
+
+def spare_plan(path):
+    plan = []
+    for kind, (manager, vdir, _, _, _) in MANAGERS.items():
+        spare, note = spare_versions(kind)
+        if not spare:
+            continue
+        vdir = os.path.expanduser(vdir)
+        size = sum(du_bytes(os.path.join(vdir, v)) for v in spare)
+        text = (f"{manager}: {', '.join(spare)} ({human(size)}) — "
+                + (note or f"не указаны ни в одном проекте и не по умолчанию; остаются: {', '.join(kept_versions(kind, spare))}"))
+        plan.append((text, lambda vdir=vdir, spare=spare: all(trash(os.path.join(vdir, v)) for v in spare)))
+    for formula, why in shadowed_brew(path):
+        plan.append((f"Homebrew: {formula} — {why}", lambda f=formula: subprocess.run([BREW, "uninstall", f]).returncode == 0))
+    for f in stale_gem_stubs():
+        plan.append((f"{f} — старый скрипт gem для системного Ruby, работает {os.path.basename(f)} из rbenv",
+                     lambda f=f: trash(f)))
+    for f in jdk_archives():
+        plan.append((f"{tilde(f)} ({human(os.path.getsize(f))}) — архив JDK, уже распакован Gradle",
+                     lambda f=f: trash(f) and all(trash(x) for x in glob.glob(glob.escape(f) + ".lock"))))
+    return plan
+
+
+def check_spare(path):
+    print(paint("\nЛишнее", "1"))
+    plan = spare_plan(path)
+    if not plan:
+        say(OK, "лишних версий, перекрытых копий и архивов нет")
+        return
+    global issues
+    issues += 1
+    for text, _ in plan:
+        say(WARN, text)
+
+
 # ---------- чистка ----------
 
 def rc_edits(path):
@@ -484,6 +682,7 @@ def clean(path):
                          lambda o=old: brew_uninstall(o)))
     for d in brew_leftovers():
         plan.append((f"{d} — настройки уже удалённой формулы {os.path.basename(d)}", lambda d=d: trash(d)))
+    plan += spare_plan(path)
 
     if not plan:
         print(f"{OK} Чистить нечего.")
@@ -535,5 +734,6 @@ check_rc()
 check_links(path)
 check_copies(path)
 check_versions()
+check_spare(path)
 print()
 print(f"{OK} Всё чисто." if not issues else paint("Ничего не менял. Убрать безопасное: mnrh path clean", "2"))
