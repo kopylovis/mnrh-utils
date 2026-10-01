@@ -1,6 +1,6 @@
 """Помощник на Swift, который живёт в фоне как LaunchAgent: сборка в .app, автозапуск, состояние.
 
-Общий код для mnrh scroll и mnrh input. Исходник — share/mnrh/<name>/main.swift. Собирается
+Общий код для mnrh scroll и приложения уведомлений mnrh Notify. Исходник — share/mnrh/<name>/main.swift. Собирается
 в ~/Library/Application Support/mnrh/<display>.app только при изменении исходника: macOS
 выдаёт разрешения (Универсальный доступ и т. п.) конкретной сборке, и лишняя пересборка их сбросит.
 """

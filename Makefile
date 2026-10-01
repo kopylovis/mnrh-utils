@@ -34,15 +34,9 @@ test:
 	@./bin/mnrh path -h >/dev/null
 	@! ./bin/mnrh path nothing >/dev/null
 	@./bin/mnrh uninstall -h >/dev/null
-	@./bin/mnrh net -h >/dev/null
 	@./bin/mnrh login -h >/dev/null
-	@./bin/mnrh power -h >/dev/null
-	@./bin/mnrh defaults -h >/dev/null
 	@./bin/mnrh outdated -h >/dev/null
-	@./bin/mnrh defaults >/dev/null
-	@./bin/mnrh power >/dev/null
 	@./bin/mnrh login >/dev/null
-	@! ./bin/mnrh net nothing >/dev/null
 	@./bin/mnrh uninstall --orphans -n >/dev/null
 	@! ./bin/mnrh uninstall no-such-app-mnrh -n >/dev/null 2>&1
 	@./bin/mnrh ports >/dev/null
@@ -53,8 +47,6 @@ test:
 	@./bin/mnrh scroll >/dev/null
 	@! ./bin/mnrh scroll nothing >/dev/null
 	@swiftc -typecheck -swift-version 5 share/mnrh/scroll/main.swift
-	@swiftc -typecheck -swift-version 5 share/mnrh/input/main.swift
-	@swiftc -typecheck -swift-version 5 share/mnrh/audio/main.swift
 	@swiftc -typecheck -swift-version 5 share/mnrh/notify/main.swift
 	@./bin/mnrh claude notify -h >/dev/null
 	@./bin/mnrh deps -h >/dev/null
@@ -75,13 +67,6 @@ test:
 	@./bin/mnrh claude notify >/dev/null
 	@echo junk | ./bin/mnrh claude notify-hook | wc -c | grep -q '^ *0$$'
 	@echo '{"session_id":"00000000-0000-0000-0000-000000000000","hook_event_name":"UserPromptSubmit","user_input":"x"}' | ./bin/mnrh claude notify-hook | wc -c | grep -q '^ *0$$'
-	@./bin/mnrh audio -h >/dev/null
-	@./bin/mnrh audio >/dev/null
-	@./bin/mnrh input -h >/dev/null
-	@./bin/mnrh kit -h >/dev/null
-	@./bin/mnrh dock -h >/dev/null
-	@./bin/mnrh dock >/dev/null
-	@! ./bin/mnrh input nothing >/dev/null
 	@./bin/mnrh fix scroll -h >/dev/null
 	@! ./bin/mnrh fix nothing >/dev/null
 	@./bin/mnrh killdaemons -h >/dev/null
@@ -126,7 +111,7 @@ test:
 	@./bin/mnrh sim >/dev/null
 	@./bin/mnrh repos >/dev/null
 	@./bin/mnrh disk >/dev/null
-	@./bin/mnrh disk --apply </dev/null >/dev/null; rc=$$?; test $$rc -eq 2 -o $$rc -eq 0
+	@./bin/mnrh disk clean </dev/null >/dev/null; rc=$$?; test $$rc -eq 2 -o $$rc -eq 0
 	@./bin/mnrh doctor >/dev/null; test $$? -le 1
 	@! ./bin/mnrh no-such-command >/dev/null 2>&1
 	@find libexec -name __pycache__ -type d -exec rm -rf {} +

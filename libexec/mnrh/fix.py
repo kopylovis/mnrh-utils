@@ -122,7 +122,7 @@ def wifi():
         if re.search(r"inet \d", run(["ifconfig", dev])):
             print(f"{OK} Wi-Fi ({dev}) выключен и включён, адрес получен.")
             return 0
-    print(f"{WARN} Wi-Fi ({dev}) включён, но адреса пока нет — подожди или проверь сеть: mnrh net")
+    print(f"{WARN} Wi-Fi ({dev}) включён, но адреса пока нет — подожди или проверь сеть и VPN")
     return 1
 
 

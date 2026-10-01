@@ -26,6 +26,9 @@ def load(registry, have):
             cols = line.rstrip("\n").split("\t")
             if line.startswith("#") or len(cols) < 3 or cols[1] not in have:
                 continue
+            seen.add(cols[1])
+            if cols[0] == "-":
+                continue
             actions = []
             for part in (cols[3].split(";;") if len(cols) > 3 and cols[3] else []):
                 a, _, label = part.partition("|")
@@ -85,27 +88,34 @@ def prompt(action, tty, answers):
     return out
 
 
+def dim(text):
+    return f"\x1b[2m{text}\x1b[0m"
+
+
 def menu(items, version):
     width = max(len(n) for _, n, *_ in items) + 2
-    gwidth = max(len(g) for g, *_ in items) + 2
-    rows, group = [], None
-    for g, name, desc, _ in items:
-        # группа видна у первой команды группы: список читается блоками
-        rows.append((f"{name} {desc} {g}", f"{(g if g != group else '').ljust(gwidth)}{name.ljust(width)}{desc}"))
-        group = g
+    rows, index, group = [], [], None
+    for k, (g, name, desc, _) in enumerate(items):
+        if g != group:
+            rows.append((None, g))
+            index.append(None)
+            group = g
+        rows.append((f"{name} {desc} {g}", f"{name.ljust(width)}{dim(desc)}"))
+        index.append(k)
     at = 0
     while True:
-        i = pick(rows, title=f"\x1b[1mmnrh {version}\x1b[0m — что сделать?", default=at)
+        i = pick(rows, title=f"\x1b[1mmnrh {version}\x1b[0m  {dim('что сделать?')}", default=at)
         if i is None:
             return None
         at = i
-        _, name, _, actions = items[i]
+        _, name, _, actions = items[index[i]]
         if len(actions) == 1:
             action = actions[0][0]
         else:
             aw = max(len(f"mnrh {name} {a}".rstrip()) for a, _ in actions) + 3
-            j = pick([(f"{a} {label}", f"{f'mnrh {name} {a}'.rstrip().ljust(aw)}{label}")
-                      for a, label in actions], title=f"\x1b[1mmnrh {name}\x1b[0m   Esc — назад")
+            j = pick([(f"{a} {label}", f"{label.ljust(max(len(l) for _, l in actions) + 3)}"
+                                       f"{dim(f'mnrh {name} {a}'.rstrip())}")
+                      for a, label in actions], title=f"\x1b[1mmnrh {name}\x1b[0m  {dim('Esc — назад')}")
             if j is None:
                 continue
             action = actions[j][0]

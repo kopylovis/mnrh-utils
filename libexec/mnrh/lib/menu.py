@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import re
 import select
 import sys
 import termios
@@ -13,6 +14,7 @@ DOWN = ("\x1b[B", "\x1bOB", "\x0e", "\t")
 HOME = ("\x1b[H", "\x1bOH", "\x1b[1~")
 END = ("\x1b[F", "\x1bOF", "\x1b[4~")
 DIGIT_PAUSE = 0.8
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
 FROM_RU = str.maketrans("йцукенгшщзхъфывапролджэячсмитьбю", "qwertyuiop[]asdfghjkl;'zxcvbnm,.")
 
 
@@ -20,14 +22,32 @@ class Cancel(Exception):
     pass
 
 
+def cut(text, width):
+    out, seen, i = [], 0, 0
+    while i < len(text) and seen < width:
+        m = ANSI.match(text, i)
+        if m:
+            out.append(m.group(0))
+            i = m.end()
+            continue
+        out.append(text[i])
+        seen += 1
+        i += 1
+    return "".join(out) + ("\x1b[0m" if "\x1b[" in text else "")
+
+
 class Menu:
+    marks = None
+
     def __init__(self, tty_fd, items, title, label, start, default):
         self.fd = tty_fd
         self.items = items
         self.title = title
         self.label = label
         self.start = start
-        self.sel = min(max(default, 0), len(items) - 1)
+        self.pick_able = [i for i, (key, _) in enumerate(items) if key is not None]
+        default = min(max(default, 0), len(items) - 1)
+        self.sel = next((i for i in self.pick_able if i >= default), self.pick_able[0])
         self.query = ""
         self.digits = ""
         self.digits_at = 0.0
@@ -40,7 +60,19 @@ class Menu:
     def view(self):
         q = self.query.lower()
         en = q.translate(FROM_RU)  # набрали в русской раскладке: «ыыр» -> «ssh»
-        return [i for i, (key, _) in enumerate(self.items) if q in key.lower() or en in key.lower()]
+        hit = {i for i in self.pick_able if q in self.items[i][0].lower() or en in self.items[i][0].lower()}
+        out, header = [], None
+        for i, (key, _) in enumerate(self.items):
+            if key is None:
+                header = i
+            elif i in hit:
+                if header is not None and (not out or out[-1] < header):
+                    out.append(header)
+                out.append(i)
+        return out
+
+    def choices(self, view=None):
+        return [i for i in (self.view() if view is None else view) if self.items[i][0] is not None]
 
     def size(self):
         try:
@@ -70,17 +102,24 @@ class Menu:
         if self.top:
             lines.append(f"\x1b[2m     ↑ ещё {self.top}\x1b[0m")
         for i in shown:
-            text = f"{i + self.start:>3}) {self.items[i][1]}"[: cols - 3]
+            if self.items[i][0] is None:
+                lines.append(cut(f"  \x1b[1;35m{self.items[i][1]}\x1b[0m", cols - 1))
+                continue
+            box = "" if self.marks is None else ("◉ " if i in self.marks else "○ ")
+            text = f"{self.pick_able.index(i) + self.start:>3}) {box}{self.items[i][1]}"
             if i == self.sel:
-                lines.append(f"\x1b[1;36m❯ {text}\x1b[0m")
+                lines.append(f"\x1b[1;36m❯ {ANSI.sub('', text)[: cols - 3]}\x1b[0m")
             else:
-                lines.append(f"  {text}")
+                lines.append("  " + cut(text, cols - 3))
         rest = len(view) - self.top - len(shown)
         if rest > 0:
             lines.append(f"\x1b[2m     ↓ ещё {rest}\x1b[0m")
-        if not view:
+        if not self.choices(view):
             lines.append("\x1b[2m  ничего не найдено\x1b[0m")
         hint = "↑↓ выбрать · Enter · цифра или буквы — быстрый переход · Esc — выход"
+        if self.marks is not None:
+            total = self.summary(self.marks) if self.summary else f"отмечено {len(self.marks)}"
+            hint = f"{total} · Пробел — отметить · a — все/ничего · Enter — дальше · Esc — отмена"
         if self.query:
             hint = f"поиск: {self.query}▏ · Backspace стереть · Esc сбросить"
         lines.append("")
@@ -90,7 +129,7 @@ class Menu:
         self.drawn = len(lines)
 
     def move(self, step):
-        view = self.view()
+        view = self.choices()
         if not view:
             return
         pos = view.index(self.sel) if self.sel in view else 0
@@ -99,15 +138,15 @@ class Menu:
     def jump(self, ch):
         now = time.monotonic()
         buf = self.digits + ch if now - self.digits_at < DIGIT_PAUSE else ch
-        if int(buf) - self.start >= len(self.items):
+        if int(buf) - self.start >= len(self.pick_able):
             buf = ch
         self.digits, self.digits_at = buf, now
         idx = int(buf) - self.start
-        if 0 <= idx < len(self.items):
-            self.sel = idx
+        if 0 <= idx < len(self.pick_able):
+            self.sel = self.pick_able[idx]
 
     def refilter(self):
-        view = self.view()
+        view = self.choices()
         if view and self.sel not in view:
             self.sel = view[0]
         self.top = 0
@@ -124,15 +163,20 @@ class Menu:
         elif key in DOWN:
             self.move(1)
         elif key in HOME:
-            view = self.view()
+            view = self.choices()
             if view:
                 self.sel = view[0]
         elif key in END:
-            view = self.view()
+            view = self.choices()
             if view:
                 self.sel = view[-1]
         elif key in ("\r", "\n"):
-            return self.sel in self.view()
+            return self.marks is not None or self.sel in self.choices()
+        elif key == " " and self.marks is not None:
+            self.marks ^= {self.sel}
+            self.move(1)
+        elif key == "a" and self.marks is not None and not self.query:
+            self.marks = set() if self.marks >= set(self.pick_able) else set(self.pick_able)
         elif key in ("\x7f", "\x08"):
             self.query = self.query[:-1]
             self.refilter()
@@ -156,21 +200,30 @@ class Menu:
                     self.refilter()
         return False
 
+    summary = None
+
     def run(self):
         self.write(HIDE)
         self.draw()
         while True:
             if self.handle(self.read_key()):
-                return self.sel
+                return self.sel if self.marks is None else set(self.marks)
             self.draw()
 
 
-def pick(items, title="", label="", start=1, default=0):
-    if not items:
+def pick_many(items, title="", marked=(), summary=None):
+    return pick(items, title=title, marked=set(marked), summary=summary)
+
+
+def pick(items, title="", label="", start=1, default=0, marked=None, summary=None):
+    if not items or all(key is None for key, _ in items):
         return None
     fd = os.open("/dev/tty", os.O_RDWR)
     saved = termios.tcgetattr(fd)
     menu = Menu(fd, items, title, label, start, default)
+    if marked is not None:
+        menu.marks = set(marked)
+        menu.summary = summary
     try:
         tty.setcbreak(fd)
         attrs = termios.tcgetattr(fd)
@@ -183,7 +236,7 @@ def pick(items, title="", label="", start=1, default=0):
         menu.clear()
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
         menu.write(SHOW)
-    if choice is not None and label:
+    if choice is not None and label and marked is None:
         menu.write(f"{label}: \x1b[1m{items[choice][0]}\x1b[0m\r\n")
     os.close(fd)
     return choice
