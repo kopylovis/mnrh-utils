@@ -94,7 +94,7 @@ def status():
     pids = running_labels()
     items = login_items()
     if items:
-        print(paint("Открываются при входе (Настройки → Основные → Объекты входа):", "1"))
+        print(paint("Открываются при входе (Настройки → Основные → Объекты входа):", "1;34"))
         for name, path in items:
             mark = OK if os.path.exists(path) else BAD
             print(f"  {mark} {name:<28} {paint(tilde(path), '2')}" + ("" if os.path.exists(path) else "  файла нет"))

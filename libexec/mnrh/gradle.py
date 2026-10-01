@@ -70,7 +70,7 @@ def status():
     running = daemons()
     newest = latest() if has_flag(args, "--check") else None
 
-    print(paint("Версии Gradle:", "1"))
+    print(paint("Версии Gradle:", "1;34"))
     for v in sorted(set(used) | set(inst) | set(running), key=version_key, reverse=True):
         parts = inst.get(v, {"dist": [], "cache": []})
         dist, cache = sizes(parts["dist"]), sizes(parts["cache"])
@@ -249,7 +249,7 @@ def update():
         rows = [(os.path.basename(b[0]), row(b)) for b in behind]
         marked = set(range(len(rows)))
         while True:
-            picked = pick_many(rows, title=f"\x1b[1mmnrh gradle update\x1b[0m  \x1b[2mобновить до {target}\x1b[0m",
+            picked = pick_many(rows, title=f"\x1b[1;35mmnrh gradle update\x1b[0m  \x1b[2mобновить до {target}\x1b[0m",
                                marked=marked, summary=lambda m: f"отмечено {len(m)}")
             if not picked:
                 print("Ничего не менял.")
@@ -268,7 +268,7 @@ def update():
     elif not assume_yes and not has_flag(args, "--all") and not names:
         print("Не терминал, выбрать нельзя. Без вопросов: mnrh gradle update --all -y или mnrh gradle update <проект> -y")
         sys.exit(2)
-    print(paint(f"Обновляю до Gradle {target}: {', '.join(os.path.basename(b[0]) for b in behind)}", "1"))
+    print(paint(f"Обновляю до Gradle {target}: {', '.join(os.path.basename(b[0]) for b in behind)}", "1;34"))
     print(paint("Первый раз скачается дистрибутив (~150 МБ). Каждый проект настраивается на новой версии — "
                 "это и есть проверка.", "2"))
     done = []

@@ -51,7 +51,7 @@ def status():
     flat = [(rt, d) for rt, lst in devices.items() for d in lst]
     booted = [(rt, d) for rt, d in flat if d.get("state") == "Booted"]
     if booted:
-        print(paint("Запущены:", "1"))
+        print(paint("Запущены:", "1;34"))
         for rt, d in booted:
             kind = d.get("deviceTypeIdentifier", "").split(".")[-1].replace("-", " ")
             print(f"  {d['name']} ({kind}, {rt.split('.')[-1].replace('-', ' ', 1).replace('-', '.')})")

@@ -346,7 +346,7 @@ def size_col(n):
 def show(title, group):
     if not group:
         return
-    print(paint(title, "1"))
+    print(paint(title, "1;34"))
     for it in group:
         line = f"  {size_col(it.size)}  {it.label}"
         if blocked(it):
@@ -400,7 +400,7 @@ def choose(previous=None):
         total = sum(order[i].size for i in marks if order[i] is not None)
         return f"отмечено {len(marks)} · {human(total)}"
 
-    picked = pick_many(rows, title="\x1b[1mmnrh disk\x1b[0m  \x1b[2mчто удалить?\x1b[0m", marked=marked, summary=summary)
+    picked = pick_many(rows, title="\x1b[1;35mmnrh disk\x1b[0m  \x1b[2mчто удалить?\x1b[0m", marked=marked, summary=summary)
     if picked is None:
         return None
     return [order[i] for i in sorted(picked) if order[i] is not None]
@@ -408,8 +408,9 @@ def choose(previous=None):
 
 total, used_b, free_before = shutil.disk_usage("/System/Volumes/Data")
 print(f"Свободно {human(free_before)} из {human(total)}\n")
-show("Безопасно, пересоздаётся само:", safe)
-show("Осознанно, прочитай пояснение:", review)
+if not apply:
+    show("Безопасно, пересоздаётся само:", safe)
+    show("Осознанно, прочитай пояснение:", review)
 
 if not safe and not review:
     print("Чистить нечего.")
@@ -426,6 +427,7 @@ if not interactive:
     if not safe:
         print("Безопасно удалять нечего.")
         sys.exit(0)
+    show("Удаляю безопасное:", safe)
     run_cleanup(safe)
     sys.exit(0)
 
@@ -438,7 +440,7 @@ while True:
         print("Ничего не удалено.")
         sys.exit(0)
     size = sum(i.size for i in chosen)
-    print(paint(f"\nУдалю {len(chosen)}, ", "1") + paint(human(size), "1;36") + paint(":", "1"))
+    print(paint(f"\nУдалю {len(chosen)}, ", "1;34") + paint(human(size), "1;36") + paint(":", "1;34"))
     for it in chosen:
         warn = paint(f"  {it.hint}", "2") if it.level == REVIEW and it.hint else ""
         print(f"  {size_col(it.size)}  {it.label}{warn}")

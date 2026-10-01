@@ -219,7 +219,7 @@ def orphans():
         return
     now = time.time()
     fresh = {p for p in found if now - last_change(p) < RECENT_DAYS * 86400}
-    print(paint("Остатки приложений, которых нет в системе:", "1"))
+    print(paint("Остатки приложений, которых нет в системе:", "1;34"))
     for p in found:
         note = paint(f"   менялось за {RECENT_DAYS} дней — чем-то используется, не трогаю", "2") if p in fresh else ""
         print(f"  {human(size[p]):>9}  {tilde(p)}{note}")

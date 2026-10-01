@@ -90,7 +90,7 @@ def status():
     if not keys:
         print("В ~/.ssh ключей нет." + paint("   -> mnrh ssh github", "2"))
     else:
-        print(paint("Ключи в ~/.ssh:", "1"))
+        print(paint("Ключи в ~/.ssh:", "1;34"))
         for k in keys:
             info = run(["ssh-keygen", "-lf", k + ".pub"]).split()
             bits, fp, kind = (info[0], info[1], info[-1].strip("()")) if len(info) >= 3 else ("?", "", "?")

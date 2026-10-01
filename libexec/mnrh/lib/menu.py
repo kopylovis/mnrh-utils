@@ -9,6 +9,7 @@ import time
 import tty
 
 HIDE, SHOW = "\x1b[?25l", "\x1b[?25h"
+TITLE, SUBTITLE = "1;35", "1;34"
 UP = ("\x1b[A", "\x1bOA", "\x10")
 DOWN = ("\x1b[B", "\x1bOB", "\x0e", "\t")
 HOME = ("\x1b[H", "\x1bOH", "\x1b[1~")
@@ -90,7 +91,8 @@ class Menu:
     def draw(self):
         rows, cols = self.size()
         view = self.view()
-        lines = [self.title] if self.title else []
+        title = self.title if not self.title or "\x1b[" in self.title else f"\x1b[{TITLE}m{self.title}\x1b[0m"
+        lines = [title] if self.title else []
         room = max(3, rows - len(lines) - 3)
         if self.sel in view:
             pos = view.index(self.sel)
@@ -104,7 +106,7 @@ class Menu:
             lines.append(f"\x1b[2m     ↑ ещё {self.top}\x1b[0m")
         for i in shown:
             if self.items[i][0] is None:
-                lines.append(cut(f"  \x1b[1;35m{self.items[i][1]}\x1b[0m", cols - 1))
+                lines.append(cut(f"  \x1b[{SUBTITLE}m{self.items[i][1]}\x1b[0m", cols - 1))
                 continue
             box = "" if self.marks is None else ("◉ " if i in self.marks else "○ ")
             text = f"{self.pick_able.index(i) + self.start:>3}) {box}{self.items[i][1]}"
@@ -260,7 +262,7 @@ def choice(question, options, default=0, back=None, esc="назад"):
             label = f" {opt[1]} "
             parts.append(f"\x1b[1;30;46m{label}\x1b[0m" if i == sel else f"\x1b[2m{label}\x1b[0m")
         hint = f"\x1b[2m  ←→ · Enter · Esc — {esc}\x1b[0m"
-        os.write(fd, f"\r\x1b[K\x1b[1m{question}\x1b[0m  {'  '.join(parts)}{hint}".encode())
+        os.write(fd, f"\r\x1b[K\x1b[1;34m{question}\x1b[0m  {'  '.join(parts)}{hint}".encode())
 
     result = back
     try:
@@ -292,7 +294,7 @@ def choice(question, options, default=0, back=None, esc="назад"):
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
         label = next((o[1] for o in options if o[0] == result), "")
-        os.write(fd, f"\r\x1b[K\x1b[1m{question}\x1b[0m  {label}\r\n{SHOW}".encode())
+        os.write(fd, f"\r\x1b[K\x1b[1;34m{question}\x1b[0m  {label}\r\n{SHOW}".encode())
         os.close(fd)
     return result
 

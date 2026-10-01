@@ -88,7 +88,7 @@ def where_added(directory):
 # ---------- PATH ----------
 
 def check_path(path):
-    print(paint("PATH (как в новой вкладке Терминала)", "1"))
+    print(paint("PATH (как в новой вкладке Терминала)", "1;34"))
     seen = {}
     for i, d in enumerate(path, 1):
         seen.setdefault(os.path.realpath(d), []).append(i)
@@ -115,7 +115,7 @@ def check_path(path):
 # ---------- файлы оболочки ----------
 
 def check_rc():
-    print(paint("\nФайлы оболочки", "1"))
+    print(paint("\nФайлы оболочки", "1;34"))
     zsh = os.environ.get("SHELL", "/bin/zsh").endswith("zsh")
     found = False
     for short, path in rc_files():
@@ -185,7 +185,7 @@ def dead_programs(path):
 
 
 def check_links(path):
-    print(paint("\nНе запускаются", "1"))
+    print(paint("\nНе запускаются", "1;34"))
     dead = dead_programs(path)
     for f, why in dead:
         say(BAD, f"{tilde(f)} — {why}")
@@ -240,7 +240,7 @@ def copies(path):
 
 
 def check_copies(path):
-    print(paint("\nНесколько копий одной программы", "1"))
+    print(paint("\nНесколько копий одной программы", "1;34"))
     found, vers = copies(path)
     shown = False
     for tool, files in found.items():
@@ -322,7 +322,7 @@ def old_brew():
 
 
 def check_versions():
-    print(paint("\nУстановленные версии", "1"))
+    print(paint("\nУстановленные версии", "1;34"))
     jdks = list_jdks()
     if jdks:
         majors = {}
@@ -558,7 +558,7 @@ def spare_plan(path):
 
 
 def check_spare(path):
-    print(paint("\nЛишнее", "1"))
+    print(paint("\nЛишнее", "1;34"))
     plan = spare_plan(path)
     if not plan:
         say(OK, "лишних версий, перекрытых копий и архивов нет")
@@ -687,7 +687,7 @@ def clean(path):
     if not plan:
         print(f"{OK} Чистить нечего.")
         return
-    print(paint("Что будет сделано:", "1"))
+    print(paint("Что будет сделано:", "1;34"))
     for text, _ in plan:
         print(f"  • {text}")
     print(paint("\nВсё удаляемое — в Корзину, файлы оболочки — с бэкапом. Для системных папок спросит пароль.", "2"))

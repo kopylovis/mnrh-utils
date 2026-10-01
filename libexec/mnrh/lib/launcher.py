@@ -17,6 +17,14 @@ def bold(text):
     return f"\033[1m{text}\033[0m" if TTY else text
 
 
+def title(text):
+    return f"\033[1;35m{text}\033[0m" if TTY else text
+
+
+def subtitle(text):
+    return f"\033[1;34m{text}\033[0m" if TTY else text
+
+
 def load(registry, have):
     """[(группа, имя, описание, [(аргументы, что делает)])] — только команды, которые есть."""
     have = have.split()
@@ -42,18 +50,18 @@ def load(registry, have):
 
 
 def show_help(items, version, full):
-    print(f"mnrh {version} — утилиты для обслуживания Mac\n")
+    print(title(f"mnrh {version}") + " — утилиты для обслуживания Mac\n")
     groups = list(dict.fromkeys(g for g, *_ in items))
     width = max(len(g) for g in groups)
     for g in groups:
         if full:
-            print(bold(g))
+            print(subtitle(g))
             for gg, n, desc, _ in items:
                 if gg == g:
                     print(f"  mnrh {n:<12} {desc}")
             print()
         else:
-            print(f"  {bold(g.ljust(width))}   {' · '.join(n for gg, n, *_ in items if gg == g)}")
+            print(f"  {subtitle(g.ljust(width))}   {' · '.join(n for gg, n, *_ in items if gg == g)}")
     if not full:
         print()
     print("  mnrh                 меню: стрелки, поиск набором, Enter — выбрать")
@@ -103,7 +111,7 @@ def menu(items, version, at=0):
         rows.append((f"{name} {desc} {g}", f"{name.ljust(width)}{dim(desc)}"))
         index.append(k)
     while True:
-        i = pick(rows, title=f"\x1b[1mmnrh {version}\x1b[0m  {dim('что сделать?')}", default=at)
+        i = pick(rows, title=f"\x1b[1;35mmnrh {version}\x1b[0m  {dim('что сделать?')}", default=at)
         if i is None:
             return None
         at = i
