@@ -121,16 +121,28 @@ def size(n):
     return f"{n / GB:.1f} ГБ" if n >= GB else f"{n / 1048576:.0f} МБ"
 
 
+DAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+
+
 def until(ts):
     try:
-        left = int(ts) - time.time()
+        ts = int(ts)
     except (TypeError, ValueError):
         return ""
+    left = ts - time.time()
     if left <= 0:
         return ""
-    if left < 86400:
-        return time.strftime("до %H:%M", time.localtime(int(ts)))
-    return f"{int(left // 86400)} дн"
+    at = time.localtime(ts)
+    if left < 3600:
+        return f"через {max(1, int(left // 60))} мин"
+    if time.strftime("%Y%m%d", at) == time.strftime("%Y%m%d"):
+        return time.strftime("в %H:%M", at)
+    return f"{DAYS[at.tm_wday]} {time.strftime('%H:%M', at)}"
+
+
+def bar(pct, width=5):
+    filled = min(width, int(round(pct / 100 * width)))
+    return "▰" * filled + "▱" * (width - filled)
 
 
 def claude_line(d):
@@ -142,13 +154,15 @@ def claude_line(d):
     if isinstance(ctx, (int, float)):
         parts.append(color(f"контекст {ctx:.0f}%", level(ctx, 60, 80)))
     limits = d.get("rate_limits") or {}
-    for key, label in (("five_hour", "5 ч"), ("seven_day", "неделя")):
+    for key, label in (("five_hour", "лимит 5 ч"), ("seven_day", "неделя")):
         lim = limits.get(key) or {}
         pct = lim.get("used_percentage")
         if isinstance(pct, (int, float)):
             when = until(lim.get("resets_at"))
-            parts.append(color(f"{label} {pct:.0f}%" + (f" ({when})" if when and pct >= 50 else ""),
-                               level(pct, 70, 90)))
+            text = f"{label} {bar(pct)} {pct:.0f}%" if key == "five_hour" else f"{label} {pct:.0f}%"
+            if when and (key == "five_hour" or pct >= 50):
+                text += f", сброс {when}"
+            parts.append(color(text, level(pct, 70, 90)))
     return parts
 
 
@@ -186,7 +200,7 @@ def work_line(d, path):
         sid = d.get("session_id") or os.path.basename(path)
         n = cached("size-" + sid, 30, lambda: session_size(path))
         if n >= 50 * 1048576:
-            parts.append(color(f"сессия {size(n)}", level(n, 150 * 1048576, 400 * 1048576)))
+            parts.append(color(f"файл сессии {size(n)}", level(n, 150 * 1048576, 400 * 1048576)))
     return parts
 
 
