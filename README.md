@@ -86,11 +86,10 @@ mnrh killdaemons -f   снять и тех, кто занят сборкой
 bash <(curl -fsSL https://raw.githubusercontent.com/kopylovis/homebrew-tap/main/install.sh)
 ```
 
-Скрипт по шагам ставит Homebrew и GitHub CLI, если их нет, выполняет вход в GitHub —
-репозиторий приватный, и Homebrew берёт код через git, — затем `brew install
-kopylovis/tap/mnrh` и `mnrh init`. Запускать можно повторно: сделанное пропускается.
+Скрипт ставит Homebrew, если его нет, затем `brew install kopylovis/tap/mnrh` и
+`mnrh init`. Запускать можно повторно: сделанное пропускается.
 
-Вручную, если вход уже настроен (`gh auth login` и `gh auth setup-git`):
+Вручную:
 
 ```bash
 brew install kopylovis/tap/mnrh
