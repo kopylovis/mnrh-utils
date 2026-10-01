@@ -242,6 +242,58 @@ def pick(items, title="", label="", start=1, default=0, marked=None, summary=Non
     return choice
 
 
+def choice(question, options, default=0, back=None, esc="назад"):
+    fd = os.open("/dev/tty", os.O_RDWR)
+    saved = termios.tcgetattr(fd)
+    sel = min(max(default, 0), len(options) - 1)
+    keys = {}
+    for i, opt in enumerate(options):
+        for k in opt[2] if len(opt) > 2 else ():
+            keys[k] = i
+
+    def draw():
+        parts = []
+        for i, opt in enumerate(options):
+            label = f" {opt[1]} "
+            parts.append(f"\x1b[1;30;46m{label}\x1b[0m" if i == sel else f"\x1b[2m{label}\x1b[0m")
+        hint = f"\x1b[2m  ←→ · Enter · Esc — {esc}\x1b[0m"
+        os.write(fd, f"\r\x1b[K\x1b[1m{question}\x1b[0m  {'  '.join(parts)}{hint}".encode())
+
+    result = back
+    try:
+        tty.setcbreak(fd)
+        attrs = termios.tcgetattr(fd)
+        attrs[3] &= ~termios.ISIG
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        os.write(fd, HIDE.encode())
+        draw()
+        while True:
+            data = os.read(fd, 16)
+            if data == b"\x1b" and select.select([fd], [], [], 0.05)[0]:
+                data += os.read(fd, 16)
+            key = data.decode("utf-8", "ignore")
+            if key in ("\x1b[D", "\x1bOD"):
+                sel = (sel - 1) % len(options)
+            elif key in ("\x1b[C", "\x1bOC", "\t"):
+                sel = (sel + 1) % len(options)
+            elif key in ("\r", "\n"):
+                result = options[sel][0]
+                break
+            elif key in ("\x1b", "\x03", "\x04"):
+                result = back
+                break
+            elif key.lower() in keys:
+                result = options[keys[key.lower()]][0]
+                break
+            draw()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        label = next((o[1] for o in options if o[0] == result), "")
+        os.write(fd, f"\r\x1b[K\x1b[1m{question}\x1b[0m  {label}\r\n{SHOW}".encode())
+        os.close(fd)
+    return result
+
+
 def main():
     p = argparse.ArgumentParser(description="меню со стрелками; пункты «ключ<TAB>текст» из stdin, ответ — индекс с 0")
     p.add_argument("--title", default="")

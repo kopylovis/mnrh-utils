@@ -92,7 +92,7 @@ def dim(text):
     return f"\x1b[2m{text}\x1b[0m"
 
 
-def menu(items, version):
+def menu(items, version, at=0):
     width = max(len(n) for _, n, *_ in items) + 2
     rows, index, group = [], [], None
     for k, (g, name, desc, _) in enumerate(items):
@@ -102,7 +102,6 @@ def menu(items, version):
             group = g
         rows.append((f"{name} {desc} {g}", f"{name.ljust(width)}{dim(desc)}"))
         index.append(k)
-    at = 0
     while True:
         i = pick(rows, title=f"\x1b[1mmnrh {version}\x1b[0m  {dim('что сделать?')}", default=at)
         if i is None:
@@ -124,20 +123,38 @@ def menu(items, version):
         except (KeyboardInterrupt, EOFError):
             return None
         if rest is not None:
-            return [name] + rest
+            return at, [name] + rest
 
 
 def main():
+    if sys.argv[1:2] == ["after"]:
+        return after(sys.argv[2] if len(sys.argv) > 2 else "0")
     mode, registry, have, version = sys.argv[1:5]
     items = load(registry, have)
     if mode == "help":
         show_help(items, version, len(sys.argv) > 5 and sys.argv[5] == "all")
         return 0
-    choice = menu(items, version)
-    if not choice:
+    try:
+        at = int(sys.argv[5]) if len(sys.argv) > 5 else 0
+    except ValueError:
+        at = 0
+    picked = menu(items, version, at)
+    if not picked:
         return 1
-    print(" ".join(shlex.quote(a) for a in choice))
+    at, choice = picked
+    print(f"{at}\t" + " ".join(shlex.quote(a) for a in choice))
     return 0
+
+
+def after(rc):
+    from menu import choice
+    head = "\x1b[32m✓ Готово\x1b[0m" if rc in ("0", "") else f"\x1b[33m! Завершилось с кодом {rc}\x1b[0m"
+    try:
+        print()
+        answer = choice(head, [("menu", "↩ В меню", ""), ("quit", "Выйти", "qй")], default=0, back="quit", esc="выход")
+    except OSError:
+        return 1
+    return 0 if answer == "menu" else 1
 
 
 sys.exit(main())

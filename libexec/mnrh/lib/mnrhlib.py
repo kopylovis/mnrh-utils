@@ -141,7 +141,11 @@ def confirm(question, assume_yes):
     if not _sys.stdin.isatty():
         print("Не терминал, подтвердить нельзя. Повтори с -y")
         _sys.exit(2)
-    return input(f"{question} [y/N] ").strip().lower() in ("y", "yes", "д", "да")
+    try:
+        from menu import choice
+        return choice(question, [("yes", "Да", "yд"), ("no", "Нет", "nн")], default=1, back="no", esc="нет") == "yes"
+    except OSError:
+        return input(f"{question} [y/N] ").strip().lower() in ("y", "yes", "д", "да")
 
 
 def gradle_build_dirs(project):

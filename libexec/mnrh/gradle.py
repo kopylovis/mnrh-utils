@@ -245,13 +245,25 @@ def update():
         return f"{os.path.basename(b[0]):<22} {b[1]} → {target}" + (f"   \x1b[2mAGP {agp}\x1b[0m" if agp else "")
     interactive = sys.stdin.isatty() and sys.stdout.isatty() and not assume_yes
     if interactive:
-        from menu import pick_many
+        from menu import choice, pick_many
         rows = [(os.path.basename(b[0]), row(b)) for b in behind]
-        picked = pick_many(rows, title=f"\x1b[1mmnrh gradle update\x1b[0m  \x1b[2mобновить до {target}\x1b[0m",
-                           marked=range(len(rows)), summary=lambda m: f"отмечено {len(m)}")
-        if not picked:
-            print("Ничего не менял.")
-            return
+        marked = set(range(len(rows)))
+        while True:
+            picked = pick_many(rows, title=f"\x1b[1mmnrh gradle update\x1b[0m  \x1b[2mобновить до {target}\x1b[0m",
+                               marked=marked, summary=lambda m: f"отмечено {len(m)}")
+            if not picked:
+                print("Ничего не менял.")
+                return
+            marked = picked
+            names_line = ", ".join(os.path.basename(behind[i][0]) for i in sorted(picked))
+            answer = choice(f"Обновить {names_line} до {target}?",
+                            [("go", "Обновить", "yд"), ("back", "← К списку", "nн"), ("quit", "Выйти", "qй")],
+                            default=1, back="back")
+            if answer == "go":
+                break
+            if answer == "quit":
+                print("Ничего не менял.")
+                return
         behind = [behind[i] for i in sorted(picked)]
     elif not assume_yes and not has_flag(args, "--all") and not names:
         print("Не терминал, выбрать нельзя. Без вопросов: mnrh gradle update --all -y или mnrh gradle update <проект> -y")

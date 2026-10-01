@@ -339,18 +339,22 @@ def blocked(it):
     return busy.get(id(it), False)
 
 
+def size_col(n):
+    return paint(f"{human(n):>9}", "36")
+
+
 def show(title, group):
     if not group:
         return
     print(paint(title, "1"))
     for it in group:
-        line = f"  {human(it.size):>9}  {it.label}"
+        line = f"  {size_col(it.size)}  {it.label}"
         if blocked(it):
             line += paint(f"   закрой {app_name(it)}", "33")
         elif it.hint:
             line += paint(f"   {it.hint}", "2")
         print(line)
-    print(f"  {human(sum(i.size for i in group)):>9}  итого\n")
+    print(paint(f"  {human(sum(i.size for i in group)):>9}  итого", "1") + "\n")
 
 
 def remove(it):
@@ -370,12 +374,13 @@ def run_cleanup(chosen):
             continue
         ok = remove(it)
         done += ok
-        print(f"  {'удалено' if ok else paint('не вышло', '31')}: {it.label}")
+        print(f"  {paint('✓', '32') if ok else paint('✗ не вышло:', '31')} {it.label}")
     after = shutil.disk_usage("/System/Volumes/Data")[2]
-    print(f"\nСвободно: {human(before)} → {human(after)} (+{human(max(after - before, 0))})")
+    print(f"\nСвободно: {human(before)} → " + paint(human(after), "1;32") +
+          paint(f" (+{human(max(after - before, 0))})", "32"))
 
 
-def choose():
+def choose(previous=None):
     from menu import pick_many
     rows, order = [], []
     for title, group in (("Безопасно — пересоздаётся само", safe), ("Осознанно — прочитай пояснение", review)):
@@ -388,6 +393,8 @@ def choose():
             rows.append((it.label, f"{human(it.size):>8}  {it.label}" + (f"  \x1b[2m{note}\x1b[0m" if note else "")))
             order.append(it)
     marked = {i for i, it in enumerate(order) if it is not None and it.level == SAFE and not blocked(it)}
+    if previous is not None:
+        marked = {i for i, it in enumerate(order) if it is not None and it in previous}
 
     def summary(marks):
         total = sum(order[i].size for i in marks if order[i] is not None)
@@ -422,15 +429,25 @@ if not interactive:
     run_cleanup(safe)
     sys.exit(0)
 
-chosen = choose()
-if not chosen:
-    print("Ничего не удалено.")
-    sys.exit(0)
-size = sum(i.size for i in chosen)
-print(paint(f"Удалю {len(chosen)}, {human(size)}:", "1"))
-for it in chosen:
-    print(f"  {human(it.size):>9}  {it.label}")
-if input("Удалить? [y/N] ").strip().lower() not in ("y", "yes", "д", "да"):
-    print("Отменено.")
-    sys.exit(0)
+from menu import choice
+
+chosen = None
+while True:
+    chosen = choose(chosen)
+    if not chosen:
+        print("Ничего не удалено.")
+        sys.exit(0)
+    size = sum(i.size for i in chosen)
+    print(paint(f"\nУдалю {len(chosen)}, ", "1") + paint(human(size), "1;36") + paint(":", "1"))
+    for it in chosen:
+        warn = paint(f"  {it.hint}", "2") if it.level == REVIEW and it.hint else ""
+        print(f"  {size_col(it.size)}  {it.label}{warn}")
+    print()
+    answer = choice("Удалить?", [("go", "Удалить", "yд"), ("back", "← К списку", "nн"), ("quit", "Выйти", "qй")],
+                    default=1, back="back")
+    if answer == "go":
+        break
+    if answer == "quit":
+        print("Ничего не удалено.")
+        sys.exit(0)
 run_cleanup(chosen)

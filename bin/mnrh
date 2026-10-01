@@ -49,10 +49,17 @@ run() {
 }
 
 if [ $# -eq 0 ] && [ -t 0 ] && [ -t 1 ] && [ -z "${MNRH_NO_MENU:-}" ]; then
-  choice=$(/usr/bin/python3 "$ROOT/libexec/mnrh/lib/launcher.py" menu "$REGISTRY" "$(available | tr '\n' ' ')" "$(cat "$ROOT/VERSION" 2>/dev/null)") || exit 0
-  [ -n "$choice" ] || exit 0
-  eval "set -- $choice"
-  printf '\033[2m$ mnrh %s\033[0m\n' "$choice"
+  at=0
+  trap 'true' INT
+  while true; do
+    picked=$(/usr/bin/python3 "$ROOT/libexec/mnrh/lib/launcher.py" menu "$REGISTRY" "$(available | tr '\n' ' ')" "$(cat "$ROOT/VERSION" 2>/dev/null)" "$at") || exit 0
+    [ -n "$picked" ] || exit 0
+    at=${picked%%$'\t'*}
+    choice=${picked#*$'\t'}
+    printf '\033[2m$ mnrh %s\033[0m\n' "$choice"
+    ( eval "set -- $choice"; "$0" "$@" )
+    /usr/bin/python3 "$ROOT/libexec/mnrh/lib/launcher.py" after "$?" || exit 0
+  done
 fi
 
 case "${1:-help}" in
