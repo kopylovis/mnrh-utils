@@ -230,3 +230,29 @@ def git_versions():
         if m:
             found.append((path, m.group(1)))
     return found
+
+
+def project_root(cwd=None):
+    cwd = os.path.abspath(cwd or os.getcwd())
+    out = run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], timeout=5).strip()
+    return out or cwd
+
+
+def find_project(query=None, cwd=None):
+    if not query:
+        return project_root(cwd), None
+    if query in ("~", "root", "home"):
+        return HOME, None
+    path = os.path.abspath(os.path.expanduser(query))
+    if os.path.isdir(path) and ("/" in query or query.startswith(("~", "."))):
+        return project_root(path), None
+    root = projects_dir()
+    names = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)) and not d.startswith(".")) \
+        if os.path.isdir(root) else []
+    hits = [d for d in names if d.lower() == query.lower()] or \
+        [d for d in names if d.lower().startswith(query.lower())]
+    if len(hits) == 1:
+        return os.path.join(root, hits[0]), None
+    if hits:
+        return None, f"«{query}» подходит к нескольким проектам: {', '.join(hits)}"
+    return None, f"проекта «{query}» нет в {tilde(root)}"

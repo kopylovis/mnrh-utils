@@ -18,7 +18,7 @@ help() {
   cat <<'EOF'
 mnrh claude                 выбрать проект в папке проектов (mnrh init) и запустить в нём Claude Code
 mnrh claude root            запустить в домашнем каталоге
-mnrh claude <имя>           сразу в проекте (достаточно начала имени)
+mnrh claude <имя>           сразу в проекте (достаточно начала имени) или в папке по пути
 mnrh claude ... -n          обычная сессия без вопроса
 mnrh claude ... -k          caffeinate без вопроса
 mnrh claude ... --new       новая сессия, не предлагать продолжить сохранённые
@@ -28,6 +28,10 @@ mnrh claude sessions        сохранённые сессии: размер, �
 mnrh claude restart         изнутри Claude: закрыть и открыть эту же сессию заново, с claude update
 mnrh claude forget          изнутри Claude: удалить эту сессию без следа и открыть чистую в той же папке
 mnrh claude slim            изнутри Claude: сжать эту сессию (старые скриншоты, длинные выводы) и открыть снова
+mnrh claude brief           где мы остановились: git, прошлая сессия, бэклог (/where)
+mnrh claude parallel "<…>"  задача в отдельной ветке и worktree, во втором окне Claude (/parallel)
+mnrh claude ask <пр> <…>    спросить отдельный Claude про другой проект, только чтение (/ask)
+mnrh claude release-notes   материал для «Что нового» к релизу (/release-notes)
 mnrh claude guard           защита от опасных команд и чтения секретов (on, off, skip <правило>, test)
 mnrh claude notify          уведомления, когда Claude ждёт тебя (on, off, after <сек>, test)
 mnrh claude setup           поставить /restart, MCP-сервер mnrh и хук zsh для перезапуска (--remove убрать)
@@ -39,6 +43,10 @@ EOF
 
 case "${1:-}" in
   sessions) shift; exec /usr/bin/python3 "$(dirname "$MENU")/claude_sessions.py" "$@" ;;
+  brief) exec /usr/bin/python3 "$(dirname "$MENU")/claude_brief.py" "$@" ;;
+  parallel) exec /usr/bin/python3 "$(dirname "$MENU")/claude_parallel.py" "$@" ;;
+  ask) exec /usr/bin/python3 "$(dirname "$MENU")/claude_ask.py" "$@" ;;
+  release-notes) exec /usr/bin/python3 "$(dirname "$MENU")/release_notes.py" "$@" ;;
   statusline) exec /usr/bin/python3 "$(dirname "$MENU")/claude_status.py" ;;
   guard|guard-hook) exec /usr/bin/python3 "$(dirname "$MENU")/claude_guard.py" "$@" ;;
   notify|notify-hook|focus) exec /usr/bin/python3 "$(dirname "$MENU")/claude_notify.py" "$@" ;;
@@ -112,6 +120,8 @@ if [ -z "$target" ]; then
   dir=$(choose) || exit 1
 elif [ "$target" = "root" ] || [ "$target" = "~" ]; then
   dir="$HOME"
+elif case "$target" in */*) true ;; *) false ;; esac && [ -d "$target" ]; then
+  dir=$(cd "$target" && pwd)
 else
   dir=$(match "$target") || exit 1
 fi

@@ -17,6 +17,11 @@ import claude_mac
 import claude_open
 import claude_search
 import gradle_deps
+import claude_ask
+import claude_parallel
+import mnrh_todo
+import release_notes
+import window_shot
 
 CLAUDE = os.environ.get("MNRH_CLAUDE_HOME", os.path.join(HOME, ".claude"))
 CLAUDE_BIN = os.environ.get("MNRH_CLAUDE_BIN", "claude")
@@ -28,6 +33,7 @@ COMMAND_FILE = os.path.join(COMMANDS, "restart.md")
 FORGET_FILE = os.path.join(COMMANDS, "forget.md")
 OLD_FORGET_FILE = os.path.join(COMMANDS, "forget-session.md")
 SLIM_FILE = os.path.join(COMMANDS, "slim.md")
+EXTRA_COMMANDS = ["todo", "where", "release-notes", "parallel", "shot", "ask"]
 SLIM_MIN = 5 << 20
 QUEUE = os.path.join(HOME, ".cache", "mnrh", "restart")
 NOTICES = os.path.join(HOME, ".cache", "mnrh", "notice")
@@ -438,6 +444,38 @@ def session_end():
     return 0
 
 
+def read_notice(sid):
+    path = os.path.join(NOTICES, sid + ".json")
+    n = None
+    for _ in range(30):
+        try:
+            with open(path) as f:
+                n = json.load(f)
+        except (OSError, ValueError):
+            return None
+        if n.get("status") != "pending":
+            break
+        time.sleep(0.1)
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return n if n and time.time() - n.get("at", 0) <= NOTICE_TTL else None
+
+
+def brief_wanted(payload, n):
+    import claude_brief
+    if payload.get("source") != "startup" or (n and n.get("kind") == "forget"):
+        return False
+    if os.environ.get("MNRH_CHILD") == "1" or not claude_brief.enabled():
+        return False
+    try:
+        tty = ps("tty", find_claude())
+    except RestartError:
+        return False
+    return bool(tty) and "?" not in tty
+
+
 def notice():
     payload = hook_payload()
     sid = payload.get("session_id")
@@ -446,24 +484,23 @@ def notice():
     path = payload.get("transcript_path")
     if path and os.path.isdir(os.path.dirname(path)):
         background(warm_up, os.path.dirname(path), sid)
-    path = os.path.join(NOTICES, sid + ".json")
-    n = None
-    for _ in range(30):
+    n = read_notice(sid)
+    messages, out = [notice_text(n)] if n else [], {}
+    if brief_wanted(payload, n):
+        import claude_brief
         try:
-            with open(path) as f:
-                n = json.load(f)
-        except (OSError, ValueError):
-            return 0
-        if n.get("status") != "pending":
-            break
-        time.sleep(0.1)
-    try:
-        os.remove(path)
-    except OSError:
-        pass
-    if time.time() - n.get("at", 0) > NOTICE_TTL:
-        return 0
-    print(json.dumps({"systemMessage": notice_text(n)}, ensure_ascii=False))
+            context, line = claude_brief.context_for_model(payload.get("cwd") or os.getcwd(), exclude=sid)
+        except Exception as e:
+            log(f"brief: {e!r}")
+            context, line = "", ""
+        if context:
+            out["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": context}
+        if line:
+            messages.append(line)
+    if messages:
+        out["systemMessage"] = "\n".join(messages)
+    if out:
+        print(json.dumps(out, ensure_ascii=False))
     return 0
 
 
@@ -665,9 +702,21 @@ HANDLERS = {
     "mac_status": lambda a: claude_mac.handle("mac_status", a, MNRH),
     "free_memory": lambda a: claude_mac.handle("free_memory", a, MNRH),
     "deps_outdated": lambda a: gradle_deps.handle(a),
+    "todo_list": lambda a: mnrh_todo.handle("todo_list", a, os.getcwd()),
+    "todo_add": lambda a: mnrh_todo.handle("todo_add", a, os.getcwd()),
+    "todo_done": lambda a: mnrh_todo.handle("todo_done", a, os.getcwd()),
+    "release_notes_context": lambda a: release_notes.handle("release_notes_context", a, os.getcwd()),
+    "release_notes_write": lambda a: release_notes.handle("release_notes_write", a, os.getcwd()),
+    "parallel_task": lambda a: claude_parallel.handle("parallel_task", a, os.getcwd(), MNRH),
+    "parallel_list": lambda a: claude_parallel.handle("parallel_list", a, os.getcwd()),
+    "parallel_finish": lambda a: claude_parallel.handle("parallel_finish", a, os.getcwd()),
+    "window_screenshot": lambda a: window_shot.handle(a),
+    "ask_project": lambda a: claude_ask.ask(a.get("project"), a.get("question"), a.get("model")),
 }
-EXTRA_TOOLS = claude_search.TOOLS + claude_mac.TOOLS + [gradle_deps.TOOL]
-READ_ONLY = [t["name"] for t in EXTRA_TOOLS if t["annotations"].get("readOnlyHint")]
+EXTRA_TOOLS = (claude_search.TOOLS + claude_mac.TOOLS + [gradle_deps.TOOL] + mnrh_todo.TOOLS + release_notes.TOOLS
+               + claude_parallel.TOOLS + [window_shot.TOOL, claude_ask.TOOL])
+READ_ONLY = [t["name"] for t in EXTRA_TOOLS if (t.get("annotations") or {}).get("readOnlyHint")] + \
+    ["todo_add", "todo_done"]
 
 
 def tools():
@@ -703,14 +752,81 @@ def mcp():
                 continue
             args = params.get("arguments")
             try:
-                text, err = handler(args if isinstance(args, dict) else {})
+                result = handler(args if isinstance(args, dict) else {})
             except Exception as e:
-                text, err = f"Не получилось: {e!r}", True
+                result = (f"Не получилось: {e!r}", True)
+            if isinstance(result, dict):
+                send({"jsonrpc": "2.0", "id": rid, "result": result})
+                continue
+            text, err = result
             send({"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": text}], "isError": err}})
         elif method == "ping":
             send({"jsonrpc": "2.0", "id": rid, "result": {}})
         else:
             send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"не умею {method}"}})
+
+
+EXTRA_SLASH = {
+    "todo": """---
+description: Бэклог проекта между сессиями: /todo — список, /todo <текст> — добавить, /todo done <N> — сделано
+allowed-tools: Bash(mnrh todo:*)
+---
+!`mnrh todo $ARGUMENTS`
+
+Покажи пользователю результат выше как есть, без своих действий и пояснений.
+""",
+    "where": """---
+description: Где мы остановились: git, прошлая сессия в этом проекте, бэклог
+allowed-tools: Bash(mnrh claude brief:*)
+---
+!`mnrh claude brief`
+
+По справке выше коротко скажи пользователю, где остановились (что было сделано и в каком всё состоянии) и
+что логично делать дальше — 2–5 пунктов. Ничего не запускай и не меняй.
+""",
+    "release-notes": """---
+description: Заметки к релизу «Что нового» на русском и английском для fastlane; аргументы — проект и/или --since <тег>
+allowed-tools: mcp__mnrh__release_notes_context, mcp__mnrh__release_notes_write, mcp__mnrh__session_search, mcp__mnrh__session_read
+---
+Подготовь заметки к релизу. Аргументы пользователя: «$ARGUMENTS» (может быть имя проекта и --since <тег или коммит>).
+
+1. Вызови release_notes_context (project и since — из аргументов, если они есть).
+2. Если по коммитам неясно, что изменилось для пользователя, загляни в сессии через session_search/session_read.
+3. Напиши «Что нового» для ru-RU и en-US: для пользователей, по делу, без технических подробностей, не длиннее
+   500 символов (тогда текст подойдёт и для Google Play, и для App Store, RuStore, Firebase).
+4. Покажи оба текста и спроси, сохранить ли. После согласия вызови release_notes_write и покажи команду для fastlane.
+""",
+    "parallel": """---
+description: Сделать задачу параллельно: отдельная ветка и worktree, второй Claude в новом окне; list — что идёт
+allowed-tools: mcp__mnrh__parallel_task, mcp__mnrh__parallel_list
+---
+Аргументы: «$ARGUMENTS».
+
+Если аргументов нет или это слово list — вызови parallel_list и покажи результат.
+Иначе вызови parallel_task с task — задачей из аргументов, переписанной так, чтобы она была понятна без контекста
+этой сессии (добавь нужные факты отсюда, если задача на них опирается). Потом коротко скажи пользователю, где
+открылся второй Claude, ссылку Remote Control, если она есть, и как потом влить или выбросить ветку.
+""",
+    "shot": """---
+description: Снимок окна приложения (Chrome, Safari, Simulator…): /shot <приложение> [вопрос]; без аргументов — список окон
+allowed-tools: Bash(mnrh shot:*), Read
+---
+!`mnrh shot $1`
+
+Если выше путь к PNG — открой его инструментом Read и ответь на вопрос пользователя о снимке: «$ARGUMENTS»
+(первое слово — приложение). Если вопроса нет — коротко опиши, что видно. Если выше список окон или ошибка —
+покажи их пользователю.
+""",
+    "ask": """---
+description: Спросить про другой проект: /ask <проект> <вопрос> — ответит отдельный Claude, только чтение
+allowed-tools: mcp__mnrh__ask_project
+---
+Аргументы: «$ARGUMENTS». Первое слово — проект, остальное — вопрос.
+
+Вызови ask_project с этим проектом и вопросом. Если вопрос опирается на контекст этой сессии, допиши в него
+нужные факты, чтобы он был понятен без неё. Ответ перескажи пользователю коротко, сохранив пути и код.
+""",
+}
 
 
 SLIM_SLASH = """---
@@ -832,7 +948,8 @@ def notice_hook(install):
 def setup(args):
     marker = "share/mnrh/restart.zsh"
     if "--remove" in args:
-        for f in (COMMAND_FILE, FORGET_FILE, SLIM_FILE, OLD_FORGET_FILE):
+        for f in [COMMAND_FILE, FORGET_FILE, SLIM_FILE, OLD_FORGET_FILE] + \
+                [os.path.join(COMMANDS, f"{n}.md") for n in EXTRA_COMMANDS]:
             if os.path.exists(f):
                 os.remove(f)
         subprocess.run(["claude", "mcp", "remove", "--scope", "user", "mnrh"], capture_output=True)
@@ -841,12 +958,14 @@ def setup(args):
         kept = [l for l in lines if marker not in l]
         if kept != lines:
             write_zshrc(kept)
-        print(f"Убрал /restart, /forget, /slim, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
+        print(f"Убрал /restart, /forget, /slim, /todo, /where, /release-notes, /parallel, /shot, /ask, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
         return 0
     os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
     if os.path.exists(OLD_FORGET_FILE):
         os.remove(OLD_FORGET_FILE)
-    for path, text in ((COMMAND_FILE, SLASH), (FORGET_FILE, FORGET_SLASH), (SLIM_FILE, SLIM_SLASH)):
+    pages = [(COMMAND_FILE, SLASH), (FORGET_FILE, FORGET_SLASH), (SLIM_FILE, SLIM_SLASH)] + \
+        [(os.path.join(COMMANDS, f"{n}.md"), EXTRA_SLASH[n]) for n in EXTRA_COMMANDS]
+    for path, text in pages:
         with open(path, "w") as f:
             f.write(text)
         print(f"✓ /{os.path.basename(path)[:-3]} → {tilde(path)}")

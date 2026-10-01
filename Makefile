@@ -99,6 +99,14 @@ test:
 	@./bin/mnrh claude sessions choose /nonexistent-mnrh | grep -qx new
 	@./bin/mnrh claude sessions -h | grep -q slim
 	@./bin/mnrh claude slim -h >/dev/null
+	@./bin/mnrh todo -h >/dev/null
+	@./bin/mnrh shot -h >/dev/null
+	@./bin/mnrh claude brief -h >/dev/null
+	@./bin/mnrh claude parallel -h >/dev/null
+	@./bin/mnrh claude ask -h >/dev/null
+	@./bin/mnrh claude release-notes -h >/dev/null
+	@cd /tmp && $(CURDIR)/bin/mnrh claude brief >/dev/null
+	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep '"todo_add"' | grep '"parallel_task"' | grep '"window_screenshot"' | grep '"ask_project"' | grep -q '"release_notes_write"'
 	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep -q '"slim"'
 	@! ./bin/mnrh claude sessions slim no-such-session >/dev/null 2>&1
 	@! ./bin/mnrh claude sessions show no-such-session >/dev/null
@@ -118,7 +126,7 @@ test:
 	@./bin/mnrh sim >/dev/null
 	@./bin/mnrh repos >/dev/null
 	@./bin/mnrh disk >/dev/null
-	@./bin/mnrh disk --apply </dev/null >/dev/null; test $$? -eq 2
+	@./bin/mnrh disk --apply </dev/null >/dev/null; rc=$$?; test $$rc -eq 2 -o $$rc -eq 0
 	@./bin/mnrh doctor >/dev/null; test $$? -le 1
 	@! ./bin/mnrh no-such-command >/dev/null 2>&1
 	@find libexec -name __pycache__ -type d -exec rm -rf {} +

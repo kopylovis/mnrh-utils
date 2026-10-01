@@ -143,9 +143,13 @@ def open_claude(args, mnrh):
     """-> (текст, ошибка ли)"""
     root, dirs = project_dirs()
     project = (args.get("project") or "").strip()
-    if not project:
+    direct = args.get("path")
+    if direct:
+        found = [os.path.abspath(direct)]
+    elif not project:
         return choices(root, dirs), False
-    found = match(project, dirs)
+    else:
+        found = match(project, dirs)
     if len(found) != 1:
         note = (f"«{project}» подходит к нескольким: {', '.join(os.path.basename(d) for d in found)}." if found
                 else f"Проекта «{project}» нет в {tilde(root)}.")
@@ -156,11 +160,12 @@ def open_claude(args, mnrh):
         return f"Режим бывает caffeinate или normal, а не «{mode}».", True
 
     name = "~" if target == HOME else os.path.basename(target)
-    cmd = [mnrh, "claude", name, MODES[mode], "--new"]
+    cmd = [mnrh, "claude", target if direct else name, MODES[mode], "--new"]
     rc = args.get("remote_control", True) is not False
     # имя у --remote-control необязательное: без него первый запрос принялся бы за имя
     extra = (["--remote-control", "home" if name == "~" else name] if rc else []) + \
-        (["--continue"] if args.get("continue") else []) + ([args["prompt"]] if args.get("prompt") else [])
+        (["--continue"] if args.get("continue") else []) + list(args.get("flags") or []) + \
+        ([args["prompt"]] if args.get("prompt") else [])
     if extra:
         cmd += ["--"] + extra
     line = " ".join(shlex.quote(c) for c in cmd)
