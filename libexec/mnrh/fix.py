@@ -6,7 +6,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import OK, BAD, WARN, adb_path, has_flag, process_commands, run
+from mnrhlib import OK, BAD, WARN, adb_path, has_flag, process_commands, run, settings_name, settings_path
 
 args = sys.argv[1:]
 
@@ -65,7 +65,8 @@ def scroll():
         return 0
     if not running:
         print("Scroll Reverser и похожие программы не запущены — переворачивает не они.")
-        print("Попробуй выключить и включить «Естественную прокрутку»: Настройки → Трекпад → Прокрутка и масштаб.")
+        print(f"Попробуй выключить и включить «{settings_name('natural')}»: "
+              f"{settings_path('settings', 'trackpad', 'scroll')}.")
         return 1
     ok = True
     for name, found in running:

@@ -8,7 +8,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mnrhlib import HOME, tilde
+from mnrhlib import HOME, settings_path, tilde
 
 SHOTS = os.path.join(HOME, ".cache", "mnrh", "shots")
 MAX_SIDE = 1600
@@ -56,7 +56,7 @@ def choose(app=None, title=None):
     ws = windows()
     if not ws:
         return None, ("Не вижу ни одного окна. Нужно разрешение «Запись экрана» для терминала, в котором идёт "
-                      "Claude: Системные настройки → Конфиденциальность и безопасность → Запись экрана и аудио.")
+                      f"Claude: {settings_path('settings', 'privacy', 'screen')}.")
     hits = ws
     if app:
         q = app.lower()

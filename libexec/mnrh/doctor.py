@@ -8,7 +8,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import BAD, HOME, OK, WARN, git_versions, human, has_flag, paint, run, tilde, version_key
+from mnrhlib import BAD, HOME, OK, WARN, git_versions, human, has_flag, paint, run, settings_path, tilde, \
+    version_key
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help"):
@@ -204,12 +205,12 @@ def check_security():
     section("Безопасность")
     fw = run(["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate"])
     if "disabled" in fw:
-        item("warn", "файрвол выключен", "Системные настройки -> Сеть -> Файрвол")
+        item("warn", "файрвол выключен", settings_path("settings", "network", "firewall"))
     elif fw:
         item("ok", "файрвол включён")
     fv = run(["fdesetup", "status"])
     if "Off" in fv:
-        item("warn", "FileVault выключен, диск не зашифрован", "Системные настройки -> Конфиденциальность и безопасность")
+        item("warn", "FileVault выключен, диск не зашифрован", settings_path("settings", "privacy"))
     elif "On" in fv:
         item("ok", "FileVault включён")
     sip = run(["csrutil", "status"])

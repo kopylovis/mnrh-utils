@@ -20,8 +20,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 
 
 class SwiftAgent:
-    def __init__(self, name, display, label):
+    def __init__(self, name, display, label, service_args=None):
         self.name, self.display, self.label = name, display, label
+        self.service_args = service_args
         self.src = os.path.join(ROOT, "share", "mnrh", name, "main.swift")
         self.app = os.path.join(HOME, "Library", "Application Support", "mnrh", f"{display}.app")
         self.bin = os.path.join(self.app, "Contents", "MacOS", f"mnrh-{name}")
@@ -30,6 +31,7 @@ class SwiftAgent:
         self.state_file = os.path.join(HOME, ".cache", "mnrh", f"{name}.json")
         self.log = os.path.join(HOME, "Library", "Logs", f"mnrh-{name}.log")
         self.domain = f"gui/{os.getuid()}"
+        self.bundle_plist = os.path.join(self.app, "Contents", "Library", "LaunchAgents", f"{label}.plist")
 
     def launchctl(self, *a):
         return subprocess.run(["launchctl", *a], capture_output=True, text=True)
@@ -38,7 +40,34 @@ class SwiftAgent:
         return self.launchctl("print", f"{self.domain}/{self.label}").returncode == 0
 
     def installed(self):
+        if self.service_args is not None:
+            return os.path.exists(self.plist) or self.service("--service-status") in ("enabled", "requiresApproval")
         return os.path.exists(self.plist)
+
+    def service_plist(self):
+        exe = os.path.basename(self.bin)
+        return plistlib.dumps({
+            "Label": self.label,
+            "BundleProgram": f"Contents/MacOS/{exe}",
+            "ProgramArguments": [exe, *self.service_args, "--state", self.state_file],
+            "AssociatedBundleIdentifiers": [self.label],
+            "RunAtLoad": True,
+            "KeepAlive": True,
+            "ProcessType": "Interactive",
+            "StandardErrorPath": self.log,
+            "StandardOutPath": self.log,
+        })
+
+    def service(self, command):
+        if not os.access(self.bin, os.X_OK) or not os.path.exists(self.bundle_plist):
+            return "notRegistered"
+        r = subprocess.run([self.bin, command], capture_output=True, text=True, timeout=30)
+        return (r.stdout.strip() or r.stderr.strip() or "error").splitlines()[-1]
+
+    def drop_legacy(self):
+        if self.service_args is not None and os.path.exists(self.plist):
+            self.launchctl("bootout", f"{self.domain}/{self.label}")
+            os.unlink(self.plist)
 
     def state(self):
         try:
@@ -61,6 +90,8 @@ class SwiftAgent:
             if p:
                 with open(p, "rb") as f:
                     h.update(f.read())
+        if self.service_args is not None:
+            h.update(self.service_plist())
         return h.hexdigest()
 
     def make_icns(self, tmp):
@@ -100,6 +131,10 @@ class SwiftAgent:
             os.makedirs(os.path.dirname(self.stamp))
             shutil.copy2(out, self.bin)
             has_icon = self.make_icns(tmp)
+        if self.service_args is not None:
+            os.makedirs(os.path.dirname(self.bundle_plist))
+            with open(self.bundle_plist, "wb") as f:
+                f.write(self.service_plist())
         info = {"CFBundleIdentifier": self.label, "CFBundleName": self.display,
                 "CFBundleDisplayName": self.display, "CFBundleExecutable": os.path.basename(self.bin),
                 "CFBundlePackageType": "APPL", "CFBundleVersion": str(int(time.time())),
@@ -136,6 +171,9 @@ class SwiftAgent:
             }, f)
 
     def stop(self):
+        if self.service_args is not None:
+            self.drop_legacy()
+            self.service("--unregister")
         if self.loaded():
             self.launchctl("bootout", f"{self.domain}/{self.label}")
             for _ in range(20):
@@ -144,16 +182,28 @@ class SwiftAgent:
                 time.sleep(0.25)
 
     def start(self):
-        """Перезапускает с текущим plist. True, если помощник поднялся и записал состояние."""
-        self.stop()
+        """Перезапускает с текущим plist. True, если помощник поднялся и записал состояние.
+
+        У помощника с service_args plist лежит в самом приложении и регистрируется через SMAppService;
+        если macOS ждёт разрешения в «Объектах входа», возвращает строку "requiresApproval"."""
         try:
             if os.path.getsize(self.log) > 1048576:
                 os.truncate(self.log, 0)
         except OSError:
             pass
-        r = self.launchctl("bootstrap", self.domain, self.plist)
-        if r.returncode != 0:
-            sys.exit(f"launchctl не запустил помощника: {r.stderr.strip()}")
+        if self.service_args is not None:
+            self.drop_legacy()
+            status = self.service("--register")
+            if status == "requiresApproval":
+                return status
+            if status != "enabled":
+                sys.exit(f"macOS не зарегистрировал помощника: {status}")
+            self.launchctl("kickstart", "-k", f"{self.domain}/{self.label}")
+        else:
+            self.stop()
+            r = self.launchctl("bootstrap", self.domain, self.plist)
+            if r.returncode != 0:
+                sys.exit(f"launchctl не запустил помощника: {r.stderr.strip()}")
         for _ in range(20):
             if self.state():
                 return True

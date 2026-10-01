@@ -9,6 +9,7 @@
 import AppKit
 import ApplicationServices
 import IOKit
+import ServiceManagement
 
 struct Axes {
     var vertical = false
@@ -33,8 +34,37 @@ while let arg = argv.next() {
     case "--trackpad": trackpad = Axes(argv.next() ?? "")
     case "--step": wheelStep = Int64(argv.next() ?? "") ?? 3
     case "--state": stateFile = argv.next() ?? ""
+    case "--config":
+        let path = argv.next() ?? ""
+        if let data = FileManager.default.contents(atPath: path),
+           let conf = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            mouse = Axes(conf["mouse"] as? String ?? "vh")
+            trackpad = Axes(conf["trackpad"] as? String ?? "")
+            wheelStep = Int64(conf["step"] as? Int ?? 3)
+        }
     default: break
     }
+}
+
+// --register, --unregister, --service-status: фоновый объект из Contents/Library/LaunchAgents этого
+// приложения. Так «Объекты входа» показывают имя и иконку приложения, а не голый бинарник.
+let serviceCommands = ["--register", "--unregister", "--service-status"]
+if let command = CommandLine.arguments.dropFirst().first(where: serviceCommands.contains) {
+    let service = SMAppService.agent(plistName: (Bundle.main.bundleIdentifier ?? "com.mnrh.scroll") + ".plist")
+    do {
+        if command == "--register" && service.status != .enabled { try service.register() }
+        if command == "--unregister" && service.status != .notRegistered { try service.unregister() }
+    } catch {
+        print("error \(error.localizedDescription)")
+        exit(1)
+    }
+    switch service.status {
+    case .enabled: print("enabled")
+    case .requiresApproval: print("requiresApproval")
+    case .notFound: print("notFound")
+    default: print("notRegistered")
+    }
+    exit(0)
 }
 
 func log(_ text: String) {
@@ -234,7 +264,7 @@ let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
 if AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary) {
     startTap()
 } else {
-    log("жду доступ: Настройки -> Конфиденциальность и безопасность -> Универсальный доступ -> mnrh scroll")
+    log("жду доступ в Универсальном доступе")
 }
 
 // Раз в несколько секунд: появился ли доступ, жив ли перехват, свежее состояние на диск.

@@ -9,7 +9,7 @@ import shlex
 import subprocess
 import time
 
-from mnrhlib import HOME, projects_dir, run, tilde
+from mnrhlib import HOME, projects_dir, run, settings_path, tilde
 
 OPEN = {
     "Apple_Terminal": '''
@@ -176,7 +176,7 @@ def open_claude(args, mnrh):
     app = "iTerm2" if term == "iTerm.app" else "Terminal"
     if r.returncode or not tty.startswith("/dev/"):
         err = (r.stderr or r.stdout).strip()
-        hint = (" Нужно разрешение: Настройки → Конфиденциальность → Автоматизация → разрешить управлять "
+        hint = (f" Нужно разрешение: {settings_path('settings', 'privacy', 'automation')} → разрешить управлять "
                 f"{app}.") if "-1743" in err or "not allowed" in err.lower() else ""
         return f"Не получилось открыть окно {app}: {err or 'osascript без ответа'}.{hint}", True
 

@@ -12,7 +12,7 @@ import time
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mnrhlib import HOME, tilde
+from mnrhlib import HOME, settings_path, tilde
 import claude_mac
 import claude_open
 import claude_search
@@ -252,8 +252,8 @@ def preflight(p):
         return
     code, out = osascript(p["term"], p["tty"])
     if code != 0:
-        raise RestartError("macOS не дал управлять терминалом: разреши в Системные настройки → "
-                           f"Конфиденциальность и безопасность → Автоматизация ({out})")
+        raise RestartError("macOS не дал управлять терминалом: разреши в "
+                           f"{settings_path('settings', 'privacy', 'automation')} ({out})")
     if out != "ok":
         raise RestartError(f"не нашёл вкладку с {p['tty']}")
 

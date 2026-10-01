@@ -9,7 +9,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mnrhlib import HOME, read_config, tilde, write_config
+from mnrhlib import HOME, read_config, settings_name, settings_path, tilde, write_config
 from swiftagent import SwiftAgent
 
 AGENT = SwiftAgent("notify", "mnrh Notify", "com.mnrh.notify")
@@ -327,7 +327,8 @@ def test():
         print("✓ показано")
         return 0
     if r.startswith("denied"):
-        print("✗ macOS не разрешает уведомления: Системные настройки → Уведомления → mnrh Notify → Разрешить")
+        print(f"✗ macOS не разрешает уведомления: {settings_path('settings', 'notifications')} → mnrh Notify → "
+              f"{settings_name('allow')}")
     else:
         print(f"✗ не получилось: {r}")
     return 1

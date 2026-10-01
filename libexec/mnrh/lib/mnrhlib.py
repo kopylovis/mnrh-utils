@@ -45,6 +45,45 @@ def has_flag(args, *names):
     return any(a in args for a in names)
 
 
+SETTINGS_NAMES = {
+    "settings": ("Системные настройки", "System Settings"),
+    "privacy": ("Конфиденциальность и безопасность", "Privacy & Security"),
+    "accessibility": ("Универсальный доступ", "Accessibility"),
+    "automation": ("Автоматизация", "Automation"),
+    "screen": ("Запись экрана и аудио", "Screen & System Audio Recording"),
+    "notifications": ("Уведомления", "Notifications"),
+    "allow": ("Разрешить уведомления", "Allow notifications"),
+    "general": ("Основные", "General"),
+    "login": ("Объекты входа и расширения", "Login Items & Extensions"),
+    "background": ("Разрешить в фоне", "Allow in the Background"),
+    "update": ("Обновление ПО", "Software Update"),
+    "network": ("Сеть", "Network"),
+    "firewall": ("Брандмауэр", "Firewall"),
+    "trackpad": ("Трекпад", "Trackpad"),
+    "scroll": ("Прокрутка и масштаб", "Scroll & Zoom"),
+    "natural": ("Естественная прокрутка", "Natural scrolling"),
+}
+_english = None
+
+
+def system_english():
+    global _english
+    if _english is None:
+        langs = run(["defaults", "read", "-g", "AppleLanguages"], timeout=5)
+        m = re.search(r'"?([A-Za-z]{2})', langs)
+        _english = bool(m) and m.group(1).lower() != "ru"
+    return _english
+
+
+def settings_name(key):
+    names = SETTINGS_NAMES.get(key)
+    return (names[1] if system_english() else names[0]) if names else key
+
+
+def settings_path(*keys):
+    return " → ".join(settings_name(k) for k in keys)
+
+
 CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "mnrh", "config")
 DEFAULT_DEV = os.path.join(HOME, "Developer")
 

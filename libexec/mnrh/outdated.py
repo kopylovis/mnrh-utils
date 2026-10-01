@@ -8,7 +8,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import HOME, OK, WARN, gradle_versions_in_use, has_flag, paint, run, version_key
+from mnrhlib import HOME, OK, WARN, gradle_versions_in_use, has_flag, paint, run, settings_path, version_key
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or args:
@@ -87,7 +87,7 @@ for title, version, restart in mac:
     name = title if title.endswith(version) else f"{title} {version}"
     print(f"  {WARN} {name}" + paint("  (с перезагрузкой)" if restart else "", "2"))
 if mac:
-    print(paint("  Поставить: Настройки → Основные → Обновление ПО", "2"))
+    print(paint(f"  Поставить: {settings_path('settings', 'general', 'update')}", "2"))
 
 if formulae is not None:
     section("Homebrew")

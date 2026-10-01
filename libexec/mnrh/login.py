@@ -8,7 +8,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import BAD, HOME, OK, WARN, has_flag, paint, run, tilde
+from mnrhlib import BAD, HOME, OK, WARN, has_flag, paint, run, settings_path, tilde
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or (args and args[0] != "off"):
@@ -94,7 +94,7 @@ def status():
     pids = running_labels()
     items = login_items()
     if items:
-        print(paint("Открываются при входе (Настройки → Основные → Объекты входа):", "1;34"))
+        print(paint(f"Открываются при входе ({settings_path('settings', 'general', 'login')}):", "1;34"))
         for name, path in items:
             mark = OK if os.path.exists(path) else BAD
             print(f"  {mark} {name:<28} {paint(tilde(path), '2')}" + ("" if os.path.exists(path) else "  файла нет"))
