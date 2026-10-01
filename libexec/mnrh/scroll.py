@@ -150,9 +150,10 @@ def on():
     write_helper_config(mouse, trackpad, step)
     if agent.source_hash() != (open(agent.stamp).read().strip() if os.path.exists(agent.stamp) else ""):
         stop_agent()
+    old_label = agent.label
     rebuilt = build()
     if rebuilt and had_binary:
-        subprocess.run(["tccutil", "reset", "Accessibility", agent.label], capture_output=True)
+        subprocess.run(["tccutil", "reset", "Accessibility", old_label], capture_output=True)
     if quit_scroll_reverser():
         print(f"{SR} закрыт, чтобы прокрутка не переворачивалась дважды.")
     started = start_agent()
@@ -184,9 +185,10 @@ def off():
 
 
 def remove():
+    label = agent.label
     off()
     shutil.rmtree(APP, ignore_errors=True)
-    r = subprocess.run(["tccutil", "reset", "Accessibility", agent.label], capture_output=True, text=True)
+    r = subprocess.run(["tccutil", "reset", "Accessibility", label], capture_output=True, text=True)
     print("Помощник удалён с диска" + (", доступ в настройках сброшен." if r.returncode == 0 else
                                        f". Строку «mnrh Scroll» в {ACCESS} можно удалить «−»."))
 

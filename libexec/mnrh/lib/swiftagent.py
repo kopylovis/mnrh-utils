@@ -21,7 +21,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 
 class SwiftAgent:
     def __init__(self, name, display, label, service_args=None):
-        self.name, self.display, self.label = name, display, label
+        self.name, self.display, self.base = name, display, label
         self.service_args = service_args
         self.src = os.path.join(ROOT, "share", "mnrh", name, "main.swift")
         self.app = os.path.join(HOME, "Library", "Application Support", "mnrh", f"{display}.app")
@@ -31,7 +31,28 @@ class SwiftAgent:
         self.state_file = os.path.join(HOME, ".cache", "mnrh", f"{name}.json")
         self.log = os.path.join(HOME, "Library", "Logs", f"mnrh-{name}.log")
         self.domain = f"gui/{os.getuid()}"
-        self.bundle_plist = os.path.join(self.app, "Contents", "Library", "LaunchAgents", f"{label}.plist")
+        self.agents_dir = os.path.join(self.app, "Contents", "Library", "LaunchAgents")
+
+    @property
+    def label(self):
+        if self.service_args is not None:
+            try:
+                with open(os.path.join(self.app, "Contents", "Info.plist"), "rb") as f:
+                    return plistlib.load(f).get("CFBundleIdentifier") or self.base
+            except (OSError, ValueError):
+                pass
+        return self.base
+
+    def build_label(self):
+        if self.service_args is None:
+            return self.base
+        h = hashlib.sha256()
+        for p in (self.src, self.icon()):
+            if p:
+                with open(p, "rb") as f:
+                    h.update(f.read())
+        h.update(json.dumps([self.service_args, self.state_file, self.log]).encode())
+        return f"{self.base}.{h.hexdigest()[:8]}"
 
     def launchctl(self, *a):
         return subprocess.run(["launchctl", *a], capture_output=True, text=True)
@@ -44,13 +65,13 @@ class SwiftAgent:
             return os.path.exists(self.plist) or self.service("--service-status") in ("enabled", "requiresApproval")
         return os.path.exists(self.plist)
 
-    def service_plist(self):
+    def service_plist(self, label):
         exe = os.path.basename(self.bin)
         return plistlib.dumps({
-            "Label": self.label,
+            "Label": label,
             "BundleProgram": f"Contents/MacOS/{exe}",
             "ProgramArguments": [exe, *self.service_args, "--state", self.state_file],
-            "AssociatedBundleIdentifiers": [self.label],
+            "AssociatedBundleIdentifiers": [label],
             "RunAtLoad": True,
             "KeepAlive": True,
             "ProcessType": "Interactive",
@@ -59,7 +80,7 @@ class SwiftAgent:
         })
 
     def service(self, command):
-        if not os.access(self.bin, os.X_OK) or not os.path.exists(self.bundle_plist):
+        if not os.access(self.bin, os.X_OK) or not os.path.isdir(self.agents_dir):
             return "notRegistered"
         r = subprocess.run([self.bin, command], capture_output=True, text=True, timeout=30)
         return (r.stdout.strip() or r.stderr.strip() or "error").splitlines()[-1]
@@ -81,7 +102,7 @@ class SwiftAgent:
 
     def drop_legacy(self):
         if self.service_args is not None and os.path.exists(self.plist):
-            self.launchctl("bootout", f"{self.domain}/{self.label}")
+            self.launchctl("bootout", f"{self.domain}/{self.base}")
             os.unlink(self.plist)
 
     def state(self):
@@ -106,10 +127,10 @@ class SwiftAgent:
                 with open(p, "rb") as f:
                     h.update(f.read())
         if self.service_args is not None:
-            h.update(self.service_plist())
+            h.update(self.service_plist(self.build_label()))
         return h.hexdigest()
 
-    def make_icns(self, tmp):
+    def make_icns(self, tmp, resources):
         png = self.icon()
         if not png:
             return False
@@ -120,7 +141,7 @@ class SwiftAgent:
                 name = f"icon_{size}x{size}{'@2x' if scale == 2 else ''}.png"
                 px = str(size * scale)
                 subprocess.run(["sips", "-z", px, px, png, "--out", os.path.join(iconset, name)], capture_output=True)
-        out = os.path.join(self.app, "Contents", "Resources", "AppIcon.icns")
+        out = os.path.join(resources, "AppIcon.icns")
         return subprocess.run(["iconutil", "-c", "icns", iconset, "-o", out], capture_output=True).returncode == 0
 
     def build(self):
@@ -136,34 +157,42 @@ class SwiftAgent:
             sys.exit("Нужен компилятор Swift из Xcode Command Line Tools: xcode-select --install")
         print(f"Собираю {self.display}...")
         with tempfile.TemporaryDirectory() as tmp:
-            out = os.path.join(tmp, "bin")
-            r = subprocess.run(["swiftc", "-O", "-swift-version", "5", self.src, "-o", out],
+            app = os.path.join(tmp, os.path.basename(self.app))
+            contents = os.path.join(app, "Contents")
+            binary = os.path.join(contents, "MacOS", os.path.basename(self.bin))
+            resources = os.path.join(contents, "Resources")
+            os.makedirs(os.path.dirname(binary))
+            os.makedirs(resources)
+            r = subprocess.run(["swiftc", "-O", "-swift-version", "5", self.src, "-o", binary],
                                capture_output=True, text=True)
             if r.returncode != 0:
                 sys.exit("Сборка не удалась:\n" + r.stderr[-2000:])
+            has_icon = self.make_icns(tmp, resources)
+            label = self.build_label()
+            if self.service_args is not None:
+                agents = os.path.join(contents, "Library", "LaunchAgents")
+                os.makedirs(agents)
+                with open(os.path.join(agents, f"{label}.plist"), "wb") as f:
+                    f.write(self.service_plist(label))
+            info = {"CFBundleIdentifier": label, "CFBundleName": self.display,
+                    "CFBundleDisplayName": self.display, "CFBundleExecutable": os.path.basename(self.bin),
+                    "CFBundlePackageType": "APPL", "CFBundleVersion": str(int(time.time())),
+                    "CFBundleShortVersionString": "1." + time.strftime("%Y%m%d"), "LSUIElement": True}
+            if has_icon:
+                info["CFBundleIconFile"] = "AppIcon"
+            with open(os.path.join(contents, "Info.plist"), "wb") as f:
+                plistlib.dump(info, f)
+            with open(os.path.join(resources, os.path.basename(self.stamp)), "w") as f:
+                f.write(want + "\n")
+            r = subprocess.run(["codesign", "--force", "--sign", "-", "--identifier", label, app],
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                sys.exit("Не удалось подписать помощника:\n" + r.stderr)
             shutil.rmtree(self.app, ignore_errors=True)
-            os.makedirs(os.path.dirname(self.bin))
-            os.makedirs(os.path.dirname(self.stamp))
-            shutil.copy2(out, self.bin)
-            has_icon = self.make_icns(tmp)
-        if self.service_args is not None:
-            os.makedirs(os.path.dirname(self.bundle_plist))
-            with open(self.bundle_plist, "wb") as f:
-                f.write(self.service_plist())
-        info = {"CFBundleIdentifier": self.label, "CFBundleName": self.display,
-                "CFBundleDisplayName": self.display, "CFBundleExecutable": os.path.basename(self.bin),
-                "CFBundlePackageType": "APPL", "CFBundleVersion": str(int(time.time())),
-                "CFBundleShortVersionString": "1." + time.strftime("%Y%m%d"), "LSUIElement": True}
-        if has_icon:
-            info["CFBundleIconFile"] = "AppIcon"
-        with open(os.path.join(self.app, "Contents", "Info.plist"), "wb") as f:
-            plistlib.dump(info, f)
-        with open(self.stamp, "w") as f:
-            f.write(want + "\n")
-        r = subprocess.run(["codesign", "--force", "--sign", "-", "--identifier", self.label, self.app],
-                           capture_output=True, text=True)
-        if r.returncode != 0:
-            sys.exit("Не удалось подписать помощника:\n" + r.stderr)
+            os.makedirs(os.path.dirname(self.app), exist_ok=True)
+            r = subprocess.run(["ditto", app, self.app], capture_output=True, text=True)
+            if r.returncode != 0:
+                sys.exit("Не удалось положить помощника на место:\n" + r.stderr)
         lsregister = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/"
                       "Support/lsregister")
         if os.path.exists(lsregister):
@@ -175,8 +204,7 @@ class SwiftAgent:
         os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
         with open(self.plist, "wb") as f:
             plistlib.dump({
-                "Label": self.label,
-                "AssociatedBundleIdentifiers": [self.label],
+                "Label": self.base,
                 "ProgramArguments": [self.bin, *extra_args, "--state", self.state_file],
                 "RunAtLoad": True,
                 "KeepAlive": True,
@@ -205,17 +233,28 @@ class SwiftAgent:
             pass
         if self.service_args is not None:
             self.drop_legacy()
-            status = self.service("--register")
-            if status == "requiresApproval":
-                return status
-            if status != "enabled":
-                sys.exit(f"macOS не зарегистрировал помощника: {status}")
-            self.launchctl("kickstart", "-k", f"{self.domain}/{self.label}")
-        else:
-            self.stop()
-            r = self.launchctl("bootstrap", self.domain, self.plist)
-            if r.returncode != 0:
-                sys.exit(f"launchctl не запустил помощника: {r.stderr.strip()}")
+            was = self.service("--service-status") == "enabled"
+            for attempt in range(16):
+                status = self.service("--register")
+                if status == "requiresApproval":
+                    return status
+                if status != "enabled":
+                    sys.exit(f"macOS не зарегистрировал помощника: {status}")
+                if was:
+                    self.launchctl("kickstart", "-k", f"{self.domain}/{self.label}")
+                if self.wait_state():
+                    return True
+                self.service("--unregister")
+                was = False
+                time.sleep(5)
+            return False
+        self.stop()
+        r = self.launchctl("bootstrap", self.domain, self.plist)
+        if r.returncode != 0:
+            sys.exit(f"launchctl не запустил помощника: {r.stderr.strip()}")
+        return self.wait_state()
+
+    def wait_state(self):
         for _ in range(20):
             if self.state():
                 return True

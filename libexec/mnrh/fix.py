@@ -7,6 +7,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 from mnrhlib import OK, BAD, WARN, adb_path, has_flag, process_commands, run, settings_name, settings_path
+from swiftagent import SwiftAgent
 
 args = sys.argv[1:]
 
@@ -56,10 +57,10 @@ def restart(name, found):
 
 
 def scroll():
-    agent = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/com.mnrh.scroll"],
-                           capture_output=True).returncode == 0
+    helper = SwiftAgent("scroll", "mnrh Scroll", "com.mnrh.scroll", service_args=[])
+    agent = helper.loaded()
     if agent:
-        run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.mnrh.scroll"])
+        helper.restart()
         print("mnrh scroll перезапущен. Состояние: mnrh scroll")
     running = [(name, found) for name in SCROLL_APPS if (found := app_pids(name))]
     if agent and not running:

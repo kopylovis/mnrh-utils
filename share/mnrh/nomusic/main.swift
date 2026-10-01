@@ -1,7 +1,8 @@
 import AppKit
 import ServiceManagement
 
-let blocked: Set<String> = ["com.apple.Music", "com.apple.iTunes"]
+let musicID = "com.apple.Music"
+let manualWindow = 2.0
 var configFile = ""
 var stateFile = ""
 
@@ -16,7 +17,7 @@ while let arg = argv.next() {
 
 let serviceCommands = ["--register", "--unregister", "--service-status"]
 if let command = CommandLine.arguments.dropFirst().first(where: serviceCommands.contains) {
-    let service = SMAppService.agent(plistName: (Bundle.main.bundleIdentifier ?? "com.mnrh.notunes") + ".plist")
+    let service = SMAppService.agent(plistName: (Bundle.main.bundleIdentifier ?? "com.mnrh.nomusic") + ".plist")
     do {
         if command == "--register" && service.status != .enabled { try service.register() }
         if command == "--unregister" && service.status != .notRegistered { try service.unregister() }
@@ -33,6 +34,11 @@ if let command = CommandLine.arguments.dropFirst().first(where: serviceCommands.
     exit(0)
 }
 
+if CommandLine.arguments.contains("--check") {
+    print("помощник собран, следит за \(musicID)")
+    exit(0)
+}
+
 func log(_ text: String) {
     let stamp = ISO8601DateFormatter().string(from: Date())
     FileHandle.standardError.write("\(stamp) \(text)\n".data(using: .utf8)!)
@@ -46,21 +52,22 @@ func config() -> [String: Any] {
 
 let started = Date()
 var blockedCount = 0
+var allowedCount = 0
 var lastBlocked: Double = 0
-var skipped = Set<pid_t>()
+var decided = [pid_t: Bool]()
 
 func writeState() {
     guard !stateFile.isEmpty else { return }
     let state: [String: Any] = ["pid": getpid(), "started": Int(started.timeIntervalSince1970),
-                                "blocked": blockedCount, "last_blocked": Int(lastBlocked)]
+                                "blocked": blockedCount, "allowed": allowedCount, "last_blocked": Int(lastBlocked)]
     if let data = try? JSONSerialization.data(withJSONObject: state) {
         try? data.write(to: URL(fileURLWithPath: stateFile), options: .atomic)
     }
 }
 
-func paused(_ conf: [String: Any]) -> Bool {
-    if let until = conf["paused_until"] as? Double { return until > Date().timeIntervalSince1970 }
-    return false
+func sinceUserInput() -> Double {
+    let types: [CGEventType] = [.leftMouseDown, .leftMouseUp, .rightMouseDown, .keyDown, .keyUp]
+    return types.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
 }
 
 func openReplacement(_ conf: [String: Any]) {
@@ -76,43 +83,62 @@ func openReplacement(_ conf: [String: Any]) {
     }
 }
 
-func block(_ app: NSRunningApplication?, _ when: String) {
-    guard let app = app, let id = app.bundleIdentifier, blocked.contains(id), !app.isTerminated else { return }
+func handle(_ app: NSRunningApplication?, _ when: String, sweep: Bool = false) {
+    guard let app = app, app.bundleIdentifier == musicID, !app.isTerminated else { return }
+    let pid = app.processIdentifier
+    if decided[pid] != nil { return }
     let conf = config()
-    if paused(conf) {
-        if skipped.insert(app.processIdentifier).inserted {
-            log("\(id) запущен (\(when)), но mnrh notunes на паузе — пропускаю")
-        }
+    let always = (conf["mode"] as? String) == "always"
+    let idle = sinceUserInput()
+    let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
+    let detail = "\(when), ввод \(idle < 60 ? String(format: "%.1f с", idle) : "давно") назад, впереди \(front)"
+    if let until = conf["paused_until"] as? Double, until > Date().timeIntervalSince1970 {
+        decided[pid] = true
+        log("Music открыт (\(detail)) — пауза, не трогаю")
         return
     }
+    if sweep, !always, let launched = app.launchDate, Date().timeIntervalSince(launched) > 10 {
+        decided[pid] = true
+        log("Music уже работал (\(detail)) — не трогаю")
+        return
+    }
+    if !always && !sweep && idle < manualWindow {
+        decided[pid] = true
+        allowedCount += 1
+        log("Music открыт вручную (\(detail)) — оставил")
+        writeState()
+        return
+    }
+    decided[pid] = false
     app.forceTerminate()
     blockedCount += 1
     lastBlocked = Date().timeIntervalSince1970
-    log("закрыл \(id) (\(when), pid \(app.processIdentifier))")
+    log("закрыл Music (\(detail), pid \(pid))")
     openReplacement(conf)
     writeState()
-}
-
-if CommandLine.arguments.contains("--check") {
-    print("помощник собран, следит за: \(blocked.sorted().joined(separator: ", "))")
-    exit(0)
 }
 
 let workspace = NSWorkspace.shared.notificationCenter
 for (name, when) in [(NSWorkspace.willLaunchApplicationNotification, "запуск"),
                      (NSWorkspace.didLaunchApplicationNotification, "после запуска")] {
     workspace.addObserver(forName: name, object: nil, queue: .main) { note in
-        block(note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, when)
+        handle(note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, when)
+    }
+}
+workspace.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { note in
+    if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+        decided.removeValue(forKey: app.processIdentifier)
     }
 }
 workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
-    NSWorkspace.shared.runningApplications.forEach { block($0, "после сна") }
+    NSWorkspace.shared.runningApplications.forEach { handle($0, "после сна", sweep: true) }
 }
-NSWorkspace.shared.runningApplications.forEach { block($0, "при старте помощника") }
+NSWorkspace.shared.runningApplications.forEach { handle($0, "при старте помощника", sweep: true) }
 
 Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in writeState() }
 writeState()
-log("слежу за Music и iTunes")
+log((config()["mode"] as? String) == "always" ? "слежу за Music: закрываю всегда"
+    : "слежу за Music: закрываю автозапуск, ручной оставляю")
 
 signal(SIGTERM, SIG_IGN)
 let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
