@@ -1,0 +1,315 @@
+import base64
+import getpass
+import json
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+from mnrhlib import HOME, OK, WARN, BAD, has_flag, paint, tilde
+from swiftagent import SwiftAgent
+
+args = sys.argv[1:]
+ACTIONS = ("setup", "pair", "on", "off", "pause", "resume", "send", "images", "log", "remove")
+if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
+    print("mnrh clip                    состояние: работает ли, связь с сервером, что передано")
+    print("mnrh clip setup [<сервер>]   подключить свой ntfy-сервер и телефон с приложением Tossy")
+    print("mnrh clip pair [--new]       показать QR для телефона; --new — новый ключ, старый телефон отключится")
+    print("mnrh clip send <файл|текст>  отправить на телефон картинку или текст")
+    print("mnrh clip pause [мин]        не отправлять буфер на телефон (по умолчанию 30 мин)")
+    print("mnrh clip resume             снова отправлять")
+    print("mnrh clip images on|off      передавать ли картинки")
+    print("mnrh clip log                что передано и почему что-то пропущено")
+    print("mnrh clip on | off           включить или выключить помощника")
+    print("mnrh clip remove             выключить и удалить помощника и настройки")
+    print()
+    print("Общий буфер обмена Mac ↔ Android через твой ntfy-сервер: скопировал на Mac — вставляешь на")
+    print("телефоне, и наоборот. Всё шифруется на устройствах, пароли из менеджеров паролей не передаются.")
+    sys.exit(0 if has_flag(args, "-h", "--help") else 2)
+cmd = args[0] if args else "status"
+
+CONFIG = os.path.join(HOME, ".config", "mnrh", "clip.json")
+NOTIFY_APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "mnrh Notify.app")
+QR = os.path.join(HOME, ".cache", "mnrh", "clip-pair.png")
+TOKEN_RE = re.compile(r"^tk_[A-Za-z0-9]{20,}$")
+agent = SwiftAgent("clip", "mnrh Clip", "com.mnrh.clip", service_args=["--config", CONFIG])
+
+
+def read_conf():
+    try:
+        with open(CONFIG) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def write_conf(**values):
+    conf = read_conf()
+    conf.update(values)
+    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+    tmp = CONFIG + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(conf, f)
+    os.replace(tmp, CONFIG)
+
+
+def configured():
+    c = read_conf()
+    return all(c.get(k) for k in ("server", "token", "to_mac", "to_phone", "key"))
+
+
+def http(method, url, token, body=None, headers=None, timeout=15):
+    req = urllib.request.Request(url, data=body, method=method,
+                                 headers={"Authorization": f"Bearer {token}", **(headers or {})})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except (urllib.error.URLError, OSError) as e:
+        return 0, str(getattr(e, "reason", e)).encode()
+
+
+def error_text(raw):
+    try:
+        return json.loads(raw).get("error") or raw.decode(errors="replace")
+    except ValueError:
+        return raw.decode(errors="replace").strip()
+
+
+def read_token():
+    if sys.stdin.isatty():
+        return getpass.getpass("Токен ntfy (tk_…, при вводе не виден): ").strip()
+    clip = subprocess.run(["pbpaste"], capture_output=True, text=True).stdout.strip()
+    if TOKEN_RE.match(clip):
+        subprocess.run(["pbcopy"], input="", text=True)
+        print("Взял токен из буфера обмена и очистил буфер.")
+        return clip
+    return ""
+
+
+def normalize_server(value):
+    value = value.strip().rstrip("/")
+    if value and not re.match(r"^https?://", value):
+        value = "https://" + value
+    return value
+
+
+def new_channel():
+    room = secrets.token_hex(12)
+    return {"to_mac": f"tossy-{room}-mac", "to_phone": f"tossy-{room}-phone",
+            "key": base64.b64encode(secrets.token_bytes(32)).decode()}
+
+
+def ensure_notify_app():
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+        import claude_notify
+        if claude_notify.ensure_app():
+            return claude_notify.AGENT.app
+    except Exception:
+        pass
+    return NOTIFY_APP if os.path.isdir(NOTIFY_APP) else ""
+
+
+def setup():
+    conf = read_conf()
+    server = normalize_server(args[1] if len(args) > 1 else "")
+    if not server:
+        hint = f" [{conf['server']}]" if conf.get("server") else ""
+        server = normalize_server(input(f"Адрес ntfy-сервера, например https://ntfy.example.com{hint}: ") or conf.get("server", ""))
+    if not server:
+        sys.exit("Нужен адрес сервера.")
+    print("Токен: на сервере `ntfy token add <пользователь>`. В файлы mnrh он попадёт только в ~/.config/mnrh/clip.json (права 600).")
+    token = read_token() or (conf.get("token", "") if conf.get("server") == server else "")
+    if not token:
+        sys.exit("Нет токена. Скопируй его (tk_…) и запусти команду ещё раз.")
+    code, raw = http("GET", f"{server}/v1/account", token)
+    if code != 200:
+        sys.exit(f"{BAD} сервер не принял токен: HTTP {code} {error_text(raw)}")
+    user = json.loads(raw).get("username", "?")
+    print(f"{OK} {server}, пользователь {user}")
+    probe = f"tossy-probe-{secrets.token_hex(6)}"
+    code, raw = http("PUT", f"{server}/{probe}", token, body=b"probe", headers={"X-Filename": "probe.bin"})
+    if code != 200:
+        print(f"{WARN} не могу публиковать: HTTP {code} {error_text(raw)} — проверь права пользователя (ntfy access)")
+    elif "attachment" not in json.loads(raw):
+        print(f"{WARN} на сервере выключены вложения: картинки и длинные тексты не пройдут "
+              f"(attachment-cache-dir в server.yml)")
+    else:
+        print(f"{OK} вложения работают, картинки пройдут")
+    values = {"server": server, "token": token, "notify_app": ensure_notify_app()}
+    if not configured() or "--new" in args:
+        values.update(new_channel())
+    values.setdefault("images", conf.get("images", True))
+    write_conf(**values)
+    start()
+    pair(fresh=False)
+
+
+def start():
+    write_conf(paused_until=0)
+    if agent.source_hash() != (open(agent.stamp).read().strip() if os.path.exists(agent.stamp) else ""):
+        agent.stop()
+    agent.build()
+    if agent.installed() and agent.state():
+        agent.restart()
+        if agent.wait_state():
+            return
+    started = agent.start()
+    if started == "requiresApproval":
+        if not agent.approve_login_item():
+            sys.exit(1)
+        started = agent.start()
+    if not started:
+        sys.exit(f"Помощник не запустился. Лог: {tilde(agent.log)}")
+
+
+def paired_at():
+    s = agent.state() or {}
+    return s.get("phone_at") or 0, s.get("phone", "")
+
+
+def pair(fresh=None):
+    if not configured():
+        sys.exit("Сначала mnrh clip setup <сервер>")
+    if fresh is None and "--new" in args:
+        write_conf(**new_channel())
+        start()
+        print(f"{OK} новый ключ и каналы; телефон, подключённый раньше, больше ничего не получит.")
+    agent.build()
+    os.makedirs(os.path.dirname(QR), exist_ok=True)
+    r = subprocess.run([agent.bin, "--config", CONFIG, "--qr", QR], capture_output=True, text=True, timeout=30)
+    if r.returncode != 0 or not os.path.exists(QR):
+        sys.exit(f"Не сделал QR: {r.stdout.strip() or r.stderr.strip()}")
+    asked = time.time()
+    print("Открой Tossy на телефоне → «Подключить» и наведи камеру на QR (жду до 3 минут).")
+    print(paint("  В QR — ключ шифрования и токен: не показывай его никому и не делай скриншот.", "2"))
+    viewer = subprocess.Popen(["qlmanage", "-p", QR], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(180):
+            at, name = paired_at()
+            if at >= asked:
+                print(f"{OK} подключён {name}")
+                break
+            time.sleep(1)
+        else:
+            print("Не дождался ответа телефона. Повторить: mnrh clip pair")
+    except KeyboardInterrupt:
+        print()
+    finally:
+        viewer.terminate()
+        try:
+            os.remove(QR)
+        except OSError:
+            pass
+
+
+def on():
+    if not configured():
+        sys.exit("Сначала mnrh clip setup <сервер>")
+    start()
+    print(f"{OK} mnrh clip включён: буфер обмена общий с телефоном.")
+
+
+def off():
+    was = agent.installed()
+    agent.uninstall()
+    print("mnrh clip выключен." if was else "mnrh clip и так выключен.")
+
+
+def remove():
+    off()
+    shutil.rmtree(agent.app, ignore_errors=True)
+    try:
+        os.remove(CONFIG)
+    except OSError:
+        pass
+    print("Помощник и настройки удалены (ключ тоже — телефон придётся подключать заново).")
+
+
+def pause():
+    minutes = int(args[1]) if len(args) > 1 and args[1].isdigit() else 30
+    until = time.time() + minutes * 60
+    write_conf(paused_until=until)
+    print(f"{OK} не отправляю буфер на телефон до {datetime.fromtimestamp(until):%H:%M}. "
+          f"С телефона на Mac — по-прежнему. Раньше: mnrh clip resume")
+
+
+def resume():
+    write_conf(paused_until=0)
+    print(f"{OK} снова отправляю буфер на телефон.")
+
+
+def images():
+    if len(args) < 2 or args[1] not in ("on", "off"):
+        sys.exit("mnrh clip images on|off")
+    write_conf(images=args[1] == "on")
+    print(f"{OK} картинки {'передаю' if args[1] == 'on' else 'не передаю, только текст'}.")
+
+
+def send():
+    if len(args) < 2:
+        sys.exit("mnrh clip send <файл-картинка | текст>")
+    if not configured():
+        sys.exit("Сначала mnrh clip setup <сервер>")
+    agent.build()
+    items = []
+    for a in args[1:]:
+        items += ["--send", a]
+    sys.exit(subprocess.run([agent.bin, "--config", CONFIG, *items]).returncode)
+
+
+def show_log():
+    try:
+        lines = open(agent.log, encoding="utf-8", errors="replace").read().splitlines()
+    except OSError:
+        sys.exit("Лога пока нет.")
+    for line in lines[-25:]:
+        stamp, _, text = line.partition(" ")
+        try:
+            stamp = datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone().strftime("%d.%m %H:%M:%S")
+        except ValueError:
+            pass
+        print(f"{paint(stamp, '2')}  {text}")
+
+
+def ago(ts):
+    return datetime.fromtimestamp(ts).strftime("%d.%m %H:%M") if ts else "—"
+
+
+def status():
+    conf = read_conf()
+    if not configured():
+        print("mnrh clip не настроен." + paint("   -> mnrh clip setup <адрес ntfy-сервера>", "2"))
+        return
+    if not agent.installed():
+        print("mnrh clip выключен." + paint("   -> mnrh clip on", "2"))
+        return
+    s = agent.state()
+    if not s:
+        print(f"{BAD} mnrh clip включён, но помощник не работает." + paint("   -> mnrh clip on", "2"))
+        print(f"  лог: {tilde(agent.log)}")
+        return
+    link = f"{OK} на связи с {conf['server']}" if s.get("connected") else f"{WARN} нет связи с {conf['server']}"
+    print(f"{link} (pid {s['pid']}, с {ago(s['started'])})")
+    print(f"  телефон: {s.get('phone') or 'ещё не подключался — mnrh clip pair'}")
+    print(f"  на телефон: {s.get('sent', 0)} (последнее {ago(s.get('last_sent'))}) · "
+          f"с телефона: {s.get('received', 0)} (последнее {ago(s.get('last_received'))})")
+    until = conf.get("paused_until") or 0
+    if until > time.time():
+        print(f"{WARN} на паузе до {datetime.fromtimestamp(until):%H:%M}" + paint("   -> mnrh clip resume", "2"))
+    if not conf.get("images", True):
+        print("  картинки не передаю (mnrh clip images on)")
+
+
+{"status": status, "setup": setup, "pair": pair, "on": on, "off": off, "pause": pause, "resume": resume,
+ "send": send, "images": images, "log": show_log, "remove": remove}[cmd]()

@@ -48,7 +48,10 @@ test:
 	@! ./bin/mnrh scroll nothing >/dev/null
 	@swiftc -typecheck -swift-version 5 share/mnrh/scroll/main.swift
 	@swiftc -typecheck -swift-version 5 share/mnrh/notify/main.swift
+	@swiftc -typecheck -swift-version 5 share/mnrh/clip/main.swift
 	@./bin/mnrh claude notify -h | grep -q telegram
+	@./bin/mnrh clip -h | grep -q Tossy
+	@./bin/mnrh clip >/dev/null
 	@./bin/mnrh deps -h >/dev/null
 	@./bin/mnrh claude guard >/dev/null
 	@./bin/mnrh claude guard -h >/dev/null
