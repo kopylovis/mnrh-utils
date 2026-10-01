@@ -11,6 +11,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mnrhlib import HOME, read_config, settings_name, settings_path, tilde, write_config
 from swiftagent import SwiftAgent
+import telegram
 
 AGENT = SwiftAgent("notify", "mnrh Notify", "com.mnrh.notify")
 STATE = os.path.join(HOME, ".cache", "mnrh", "notify")
@@ -68,6 +69,8 @@ def usage():
           f"{after()} с, по умолчанию {DEFAULT_AFTER})")
     print("mnrh claude notify sound on|off звук")
     print("mnrh claude notify test         показать пробное уведомление")
+    print("mnrh claude notify telegram     ещё и в Telegram, когда ты не за Mac: подключить бота")
+    print("  … telegram test | off | always | away <сек>")
     print()
     print("Уведомление приходит, если Claude просит разрешение или задаёт вопрос, долго ждёт ответа")
     print("или закончил долгий ход, а ты смотришь не на его вкладку. Нажатие переключает на неё")
@@ -276,20 +279,32 @@ def hook():
     if not tty:
         return 0
     bundle = os.environ.get("__CFBundleIdentifier", "")
-    if watching(bundle, tty):
-        return 0
-    if not ensure_app():
+    to_phone = telegram.wanted()
+    on_mac = not watching(bundle, tty)
+    if not on_mac and not to_phone:
         return 0
     head, body = what
     cwd = payload.get("cwd") or ""
     project = "~" if cwd.rstrip("/") == HOME else os.path.basename(cwd.rstrip("/")) or "Claude"
     title = session_title(sid, payload.get("transcript_path"))
-    mnrh = mnrh_path()
-    click = f"{shlex.quote(mnrh)} claude focus {shlex.quote(tty)} {shlex.quote(bundle)}" if mnrh else None
-    post(f"{project}: {head}", title, body, sid, click)
+    if on_mac and ensure_app():
+        mnrh = mnrh_path()
+        click = f"{shlex.quote(mnrh)} claude focus {shlex.quote(tty)} {shlex.quote(bundle)}" if mnrh else None
+        post(f"{project}: {head}", title, body, sid, click)
+    if to_phone:
+        try:
+            telegram.send(f"{project}: {head}", title, body)
+        except telegram.TelegramError as e:
+            log_error(f"telegram: {e}")
     st["notified"] = True
     save_state(sid, st)
     return 0
+
+
+def log_error(text):
+    os.makedirs(STATE, exist_ok=True)
+    with open(os.path.join(STATE, "errors.log"), "a") as f:
+        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n")
 
 
 def mnrh_path():
@@ -310,6 +325,7 @@ def status():
     except (OSError, ValueError, AttributeError):
         have = []
     print("Хуки Claude Code: " + (", ".join(have) if have else "не стоят — mnrh claude setup"))
+    print(telegram.describe())
 
 
 def test():
@@ -362,6 +378,8 @@ def main():
         return 0
     if rest[0] == "test":
         return test()
+    if rest[0] == "telegram":
+        return telegram.main(rest[1:])
     usage()
     return 2
 

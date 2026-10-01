@@ -21,7 +21,7 @@ mnrh claude setup     поставить /restart, /forget, MCP-сервер mnr
 mnrh claude restart   изнутри Claude: закрыть, claude update, открыть эту же сессию снова
 mnrh claude forget    изнутри Claude: удалить эту сессию без следа и открыть чистую
 mnrh claude slim      изнутри Claude: сжать эту сессию и открыть её снова (/slim)
-mnrh claude notify    уведомления, когда Claude ждёт тебя: on, off, after <сек>, sound, test
+mnrh claude notify    уведомления, когда Claude ждёт тебя: on, off, after <сек>, sound, test, telegram
 mnrh claude guard     защита секретов: вопрос перед чтением и удалением ключей; on, off, test, log
 mnrh deps             устаревшие зависимости Gradle в libs.versions.toml (этот проект или все)
 mnrh todo             бэклог задач проекта между сессиями Claude (add, done, rm, all)
@@ -466,6 +466,16 @@ Terminal и iTerm2 (по tty, как `/restart`), а в Android Studio, VS Code 
 показывать уведомления, а при первом нажатии — можно ли ему управлять Terminal или iTerm2.
 `mnrh claude notify test` — пробное уведомление, `notify off` / `on` — выключить и
 включить, `notify sound off` — без звука.
+
+Те же уведомления могут приходить в Telegram, когда тебя нет за Mac: экран заблокирован или
+2 минуты никто не трогал мышь и клавиатуру. `mnrh claude notify telegram` подключает бота:
+создаёшь его у @BotFather, вводишь токен (или копируешь его и запускаешь команду не из
+терминала — mnrh возьмёт токен из буфера обмена и очистит буфер), нажимаешь Start в чате с
+ботом. Токен лежит в Связке ключей (`mnrh-telegram`), в конфиге — только номер чата.
+`telegram test` — пробное сообщение, `telegram away <сек>` — через сколько секунд без ввода
+считать, что тебя нет, `telegram always` — присылать всегда, `telegram off` — отключить и
+удалить токен. Если ты смотришь на вкладку Claude, но отошёл, уведомление придёт только в
+Telegram. Ошибки отправки пишутся в `~/.cache/mnrh/notify/errors.log`.
 
 Иконка приложений-помощников (mnrh Notify, mnrh Scroll, mnrh NoMusic) — `share/mnrh/icon.png`, 1024×1024,
 картинка до края без прозрачности: macOS 26 сама скругляет её, а иконку с полями или

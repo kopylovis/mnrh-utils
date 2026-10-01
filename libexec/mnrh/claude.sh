@@ -33,7 +33,7 @@ mnrh claude parallel "<…>"  задача в отдельной ветке и w
 mnrh claude ask <пр> <…>    спросить отдельный Claude про другой проект, только чтение (/ask)
 mnrh claude release-notes   материал для «Что нового» к релизу (/release-notes)
 mnrh claude guard           защита секретов: спросит перед чтением или удалением ключей (on, off, test)
-mnrh claude notify          уведомления, когда Claude ждёт тебя (on, off, after <сек>, test)
+mnrh claude notify          уведомления, когда Claude ждёт тебя (on, off, after <сек>, test, telegram)
 mnrh claude setup           поставить /restart, MCP-сервер mnrh и хук zsh для перезапуска (--remove убрать)
 
 caffeinate (по умолчанию) не даёт Mac уснуть, пока идёт сессия:
