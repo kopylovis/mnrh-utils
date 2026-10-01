@@ -114,7 +114,7 @@ def menu(items, version, at=0):
             aw = max(len(f"mnrh {name} {a}".rstrip()) for a, _ in actions) + 3
             j = pick([(f"{a} {label}", f"{label.ljust(max(len(l) for _, l in actions) + 3)}"
                                        f"{dim(f'mnrh {name} {a}'.rstrip())}")
-                      for a, label in actions], title=f"\x1b[1mmnrh {name}\x1b[0m  {dim('Esc — назад')}")
+                      for a, label in actions], title=f"\x1b[1;35mmnrh {name}\x1b[0m", esc="назад")
             if j is None:
                 continue
             action = actions[j][0]

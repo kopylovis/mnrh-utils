@@ -38,6 +38,7 @@ def cut(text, width):
 
 class Menu:
     marks = None
+    esc = "выход"
 
     def __init__(self, tty_fd, items, title, label, start, default):
         self.fd = tty_fd
@@ -116,7 +117,7 @@ class Menu:
             lines.append(f"\x1b[2m     ↓ ещё {rest}\x1b[0m")
         if not self.choices(view):
             lines.append("\x1b[2m  ничего не найдено\x1b[0m")
-        hint = "↑↓ выбрать · Enter · цифра или буквы — быстрый переход · Esc — выход"
+        hint = f"↑↓ выбрать · Enter · цифра или буквы — быстрый переход · Esc — {self.esc}"
         if self.marks is not None:
             total = self.summary(self.marks) if self.summary else f"отмечено {len(self.marks)}"
             hint = f"{total} · Пробел — отметить · a — все/ничего · Enter — дальше · Esc — отмена"
@@ -215,12 +216,14 @@ def pick_many(items, title="", marked=(), summary=None):
     return pick(items, title=title, marked=set(marked), summary=summary)
 
 
-def pick(items, title="", label="", start=1, default=0, marked=None, summary=None):
+def pick(items, title="", label="", start=1, default=0, marked=None, summary=None, esc=None):
     if not items or all(key is None for key, _ in items):
         return None
     fd = os.open("/dev/tty", os.O_RDWR)
     saved = termios.tcgetattr(fd)
     menu = Menu(fd, items, title, label, start, default)
+    if esc:
+        menu.esc = esc
     if marked is not None:
         menu.marks = set(marked)
         menu.summary = summary
