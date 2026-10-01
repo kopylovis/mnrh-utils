@@ -32,7 +32,6 @@ HELPER_CONFIG = os.path.join(HOME, ".config", "mnrh", "scroll.json")
 agent = SwiftAgent("scroll", "mnrh Scroll", "com.mnrh.scroll", service_args=["--config", HELPER_CONFIG])
 SRC, APP, BIN, STATE, LOG = agent.src, agent.app, agent.bin, agent.state_file, agent.log
 SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-LOGIN_ITEMS_URL = "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"
 ACCESS = settings_path("settings", "privacy", "accessibility")
 SR = "Scroll Reverser"
 SR_DOMAIN = "com.pilotmoon.scroll-reverser"
@@ -140,22 +139,6 @@ def settings_open():
     return any("/System Settings.app/Contents/MacOS/" in c for c in process_commands().values())
 
 
-def wait_for_login_item():
-    print(f"{WARN} macOS ждёт разрешения для фонового объекта: "
-          f"{settings_path('settings', 'general', 'login')} → «mnrh Scroll».")
-    run(["open", LOGIN_ITEMS_URL])
-    if not sys.stdin.isatty():
-        return False
-    print("Жду до двух минут...", end="", flush=True)
-    for _ in range(120):
-        time.sleep(1)
-        if agent.service("--service-status") == "enabled":
-            print(" есть.")
-            return True
-    print("\nНе дождался. Как разрешишь — снова mnrh scroll on.")
-    return False
-
-
 def on():
     if not os.path.exists(SRC):
         sys.exit(f"Нет исходника помощника: {SRC}")
@@ -174,7 +157,7 @@ def on():
         print(f"{SR} закрыт, чтобы прокрутка не переворачивалась дважды.")
     started = start_agent()
     if started == "requiresApproval":
-        if not wait_for_login_item():
+        if not agent.approve_login_item():
             return
         started = start_agent()
     if not started:

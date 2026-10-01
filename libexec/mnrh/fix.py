@@ -56,12 +56,13 @@ def restart(name, found):
 
 
 def scroll():
-    agent = os.path.expanduser("~/Library/LaunchAgents/com.mnrh.scroll.plist")
-    if os.path.exists(agent):
+    agent = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/com.mnrh.scroll"],
+                           capture_output=True).returncode == 0
+    if agent:
         run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.mnrh.scroll"])
         print("mnrh scroll перезапущен. Состояние: mnrh scroll")
     running = [(name, found) for name in SCROLL_APPS if (found := app_pids(name))]
-    if os.path.exists(agent) and not running:
+    if agent and not running:
         return 0
     if not running:
         print("Scroll Reverser и похожие программы не запущены — переворачивает не они.")

@@ -14,7 +14,7 @@ import sys
 import tempfile
 import time
 
-from mnrhlib import HOME
+from mnrhlib import HOME, WARN, settings_path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -63,6 +63,21 @@ class SwiftAgent:
             return "notRegistered"
         r = subprocess.run([self.bin, command], capture_output=True, text=True, timeout=30)
         return (r.stdout.strip() or r.stderr.strip() or "error").splitlines()[-1]
+
+    def approve_login_item(self):
+        print(f"{WARN} macOS ждёт разрешения для фонового объекта: "
+              f"{settings_path('settings', 'general', 'login')} → «{self.display}».")
+        subprocess.run(["open", "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"])
+        if not sys.stdin.isatty():
+            return False
+        print("Жду до двух минут...", end="", flush=True)
+        for _ in range(120):
+            time.sleep(1)
+            if self.service("--service-status") == "enabled":
+                print(" есть.")
+                return True
+        print("\nНе дождался. Как разрешишь — снова то же on.")
+        return False
 
     def drop_legacy(self):
         if self.service_args is not None and os.path.exists(self.plist):
@@ -182,10 +197,7 @@ class SwiftAgent:
                 time.sleep(0.25)
 
     def start(self):
-        """Перезапускает с текущим plist. True, если помощник поднялся и записал состояние.
-
-        У помощника с service_args plist лежит в самом приложении и регистрируется через SMAppService;
-        если macOS ждёт разрешения в «Объектах входа», возвращает строку "requiresApproval"."""
+        """Перезапускает с текущим plist. True, если помощник поднялся и записал состояние."""
         try:
             if os.path.getsize(self.log) > 1048576:
                 os.truncate(self.log, 0)

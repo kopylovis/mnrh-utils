@@ -46,8 +46,6 @@ while let arg = argv.next() {
     }
 }
 
-// --register, --unregister, --service-status: фоновый объект из Contents/Library/LaunchAgents этого
-// приложения. Так «Объекты входа» показывают имя и иконку приложения, а не голый бинарник.
 let serviceCommands = ["--register", "--unregister", "--service-status"]
 if let command = CommandLine.arguments.dropFirst().first(where: serviceCommands.contains) {
     let service = SMAppService.agent(plistName: (Bundle.main.bundleIdentifier ?? "com.mnrh.scroll") + ".plist")

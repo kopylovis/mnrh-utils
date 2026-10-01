@@ -48,6 +48,8 @@ mnrh gradle --check   ещё сверить с последней версией
 mnrh gradle clean     удалить версии, которые не использует ни один проект (--builds: и build/)
 mnrh scroll on        переворачивать прокрутку мыши, не трогая трекпад (вместо Scroll Reverser)
 mnrh scroll           состояние; off выключить, test проверить, что мышь и трекпад различаются
+mnrh notunes on       не давать запускаться Apple Music (вместо noTunes); --open Spotify — открыть его
+mnrh notunes          состояние; pause [мин] пустить Music на время, resume, log, off
 mnrh sleep            что не даёт Mac уснуть, последние засыпания и пробуждения
 mnrh sleep fix        снять зависшие caffeinate, чья программа уже закрыта
 mnrh ssh              SSH-ключи: какие есть, загружены ли, кем представляются GitHub
@@ -465,7 +467,7 @@ Terminal и iTerm2 (по tty, как `/restart`), а в Android Studio, VS Code 
 `mnrh claude notify test` — пробное уведомление, `notify off` / `on` — выключить и
 включить, `notify sound off` — без звука.
 
-Иконка приложений-помощников (mnrh Notify и mnrh scroll) — `share/mnrh/icon.png`, 1024×1024,
+Иконка приложений-помощников (mnrh Notify, mnrh Scroll, mnrh noTunes) — `share/mnrh/icon.png`, 1024×1024,
 картинка до края без прозрачности: macOS 26 сама скругляет её, а иконку с полями или
 прозрачными углами кладёт на серую подложку. Из PNG при сборке делается `AppIcon.icns`;
 при смене иконки помощник пересобирается сам. Центр уведомлений помнит старую иконку до
@@ -599,11 +601,14 @@ HID-событие с id устройства, а по id в IORegistry видн
 Как устроено:
 
 - `share/mnrh/scroll/main.swift` — помощник на Swift без зависимостей. `mnrh scroll on`
-  собирает его `swiftc` в `~/Library/Application Support/mnrh/mnrh scroll.app`, подписывает
-  ad-hoc и ставит в автозапуск (`~/Library/LaunchAgents/com.mnrh.scroll.plist`, launchd
-  поднимет его и после падения). Пересобирается только при изменении исходника.
-- Нужен доступ в «Универсальном доступе» — иначе macOS не даёт менять события. `on` открывает
-  настройки и ждёт; после пересборки доступ надо включить заново, macOS видит новую программу.
+  собирает его `swiftc` в `~/Library/Application Support/mnrh/mnrh Scroll.app`, подписывает
+  ad-hoc и регистрирует фоновым объектом через SMAppService: plist лежит внутри приложения
+  (`Contents/Library/LaunchAgents/com.mnrh.scroll.plist`), поэтому в «Объектах входа» видно
+  имя и иконку приложения, а launchd поднимет его и после падения. Настройки помощник читает
+  из `~/.config/mnrh/scroll.json`. Пересобирается только при изменении исходника.
+- Нужен доступ в «Универсальном доступе» — иначе macOS не даёт менять события. macOS сама
+  показывает окно запроса, `on` ждёт; настройки открывает, только если через 45 секунд доступа
+  нет и они не открыты. После пересборки доступ надо включить заново: macOS видит новую программу.
 - Настройки при первом `on` берутся из Scroll Reverser, дальше живут в `~/.config/mnrh/config`:
   `--mouse vh|v|h|off`, `--trackpad …`, `--step N` (строк за щелчок колеса, как Discrete
   scroll step в Scroll Reverser; 3 по умолчанию).
@@ -705,3 +710,19 @@ Apple, консольные инструменты без `.app` (SwiftPM, Fireb
 Положить файл в `libexec/mnrh/`: `имя.sh` запускается через bash, `имя.py` через
 `/usr/bin/python3`, остальное — как исполняемый файл. Команда сразу доступна как
 `mnrh имя`. Описание для `mnrh help` добавляется в функцию `describe` в `bin/mnrh`.
+
+## Как работает `mnrh notunes`
+
+Замена [noTunes](https://github.com/tombonez/noTunes): Apple Music больше не открывается сам
+при подключении наушников, по клавише Play или из Bluetooth-гарнитуры.
+
+- `share/mnrh/notunes/main.swift` собирается в `~/Library/Application Support/mnrh/mnrh noTunes.app`
+  и регистрируется так же, как mnrh Scroll. Иконки в строке меню нет, разрешений не нужно.
+- Music закрывается и в момент запуска, и сразу после него (noTunes ловил только первое и
+  пропускал Music, запущенный в фоне), а ещё при старте помощника и после сна.
+- `--open <приложение>` — что открыть вместо Music (без вывода на передний план и только если оно
+  ещё не запущено). При первом `on` берётся из настроек noTunes, если там было задано.
+- `pause [мин]` пускает Music на время без перезапуска помощника: настройки
+  (`~/.config/mnrh/notunes.json`) перечитываются при каждом запуске Music.
+- `on` закрывает запущенный noTunes и подсказывает, как его удалить.
+- Лог: `~/Library/Logs/mnrh-notunes.log` (`mnrh notunes log`), состояние: `~/.cache/mnrh/notunes.json`.
