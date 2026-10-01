@@ -81,7 +81,8 @@ class SwiftAgent:
         """Собирает, если исходник поменялся. True — собран заново."""
         want = self.source_hash()
         try:
-            if open(self.stamp).read().strip() == want and os.access(self.bin, os.X_OK):
+            if open(self.stamp).read().strip() == want and os.access(self.bin, os.X_OK) and \
+                    os.path.basename(self.app) in os.listdir(os.path.dirname(self.app)):
                 return False
         except OSError:
             pass
@@ -125,6 +126,7 @@ class SwiftAgent:
         with open(self.plist, "wb") as f:
             plistlib.dump({
                 "Label": self.label,
+                "AssociatedBundleIdentifiers": [self.label],
                 "ProgramArguments": [self.bin, *extra_args, "--state", self.state_file],
                 "RunAtLoad": True,
                 "KeepAlive": True,

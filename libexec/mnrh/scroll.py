@@ -27,7 +27,7 @@ if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
     sys.exit(0 if has_flag(args, "-h", "--help") else 2)
 cmd = args[0] if args else "status"
 
-agent = SwiftAgent("scroll", "mnrh scroll", "com.mnrh.scroll")
+agent = SwiftAgent("scroll", "mnrh Scroll", "com.mnrh.scroll")
 SRC, APP, BIN, PLIST, STATE, LOG = agent.src, agent.app, agent.bin, agent.plist, agent.state_file, agent.log
 SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 SR = "Scroll Reverser"
@@ -106,7 +106,7 @@ def wait_for_access():
     if s and s.get("trusted"):
         return True
     print(paint("Нужен доступ.", "1") + " Открываю настройки: Конфиденциальность и безопасность → Универсальный доступ.")
-    print("Включи там «mnrh scroll» (если его нет в списке — «+» и выбери")
+    print("Включи там «mnrh Scroll» (если его нет в списке — «+» и выбери")
     print(f"  {APP.replace(HOME, '~', 1)}).")
     run(["open", SETTINGS_URL])
     if not sys.stdin.isatty():
@@ -133,6 +133,8 @@ def on():
     had_binary = os.path.exists(BIN)
     stop_agent()
     rebuilt = build()
+    if rebuilt and had_binary:
+        subprocess.run(["tccutil", "reset", "Accessibility", agent.label], capture_output=True)
     if quit_scroll_reverser():
         print(f"{SR} закрыт, чтобы прокрутка не переворачивалась дважды.")
     write_plist(mouse, trackpad, step)
@@ -143,7 +145,7 @@ def on():
     s = state()
     if rebuilt and had_binary and not (s and s.get("trusted")):
         print(f"{WARN} Помощник пересобран, и macOS считает его новым приложением. В списке Универсального")
-        print("  доступа выключи и снова включи «mnrh scroll» (или удали его «−» и добавь заново).")
+        print("  доступа включи «mnrh Scroll» (если его нет — «+» и выбери приложение).")
     if not wait_for_access():
         return
     if os.path.isdir(f"/Applications/{SR}.app"):
@@ -168,7 +170,7 @@ def remove():
     shutil.rmtree(APP, ignore_errors=True)
     r = subprocess.run(["tccutil", "reset", "Accessibility", agent.label], capture_output=True, text=True)
     print("Помощник удалён с диска" + (", доступ в настройках сброшен." if r.returncode == 0 else
-                                       ". Строку «mnrh scroll» в Универсальном доступе можно удалить «−»."))
+                                       ". Строку «mnrh Scroll» в Универсальном доступе можно удалить «−»."))
 
 
 def restart():
@@ -226,7 +228,7 @@ def status():
         elif s.get("trusted"):
             print(f"{WARN} mnrh scroll: доступ есть, но перехват выключен" + paint("   -> mnrh scroll restart", "2"))
         else:
-            print(f"{BAD} mnrh scroll ждёт доступа: Универсальный доступ → «mnrh scroll»"
+            print(f"{BAD} mnrh scroll ждёт доступа: Универсальный доступ → «mnrh Scroll»"
                   + paint("   -> mnrh scroll on", "2"))
         print(f"  мышь: {describe(conf.get('scroll_mouse', 'v'))} · трекпад: {describe(conf.get('scroll_trackpad', ''))}"
               f" · колесо: {conf.get('scroll_step', '3')} стр. за щелчок")
