@@ -22,7 +22,7 @@ mnrh claude restart   изнутри Claude: закрыть, claude update, от
 mnrh claude forget    изнутри Claude: удалить эту сессию без следа и открыть чистую
 mnrh claude slim      изнутри Claude: сжать эту сессию и открыть её снова (/slim)
 mnrh claude notify    уведомления, когда Claude ждёт тебя: on, off, after <сек>, sound, test
-mnrh claude guard     защита от опасных команд и чтения секретов: on, off, skip <правило>, test, log
+mnrh claude guard     защита секретов: вопрос перед чтением и удалением ключей; on, off, test, log
 mnrh deps             устаревшие зависимости Gradle в libs.versions.toml (этот проект или все)
 mnrh todo             бэклог задач проекта между сессиями Claude (add, done, rm, all)
 mnrh shot [прил.]     снимок окна приложения; без аргументов — список окон
@@ -422,27 +422,26 @@ master ↑3 ±5 · память 9.9/16 ГБ · swap 1.5 · Gradle 2 (3.1 ГБ) �
 порты 5 с, тип проекта 30 с, версия Node 60 с. Строка обновляется ещё и раз в 10 с
 (`refreshInterval`). Своя строка состояния, если она уже была, не заменяется.
 
-### Защита: `mnrh claude guard`
+### Защита секретов: `mnrh claude guard`
 
-Хук `PreToolUse` на Bash, Read, Edit, Write останавливает:
+Хук `PreToolUse` следит только за двумя вещами:
 
 | Правило | Что |
 |---|---|
-| `force-push` | `git push --force` и `+ветка` в main, master, develop, release/* |
-| `discard` | `git reset --hard`, `git clean -f`, `git checkout -- .`, `git restore`, когда есть что терять; `git stash drop/clear`, `git branch -D` |
-| `rm` | `rm -r` за пределами проекта, `/tmp`, `/var/folders`, scratchpad сессии и содержимого `~/.cache` (саму `~/.cache` — нельзя), сам проект, `~` и `/`; путь, который не раскрыть заранее |
-| `release` | лейны fastlane с release, beta, upload, deploy, store, testflight, …; `gradle publish`; `gh release create`; `firebase deploy/appdistribution`; скрипты `*distribute*`, `*deploy*`, `*release*`, `*publish*` |
-| `secrets` | чтение и правка `.env*` (кроме `.example` и т. п.), `*.p8`, `*.p12`, `*.jks`, `*.keystore`, приватных ключей SSH, `*service-account*.json`, `keystore.properties`, `.netrc`; `security find-*-password -w` |
-| `sql` | `DROP TABLE/DATABASE`, `TRUNCATE`, `DELETE` без `WHERE` |
-| `remote` | `ssh` с reboot, `systemctl stop/restart`, `docker compose down`, `rm -r` |
-| `pipe-shell` | `curl … \| sh` |
+| `secrets-read` | чтение и правка `.env*` (кроме `.example` и т. п.), `*.p8`, `*.p12`, `*.jks`, `*.keystore`, приватных ключей SSH, `*service-account*.json`, `*credentials*.json`, `keystore.properties`, `.netrc`, `.npmrc`; `security find-*-password -w` |
+| `secrets-delete` | `rm`, `rmdir`, `unlink`, `shred`, `trash` файла-ключа или папки, где ключи лежат (`~/.ssh`, `~/.gnupg`, `~/.aws`, связка ключей, `fastlane/` с `.p8` и JSON…); `security delete-*` |
 
-В обычном режиме Claude Code просто спросит разрешение с объяснением. В режимах `auto` и
-`--dangerously-skip-permissions` ответ «спросить» Claude Code превращает в «запретить» или
-«разрешить», поэтому guard запрещает вызов и просит Claude спросить тебя: чтобы разрешить,
-ты сам пишешь в чате четырёхзначный код из его вопроса (код привязан к команде и сессии,
-модель не может написать его за тебя). `mnrh claude guard skip release` выключает правило,
-`guard test '<команда>'` показывает решение, `guard log` — последние срабатывания.
+Остальное (`git push --force`, `reset --hard`, `rm` обычных файлов, выкладка через fastlane,
+SQL, команды на сервере) guard не трогает — это на совести обычных разрешений Claude Code.
+
+Это не отказ, а вопрос. В обычном режиме Claude Code сам показывает «разрешить?» с
+объяснением. В режимах `auto` и `--dangerously-skip-permissions` Claude Code так не умеет
+(«спросить» у него превращается в «запретить» или «разрешить»), поэтому guard задерживает
+вызов, а Claude спрашивает тебя в чате, зачем ему это нужно. Ответишь «да» (или «ок»,
+«давай», «yes») — тот же вызов пройдёт; ответ привязан к этому вызову и к твоему
+сообщению после вопроса, модель не может ответить за тебя. `mnrh claude guard skip
+secrets-read` выключает правило, `guard test '<команда>'` показывает решение, `guard log` —
+последние срабатывания.
 
 ### Уведомления, когда Claude ждёт тебя
 

@@ -52,13 +52,12 @@ test:
 	@./bin/mnrh deps -h >/dev/null
 	@./bin/mnrh claude guard >/dev/null
 	@./bin/mnrh claude guard -h >/dev/null
-	@cd /tmp && $(CURDIR)/bin/mnrh claude guard test 'git push -f origin master' | grep -q force-push
-	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/Documents' | grep -q '(rm'
-	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/.cache/mnrh/statusline' | grep -q пропущу
-	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/.cache' | grep -q '(rm'
-	@$(CURDIR)/bin/mnrh claude guard test 'bundle exec fastlane beta' | grep -q release
-	@$(CURDIR)/bin/mnrh claude guard test 'cat fastlane/.env.default' | grep -q secrets
-	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf build && ./gradlew assembleRelease' | grep -q пропущу
+	@cd /tmp && $(CURDIR)/bin/mnrh claude guard test 'git push -f origin master' | grep -q пропущу
+	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/Documents/old' | grep -q пропущу
+	@$(CURDIR)/bin/mnrh claude guard test 'bundle exec fastlane beta' | grep -q пропущу
+	@$(CURDIR)/bin/mnrh claude guard test 'cat fastlane/.env.default' | grep -q secrets-read
+	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/.ssh' | grep -q secrets-delete
+	@$(CURDIR)/bin/mnrh claude guard test 'security delete-generic-password -s x' | grep -q secrets-delete
 	@echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | ./bin/mnrh claude guard-hook | wc -c | grep -q '^ *0$$'
 	@echo '{"tool_name":"Read","permission_mode":"auto","session_id":"x","tool_input":{"file_path":"/x/.env"}}' | ./bin/mnrh claude guard-hook | grep -q '"deny"'
 	@echo '{}' | ./bin/mnrh claude statusline >/dev/null

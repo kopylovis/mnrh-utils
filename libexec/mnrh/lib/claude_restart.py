@@ -939,7 +939,7 @@ def notice_hook(install):
         print(f"✓ сообщения после /restart и /forget, удаление пустых сессий → хуки SessionStart и SessionEnd "
               f"в {tilde(SETTINGS)}")
         print(status_note)
-        print("✓ защита от опасных команд и чтения секретов → хук PreToolUse (mnrh claude guard)")
+        print("✓ защита секретов: вопрос перед чтением и удалением ключей → хук PreToolUse (mnrh claude guard)")
         print("✓ уведомления, когда Claude ждёт тебя → хуки UserPromptSubmit, Stop и Notification "
               "(mnrh claude notify -h)")
         print(f"✓ без вопроса о разрешении: {', '.join(READ_ONLY)} (они только читают)")
