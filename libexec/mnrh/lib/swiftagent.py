@@ -49,9 +49,33 @@ class SwiftAgent:
         except (OSError, ValueError, KeyError):
             return None
 
+    def icon(self):
+        for p in (os.path.join(os.path.dirname(self.src), "icon.png"), os.path.join(ROOT, "share", "mnrh", "icon.png")):
+            if os.path.exists(p):
+                return p
+        return None
+
     def source_hash(self):
-        with open(self.src, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()
+        h = hashlib.sha256()
+        for p in (self.src, self.icon()):
+            if p:
+                with open(p, "rb") as f:
+                    h.update(f.read())
+        return h.hexdigest()
+
+    def make_icns(self, tmp):
+        png = self.icon()
+        if not png:
+            return False
+        iconset = os.path.join(tmp, "AppIcon.iconset")
+        os.makedirs(iconset)
+        for size in (16, 32, 128, 256, 512):
+            for scale in (1, 2):
+                name = f"icon_{size}x{size}{'@2x' if scale == 2 else ''}.png"
+                px = str(size * scale)
+                subprocess.run(["sips", "-z", px, px, png, "--out", os.path.join(iconset, name)], capture_output=True)
+        out = os.path.join(self.app, "Contents", "Resources", "AppIcon.icns")
+        return subprocess.run(["iconutil", "-c", "icns", iconset, "-o", out], capture_output=True).returncode == 0
 
     def build(self):
         """Собирает, если исходник поменялся. True — собран заново."""
@@ -74,16 +98,25 @@ class SwiftAgent:
             os.makedirs(os.path.dirname(self.bin))
             os.makedirs(os.path.dirname(self.stamp))
             shutil.copy2(out, self.bin)
+            has_icon = self.make_icns(tmp)
+        info = {"CFBundleIdentifier": self.label, "CFBundleName": self.display,
+                "CFBundleDisplayName": self.display, "CFBundleExecutable": os.path.basename(self.bin),
+                "CFBundlePackageType": "APPL", "CFBundleVersion": str(int(time.time())),
+                "CFBundleShortVersionString": "1." + time.strftime("%Y%m%d"), "LSUIElement": True}
+        if has_icon:
+            info["CFBundleIconFile"] = "AppIcon"
         with open(os.path.join(self.app, "Contents", "Info.plist"), "wb") as f:
-            plistlib.dump({"CFBundleIdentifier": self.label, "CFBundleName": self.display,
-                           "CFBundleDisplayName": self.display, "CFBundleExecutable": os.path.basename(self.bin),
-                           "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "LSUIElement": True}, f)
+            plistlib.dump(info, f)
         with open(self.stamp, "w") as f:
             f.write(want + "\n")
         r = subprocess.run(["codesign", "--force", "--sign", "-", "--identifier", self.label, self.app],
                            capture_output=True, text=True)
         if r.returncode != 0:
             sys.exit("Не удалось подписать помощника:\n" + r.stderr)
+        lsregister = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/"
+                      "Support/lsregister")
+        if os.path.exists(lsregister):
+            subprocess.run([lsregister, "-f", self.app], capture_output=True)
         return True
 
     def write_plist(self, extra_args):

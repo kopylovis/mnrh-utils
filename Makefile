@@ -106,6 +106,9 @@ test:
 	@zsh -n share/mnrh/restart.zsh
 	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep '"restart"' | grep -q '"forget"'
 	@./bin/mnrh gradle -h >/dev/null
+	@./bin/mnrh gradle update </dev/null >/dev/null 2>&1; rc=$$?; test $$rc -eq 2 -o $$rc -eq 1 -o $$rc -eq 0
+	@swiftc -typecheck -swift-version 5 share/mnrh/notify/main.swift
+	@test -f share/mnrh/icon.png
 	@./bin/mnrh gradle >/dev/null
 	@./bin/mnrh claude </dev/null >/dev/null 2>&1; test $$? -eq 2
 	@./bin/mnrh sim >/dev/null

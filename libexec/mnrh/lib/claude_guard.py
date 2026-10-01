@@ -20,7 +20,7 @@ TAIL = 4 << 20
 RULES = {
     "force-push": "git push --force в защищённую ветку (main, master, develop, release/*)",
     "discard": "git reset --hard, git clean, git checkout/restore файлов, git stash drop/clear, "
-               "git branch -D — когда есть что потерять",
+               "git branch -D — когда есть что потерять (во временных папках не проверяется)",
     "rm": "rm -r за пределами проекта, временных папок, scratchpad и содержимого ~/.cache, а также сам проект, ~ и /",
     "release": "выкладка: лейны fastlane с release/beta/upload/deploy/…, gradle publish, "
                "gh release create, firebase deploy/appdistribution, скрипты distribute/deploy/release/publish",
@@ -125,6 +125,8 @@ def check_git(ws, cwd):
         bad = [t.replace("refs/heads/", "") for t in targets if PROTECTED.match(t.replace("refs/heads/", ""))]
         if bad:
             return "force-push", f"git push --force в {', '.join(bad)} перепишет историю на сервере"
+        return None
+    if any(os.path.realpath(cwd) == r or os.path.realpath(cwd).startswith(r + "/") for r in SAFE_ROOTS):
         return None
     dirty = lambda: bool(git_out(cwd, "status", "--porcelain"))
     if sub == "reset" and "--hard" in rest and dirty():

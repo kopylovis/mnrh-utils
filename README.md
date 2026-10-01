@@ -466,6 +466,12 @@ Terminal и iTerm2 (по tty, как `/restart`), а в Android Studio, VS Code 
 `mnrh claude notify test` — пробное уведомление, `notify off` / `on` — выключить и
 включить, `notify sound off` — без звука.
 
+Иконка приложений-помощников (mnrh Notify и mnrh scroll) — `share/mnrh/icon.png`, 1024×1024,
+картинка до края без прозрачности: macOS 26 сама скругляет её, а иконку с полями или
+прозрачными углами кладёт на серую подложку. Из PNG при сборке делается `AppIcon.icns`;
+при смене иконки помощник пересобирается сам. Центр уведомлений помнит старую иконку до
+перезагрузки или выхода из системы.
+
 Лог: `~/Library/Logs/mnrh-claude-restart.log`.
 
 ## Что проверяет `mnrh doctor`
@@ -513,6 +519,24 @@ Homebrew, симуляторы без runtime, снимки `mnrh shot`.
   `mnrh claude sessions slim`, старые runtime и символы iOS для отладки.
 
 Системные кеши `com.apple.*` не трогаются никогда.
+
+## Обновление Gradle: `mnrh gradle update`
+
+Список проектов, у которых Gradle wrapper старше последней версии (все отмечены, рядом —
+версия AGP). Для каждого выбранного: в `gradle-wrapper.properties` прописываются новая
+версия и её `distributionSha256Sum` с services.gradle.org, затем запускается
+`./gradlew wrapper --gradle-version <версия> --no-daemon` уже на новой версии — так, как
+советует Gradle, обновляются `gradle-wrapper.jar` и скрипты `gradlew`, а заодно проверяется,
+что проект настраивается на новой версии. Если не настроился — все файлы wrapper
+возвращаются как были, и показывается причина из «What went wrong». Проекты с
+незакоммиченными правками в файлах wrapper пропускаются. Коммитить — самому.
+
+```
+mnrh gradle update                    выбрать проекты в списке
+mnrh gradle update kcalm sightra -y   эти, без вопросов
+mnrh gradle update --all -y           все отстающие
+mnrh gradle update --version 9.8.0    до своей версии
+```
 
 ## Что показывает `mnrh repos`
 
