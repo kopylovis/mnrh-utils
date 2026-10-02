@@ -96,7 +96,8 @@ if let loaded = loadConfig() {
 
 if !qrOut.isEmpty {
     let payload: [String: Any] = ["v": 1, "s": conf.server, "t": conf.token, "in": conf.toPhone,
-                                  "out": conf.toMac, "k": conf.keyText]
+                                  "out": conf.toMac, "k": conf.keyText,
+                                  "n": (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? "Mac"]
     let json = try! JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
     guard let filter = CIFilter(name: "CIQRCodeGenerator") else { exit(1) }
     filter.setValue(json, forKey: "inputMessage")
