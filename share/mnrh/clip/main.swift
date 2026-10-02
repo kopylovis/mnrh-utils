@@ -145,6 +145,7 @@ struct Config {
     var keyText = ""
     var pausedUntil = 0.0
     var images = true
+    var files = true
     var notifyApp = ""
     var name = ""
     var aliases = [String: String]()
@@ -177,6 +178,7 @@ func loadConfig() -> Config? {
     c.keyText = keyText
     c.pausedUntil = raw["paused_until"] as? Double ?? 0
     c.images = raw["images"] as? Bool ?? true
+    c.files = raw["files"] as? Bool ?? true
     c.notifyApp = raw["notify_app"] as? String ?? ""
     c.name = (raw["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
     c.aliases = raw["aliases"] as? [String: String] ?? [:]
@@ -394,14 +396,36 @@ func capture() {
     if types.contains(.fileURL) {
         let urls = pasteboard.readObjects(forClasses: [NSURL.self],
                                           options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        guard conf.images, urls.count == 1, let url = urls.first,
-              let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image),
-              let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size <= maxImage * 2,
-              let data = try? Data(contentsOf: url), let (body, mime) = imagePayload(data, type) else {
-            log("пропустил: скопированы файлы, передаю только одну картинку")
+        guard urls.count == 1, let url = urls.first else {
+            log("пропустил: скопировано несколько файлов, передаю по одному")
             return
         }
-        publish(kind: "image", mime: mime, data: body, text: nil)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else {
+            log("пропустил: папки не передаю")
+            return
+        }
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        let type = UTType(filenameExtension: url.pathExtension)
+        if conf.images, let type = type, type.conforms(to: .image), size <= maxImage * 2,
+           let data = try? Data(contentsOf: url), let (body, mime) = imagePayload(data, type) {
+            publish(kind: "image", mime: mime, data: body, text: nil)
+            return
+        }
+        guard conf.files else {
+            log("пропустил: передача файлов выключена — mnrh tossy files on")
+            return
+        }
+        guard size <= maxFile, let data = try? Data(contentsOf: url) else {
+            log("пропустил: \(url.lastPathComponent) больше \(maxFile / 1_000_000) МБ")
+            return
+        }
+        if isEcho(data) {
+            log("пропустил: этот файл только что пришёл с другого устройства")
+            return
+        }
+        publish(kind: "file", mime: type?.preferredMIMEType ?? "application/octet-stream", data: data, text: nil,
+                extra: ["f": url.lastPathComponent])
         return
     }
     if conf.images {
@@ -576,6 +600,8 @@ func apply(_ meta: [String: Any], _ data: Data?) {
             return
         }
         pasteboard.writeObjects([url as NSURL])
+        lastReceivedHash = digest(data)
+        lastReceivedAt = Date().timeIntervalSince1970
         what = "файл \(url.lastPathComponent) (\(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))) — в Загрузках/Tossy"
     } else {
         log("непонятное сообщение: \(kind)")

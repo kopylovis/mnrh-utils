@@ -18,8 +18,8 @@ from mnrhlib import HOME, OK, WARN, BAD, has_flag, paint, tilde
 from swiftagent import SwiftAgent
 
 args = sys.argv[1:]
-ACTIONS = ("status", "setup", "pair", "invite", "join", "rename", "on", "off", "pause", "resume", "send", "images", "log",
-           "remove")
+ACTIONS = ("status", "setup", "pair", "invite", "join", "rename", "on", "off", "pause", "resume", "send", "images", "files",
+           "log", "remove")
 if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
     print("mnrh tossy                    меню с действиями (без терминала — то же, что status)")
     print("mnrh tossy status             состояние: работает ли, связь с сервером, устройства, что передано")
@@ -36,6 +36,7 @@ if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
     print("mnrh tossy pause [мин]        не отправлять буфер этого Mac (по умолчанию 30 мин)")
     print("mnrh tossy resume             снова отправлять")
     print("mnrh tossy images on|off      передавать ли картинки")
+    print("mnrh tossy files on|off       передавать ли файл, скопированный в Finder (до 24 МБ)")
     print("mnrh tossy log                что передано и почему что-то пропущено")
     print("mnrh tossy on | off           включить или выключить помощника")
     print("mnrh tossy remove             выключить и удалить помощника и настройки")
@@ -351,6 +352,48 @@ def images():
     print(f"{OK} картинки {'передаю' if args[1] == 'on' else 'не передаю, только текст'}.")
 
 
+def files():
+    if len(args) < 2 or args[1] not in ("on", "off"):
+        sys.exit("mnrh tossy files on|off")
+    write_conf(files=args[1] == "on")
+    print(f"{OK} файлы из Finder {'передаю' if args[1] == 'on' else 'не передаю — только mnrh tossy send'}.")
+
+
+def refresh_helper():
+    """Помощник, запущенный до обновления mnrh, работает на старом коде, пока его не перезапустить.
+
+    У каждой сборки свой идентификатор службы, поэтому старую службу надо снять отдельно: после
+    пересборки она уже не совпадает с той, что записана в новом приложении.
+    """
+    if cmd in ("off", "remove", "setup", "on", "menu") or not configured():
+        return
+    s = agent.state()
+    if not s and not agent.installed():
+        return
+    stamp = open(agent.stamp).read().strip() if os.path.exists(agent.stamp) else ""
+    try:
+        rebuilt = bool(s) and os.path.getmtime(agent.bin) > (s.get("started") or 0) + 1
+    except OSError:
+        rebuilt = False
+    if agent.source_hash() == stamp and not rebuilt:
+        return
+    print(paint("обновляю помощника: он работал на прежней версии", "2"))
+    listed = subprocess.run(["launchctl", "list"], capture_output=True, text=True).stdout.splitlines()
+    for line in listed:
+        label = line.split("\t")[-1]
+        if label.startswith(agent.base + "."):
+            agent.launchctl("bootout", f"{agent.domain}/{label}")
+    if s:
+        try:
+            os.kill(s["pid"], 15)
+        except OSError:
+            pass
+    agent.stop()
+    agent.build()
+    if agent.start() is not True:
+        print(f"{WARN} новый помощник не запустился" + paint("   -> mnrh tossy on", "2"))
+
+
 def send():
     if not configured():
         sys.exit("Сначала mnrh tossy setup <сервер>")
@@ -459,6 +502,8 @@ def status():
         print(f"{WARN} на паузе до {datetime.fromtimestamp(until):%H:%M}" + paint("   -> mnrh tossy resume", "2"))
     if not conf.get("images", True):
         print("  картинки не передаю (mnrh tossy images on)")
+    if not conf.get("files", True):
+        print("  файлы из Finder не передаю (mnrh tossy files on)")
 
 
 def computer_name():
@@ -567,5 +612,6 @@ def menu():
             return
 
 
-{"menu": menu, "status": status, "rename": rename, "setup": setup, "pair": pair, "invite": invite, "join": join, "on": on, "off": off, "pause": pause, "resume": resume,
+refresh_helper()
+{"menu": menu, "status": status, "files": files, "rename": rename, "setup": setup, "pair": pair, "invite": invite, "join": join, "on": on, "off": off, "pause": pause, "resume": resume,
  "send": send, "images": images, "log": show_log, "remove": remove}[cmd]()
