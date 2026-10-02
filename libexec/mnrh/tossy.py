@@ -30,7 +30,9 @@ if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
     print("mnrh tossy rename             переименовать устройство в комнате (выбор из списка)")
     print("mnrh tossy rename <имя>       новое имя этого Mac — его увидят все в комнате")
     print("mnrh tossy rename <кто> <имя> как называть другое устройство на этом Mac (пустое имя — вернуть его собственное)")
-    print("mnrh tossy send <файл|текст>  отправить на все устройства картинку или текст")
+    print("mnrh tossy send <файл|текст>  отправить текст, картинку или любой файл до 24 МБ на все устройства")
+    print("  … | mnrh tossy send         отправить то, что пришло в пайп (текст или файл)")
+    print("  --to <кто>                  только этому устройству (имя из status; можно несколько)")
     print("mnrh tossy pause [мин]        не отправлять буфер этого Mac (по умолчанию 30 мин)")
     print("mnrh tossy resume             снова отправлять")
     print("mnrh tossy images on|off      передавать ли картинки")
@@ -350,15 +352,62 @@ def images():
 
 
 def send():
-    if len(args) < 2:
-        sys.exit("mnrh tossy send <файл-картинка | текст>")
     if not configured():
         sys.exit("Сначала mnrh tossy setup <сервер>")
+    rest, targets = [], []
+    items = iter(args[1:])
+    for a in items:
+        if a in ("--to", "-t"):
+            targets.append(next(items, ""))
+        elif a.startswith("--to="):
+            targets.append(a[5:])
+        else:
+            rest.append(a)
+    ids = []
+    if targets:
+        conf = read_conf()
+        devices = room_devices(conf, agent.state() or {})
+        for t in targets:
+            low = t.strip().lower()
+            found = [d for d in devices if low in (d["title"].lower(), d["name"].lower(), d["id"].lower())]
+            if not found:
+                names = ", ".join(d["title"] for d in devices) or "в комнате пока никого"
+                sys.exit(f"Нет устройства «{t}». Есть: {names}")
+            ids.append(found[0]["id"])
+    piped = None
+    if not rest and not sys.stdin.isatty():
+        piped = sys.stdin.buffer.read()
+    if not rest and not piped:
+        sys.exit("mnrh tossy send [--to <кто>] <файл|текст>…  или  … | mnrh tossy send [--to <кто>]")
     agent.build()
-    items = []
-    for a in args[1:]:
-        items += ["--send", a]
-    sys.exit(subprocess.run([agent.bin, "--config", CONFIG, *items]).returncode)
+    cmd_args = [a for i in ids for a in ("--to", i)]
+    tmp = None
+    if piped is not None:
+        os.makedirs(os.path.dirname(QR), exist_ok=True)
+        try:
+            piped.decode("utf-8")
+            tmp = os.path.join(os.path.dirname(QR), f"tossy-send-{os.getpid()}.txt")
+            cmd_args += ["--text", tmp]
+        except UnicodeDecodeError:
+            tmp = os.path.join(os.path.dirname(QR), f"tossy-send-{os.getpid()}", "stdin.bin")
+            os.makedirs(os.path.dirname(tmp), exist_ok=True)
+            cmd_args += ["--send", tmp]
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(piped)
+    for a in rest:
+        cmd_args += ["--send", a]
+    try:
+        code = subprocess.run([agent.bin, "--config", CONFIG, *cmd_args]).returncode
+    finally:
+        if tmp:
+            try:
+                os.remove(tmp)
+                if tmp.endswith("stdin.bin"):
+                    os.rmdir(os.path.dirname(tmp))
+            except OSError:
+                pass
+    sys.exit(code)
 
 
 def show_log():

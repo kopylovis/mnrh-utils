@@ -7,12 +7,15 @@ import UniformTypeIdentifiers
 
 let maxText = 1_000_000
 let maxImage = 15_000_000
+let maxFile = 24_000_000
 let inlineLimit = 2_400
 let staleAfter = 15.0 * 60
 var configFile = ""
 var stateFile = ""
 var qrOut = ""
 var sendItems = [String]()
+var sendTexts = [String]()
+var sendTo = [String]()
 var inviteCode = ""
 var joinServer = ""
 var joinCode = ""
@@ -25,6 +28,8 @@ while let arg = argv.next() {
     case "--state": stateFile = argv.next() ?? ""
     case "--qr": qrOut = argv.next() ?? ""
     case "--send": sendItems.append(argv.next() ?? "")
+    case "--text": sendTexts.append(argv.next() ?? "")
+    case "--to": sendTo.append(argv.next() ?? "")
     case "--invite": inviteCode = argv.next() ?? ""
     case "--join":
         joinServer = argv.next() ?? ""
@@ -462,6 +467,21 @@ func rewriteConfig(_ change: (inout [String: Any]) -> Void) -> Bool {
     return rename(tmp, configFile) == 0
 }
 
+func saveDownload(_ name: String, _ data: Data) -> URL? {
+    let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/Tossy", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let clean = String(name.split(separator: "/").last ?? "file").replacingOccurrences(of: ":", with: "_")
+    let base = (clean as NSString).deletingPathExtension
+    let ext = (clean as NSString).pathExtension
+    var url = dir.appendingPathComponent(clean.isEmpty ? "file" : clean)
+    var n = 2
+    while FileManager.default.fileExists(atPath: url.path) {
+        url = dir.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)")
+        n += 1
+    }
+    return (try? data.write(to: url)) != nil ? url : nil
+}
+
 func shownName(_ meta: [String: Any], _ fallback: String) -> String {
     if let id = meta["id"] as? String, let alias = conf.aliases[id], !alias.isEmpty { return alias }
     return meta["n"] as? String ?? fallback
@@ -528,7 +548,7 @@ func apply(_ meta: [String: Any], _ data: Data?) {
         writeState()
         return
     }
-    guard kind == "text" || (kind == "image" && data != nil) else {
+    guard kind == "text" || ((kind == "image" || kind == "file") && data != nil) else {
         log("непонятное сообщение: \(kind)")
         return
     }
@@ -550,6 +570,13 @@ func apply(_ meta: [String: Any], _ data: Data?) {
         lastReceivedHash = digest(data)
         lastReceivedAt = Date().timeIntervalSince1970
         what = describe("картинка", data.count, nil)
+    } else if kind == "file", let data = data {
+        guard let url = saveDownload(meta["f"] as? String ?? "file", data) else {
+            log("не сохранил файл от \(from)")
+            return
+        }
+        pasteboard.writeObjects([url as NSURL])
+        what = "файл \(url.lastPathComponent) (\(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))) — в Загрузках/Tossy"
     } else {
         log("непонятное сообщение: \(kind)")
         return
@@ -667,33 +694,66 @@ final class Stream: NSObject, URLSessionDataDelegate {
     }
 }
 
-if !sendItems.isEmpty {
-    var pending = sendItems.count
+if !sendItems.isEmpty || !sendTexts.isEmpty {
+    var pending = sendItems.count + sendTexts.count
     var failed = false
+    let target: [String: Any] = sendTo.isEmpty ? [:] : ["to": sendTo]
     let finish: (Bool) -> Void = { ok in
         failed = failed || !ok
         pending -= 1
         if pending == 0 { exit(failed ? 1 : 0) }
     }
+    func sendText(_ text: String) {
+        guard Data(text.utf8).count <= maxText else {
+            print("текст больше \(maxText / 1_000_000) МБ")
+            finish(false)
+            return
+        }
+        publish(kind: "text", mime: "text/plain", data: Data(text.utf8), text: text, extra: target) { ok in
+            print(ok ? "✓ отправил текст" : "✗ не отправил текст")
+            finish(ok)
+        }
+    }
+    for path in sendTexts {
+        guard let data = FileManager.default.contents(atPath: path), let text = String(data: data, encoding: .utf8) else {
+            print("не прочитал текст")
+            finish(false)
+            continue
+        }
+        sendText(text)
+    }
     for item in sendItems {
         let url = URL(fileURLWithPath: (item as NSString).expandingTildeInPath)
-        if FileManager.default.fileExists(atPath: url.path) {
-            guard let data = try? Data(contentsOf: url),
-                  let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image),
-                  let (body, mime) = imagePayload(data, type) else {
-                print("не картинка или слишком большая: \(item)")
-                finish(false)
-                continue
-            }
-            publish(kind: "image", mime: mime, data: body, text: nil) { ok in
-                print(ok ? "✓ отправил \(url.lastPathComponent)" : "✗ не отправил \(url.lastPathComponent)")
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
+            sendText(item)
+            continue
+        }
+        guard !isDir.boolValue else {
+            print("папки не передаю: \(url.lastPathComponent)")
+            finish(false)
+            continue
+        }
+        let name = url.lastPathComponent
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        let type = UTType(filenameExtension: url.pathExtension)
+        if let type = type, type.conforms(to: .image), size <= maxImage * 2,
+           let data = try? Data(contentsOf: url), let (body, mime) = imagePayload(data, type) {
+            publish(kind: "image", mime: mime, data: body, text: nil, extra: target) { ok in
+                print(ok ? "✓ отправил \(name)" : "✗ не отправил \(name)")
                 finish(ok)
             }
-        } else {
-            publish(kind: "text", mime: "text/plain", data: Data(item.utf8), text: item) { ok in
-                print(ok ? "✓ отправил текст" : "✗ не отправил текст")
-                finish(ok)
-            }
+            continue
+        }
+        guard size <= maxFile, let data = try? Data(contentsOf: url) else {
+            print("файл больше \(maxFile / 1_000_000) МБ или не читается: \(name)")
+            finish(false)
+            continue
+        }
+        let mime = type?.preferredMIMEType ?? "application/octet-stream"
+        publish(kind: "file", mime: mime, data: data, text: nil, extra: target.merging(["f": name]) { _, new in new }) { ok in
+            print(ok ? "✓ отправил \(name)" : "✗ не отправил \(name)")
+            finish(ok)
         }
     }
     RunLoop.main.run()
