@@ -17,21 +17,23 @@ from mnrhlib import HOME, OK, WARN, BAD, has_flag, paint, tilde
 from swiftagent import SwiftAgent
 
 args = sys.argv[1:]
-ACTIONS = ("setup", "pair", "on", "off", "pause", "resume", "send", "images", "log", "remove")
+ACTIONS = ("setup", "pair", "invite", "join", "on", "off", "pause", "resume", "send", "images", "log", "remove")
 if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
     print("mnrh clip                    состояние: работает ли, связь с сервером, что передано")
     print("mnrh clip setup [<сервер>]   подключить свой ntfy-сервер и телефон с приложением Tossy")
-    print("mnrh clip pair [--new]       показать QR для телефона; --new — новый ключ, старый телефон отключится")
-    print("mnrh clip send <файл|текст>  отправить на телефон картинку или текст")
-    print("mnrh clip pause [мин]        не отправлять буфер на телефон (по умолчанию 30 мин)")
+    print("mnrh clip pair [--new]       показать QR для телефона; --new — новый ключ, все устройства подключать заново")
+    print("mnrh clip invite             код для второго Mac (10 минут, один раз)")
+    print("mnrh clip join <код>         подключить этот Mac к комнате другого: mnrh clip join ntfy.example.com/ABCD-EFGH")
+    print("mnrh clip send <файл|текст>  отправить на все устройства картинку или текст")
+    print("mnrh clip pause [мин]        не отправлять буфер этого Mac (по умолчанию 30 мин)")
     print("mnrh clip resume             снова отправлять")
     print("mnrh clip images on|off      передавать ли картинки")
     print("mnrh clip log                что передано и почему что-то пропущено")
     print("mnrh clip on | off           включить или выключить помощника")
     print("mnrh clip remove             выключить и удалить помощника и настройки")
     print()
-    print("Общий буфер обмена Mac ↔ Android через твой ntfy-сервер: скопировал на Mac — вставляешь на")
-    print("телефоне, и наоборот. Всё шифруется на устройствах, пароли из менеджеров паролей не передаются.")
+    print("Общий буфер обмена твоих Mac и Android-телефона через свой ntfy-сервер: скопировал на одном —")
+    print("вставляешь на остальных. Всё шифруется на устройствах, пароли из менеджеров паролей не передаются.")
     sys.exit(0 if has_flag(args, "-h", "--help") else 2)
 cmd = args[0] if args else "status"
 
@@ -63,7 +65,25 @@ def write_conf(**values):
 
 def configured():
     c = read_conf()
-    return all(c.get(k) for k in ("server", "token", "to_mac", "to_phone", "key"))
+    return all(c.get(k) for k in ("server", "token", "key")) and bool(c.get("room") or c.get("to_mac"))
+
+
+def migrate():
+    c = read_conf()
+    if c.get("room") or not c.get("to_mac"):
+        if c.get("room") and not c.get("device_id"):
+            write_conf(device_id=secrets.token_hex(8))
+        return False
+    conf = {k: v for k, v in c.items() if k not in ("to_mac", "to_phone")}
+    conf.update(room=f"tossy-{secrets.token_hex(12)}", legacy_to_mac=c["to_mac"], legacy_to_phone=c["to_phone"],
+                device_id=c.get("device_id") or secrets.token_hex(8))
+    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+    tmp = CONFIG + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(conf, f)
+    os.replace(tmp, CONFIG)
+    return True
 
 
 def http(method, url, token, body=None, headers=None, timeout=15):
@@ -104,9 +124,16 @@ def normalize_server(value):
 
 
 def new_channel():
-    room = secrets.token_hex(12)
-    return {"to_mac": f"tossy-{room}-mac", "to_phone": f"tossy-{room}-phone",
-            "key": base64.b64encode(secrets.token_bytes(32)).decode()}
+    return {"room": f"tossy-{secrets.token_hex(12)}", "key": base64.b64encode(secrets.token_bytes(32)).decode(),
+            "device_id": read_conf().get("device_id") or secrets.token_hex(8), "legacy_to_mac": "", "legacy_to_phone": ""}
+
+
+CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def new_code():
+    raw = "".join(secrets.choice(CODE_ALPHABET) for _ in range(8))
+    return f"{raw[:4]}-{raw[4:]}"
 
 
 def ensure_notify_app():
@@ -156,6 +183,8 @@ def setup():
 
 
 def start():
+    if migrate():
+        print(f"{OK} настройки переведены на комнату: телефон переедет сам, как только получит сообщение.")
     write_conf(paused_until=0)
     if agent.source_hash() != (open(agent.stamp).read().strip() if os.path.exists(agent.stamp) else ""):
         agent.stop()
@@ -211,6 +240,59 @@ def pair(fresh=None):
             os.remove(QR)
         except OSError:
             pass
+
+
+def invite():
+    if not configured():
+        sys.exit("Сначала mnrh clip setup <сервер>")
+    migrate()
+    agent.build()
+    code = new_code()
+    r = subprocess.run([agent.bin, "--config", CONFIG, "--invite", code], capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        sys.exit(f"Не создал приглашение: {r.stdout.strip() or r.stderr.strip()}")
+    host = read_conf()["server"].split("://", 1)[-1]
+    print(f"{OK} приглашение на 10 минут. На втором Mac выполни:")
+    print()
+    print(f"    mnrh clip join {host}/{code}")
+    print()
+    print(paint("  Код одноразовый по смыслу: кто его знает, тот войдёт в комнату. Не публикуй его.", "2"))
+
+
+def join():
+    if len(args) < 2:
+        sys.exit("mnrh clip join <сервер>/<КОД> — команду показывает mnrh clip invite на первом Mac")
+    target = args[1].strip()
+    server, _, code = target.rpartition("/")
+    server = normalize_server(server or read_conf().get("server", ""))
+    if not server or not re.match(r"^[0-9A-Za-z]{4}-?[0-9A-Za-z]{4}$", code):
+        sys.exit("Нужно вида: mnrh clip join ntfy.example.com/ABCD-EFGH")
+    agent.build()
+    out = os.path.join(os.path.dirname(CONFIG), "clip-join.tmp")
+    try:
+        r = subprocess.run([agent.bin, "--config", "/dev/null", "--join", server, code, "--out", out],
+                           capture_output=True, text=True, timeout=120)
+        if r.returncode != 0 or not os.path.exists(out):
+            sys.exit(f"{BAD} {r.stdout.strip() or r.stderr.strip() or 'не получилось'}")
+        with open(out) as f:
+            invite = json.load(f)
+    finally:
+        try:
+            os.remove(out)
+        except OSError:
+            pass
+    old = read_conf()
+    conf = {"server": normalize_server(invite["s"]), "token": invite["t"], "room": invite["r"], "key": invite["k"],
+            "device_id": old.get("device_id") or secrets.token_hex(8), "images": old.get("images", True),
+            "notify_app": ensure_notify_app()}
+    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+    tmp = CONFIG + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(conf, f)
+    os.replace(tmp, CONFIG)
+    start()
+    print(f"{OK} этот Mac в одной комнате с {r.stdout.strip()}: скопированное здесь появится там и на телефоне.")
 
 
 def on():
@@ -301,9 +383,17 @@ def status():
         return
     link = f"{OK} на связи с {conf['server']}" if s.get("connected") else f"{WARN} нет связи с {conf['server']}"
     print(f"{link} (pid {s['pid']}, с {ago(s['started'])})")
-    print(f"  телефон: {s.get('phone') or 'ещё не подключался — mnrh clip pair'}")
-    print(f"  на телефон: {s.get('sent', 0)} (последнее {ago(s.get('last_sent'))}) · "
-          f"с телефона: {s.get('received', 0)} (последнее {ago(s.get('last_received'))})")
+    members = s.get("members") or {}
+    if members:
+        names = [f"{m.get('name', '?')} ({'Mac' if m.get('src') == 'mac' else 'телефон'}, {ago(m.get('seen'))})"
+                 for m in sorted(members.values(), key=lambda m: -(m.get("seen") or 0))]
+        print(f"  устройства в комнате: {', '.join(names)}")
+    else:
+        print(f"  телефон: {s.get('phone') or 'ещё не подключался — mnrh clip pair'}")
+    if not conf.get("room"):
+        print(f"{WARN} старая схема без комнаты" + paint("   -> mnrh clip on", "2"))
+    print(f"  отправлено: {s.get('sent', 0)} (последнее {ago(s.get('last_sent'))}) · "
+          f"получено: {s.get('received', 0)} (последнее {ago(s.get('last_received'))})")
     until = conf.get("paused_until") or 0
     if until > time.time():
         print(f"{WARN} на паузе до {datetime.fromtimestamp(until):%H:%M}" + paint("   -> mnrh clip resume", "2"))
@@ -311,5 +401,5 @@ def status():
         print("  картинки не передаю (mnrh clip images on)")
 
 
-{"status": status, "setup": setup, "pair": pair, "on": on, "off": off, "pause": pause, "resume": resume,
+{"status": status, "setup": setup, "pair": pair, "invite": invite, "join": join, "on": on, "off": off, "pause": pause, "resume": resume,
  "send": send, "images": images, "log": show_log, "remove": remove}[cmd]()

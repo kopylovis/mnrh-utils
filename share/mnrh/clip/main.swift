@@ -1,4 +1,5 @@
 import AppKit
+import CommonCrypto
 import CryptoKit
 import ServiceManagement
 import SystemConfiguration
@@ -12,6 +13,10 @@ var configFile = ""
 var stateFile = ""
 var qrOut = ""
 var sendItems = [String]()
+var inviteCode = ""
+var joinServer = ""
+var joinCode = ""
+var joinOut = ""
 
 var argv = CommandLine.arguments.dropFirst().makeIterator()
 while let arg = argv.next() {
@@ -20,6 +25,11 @@ while let arg = argv.next() {
     case "--state": stateFile = argv.next() ?? ""
     case "--qr": qrOut = argv.next() ?? ""
     case "--send": sendItems.append(argv.next() ?? "")
+    case "--invite": inviteCode = argv.next() ?? ""
+    case "--join":
+        joinServer = argv.next() ?? ""
+        joinCode = argv.next() ?? ""
+    case "--out": joinOut = argv.next() ?? ""
     default: break
     }
 }
@@ -53,11 +63,79 @@ func log(_ text: String) {
     FileHandle.standardError.write("\(stamp) \(text)\n".data(using: .utf8)!)
 }
 
+let computerName = (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? "Mac"
+
+func normalizedCode(_ code: String) -> String {
+    code.uppercased().filter { $0.isLetter || $0.isNumber }
+}
+
+func inviteTopic(_ code: String) -> String {
+    let hash = SHA256.hash(data: Data("tossy-invite-topic:\(normalizedCode(code))".utf8))
+    return "tossy-inv-" + hash.prefix(12).map { String(format: "%02x", $0) }.joined()
+}
+
+func inviteKey(_ code: String) -> SymmetricKey {
+    let password = Array(normalizedCode(code).utf8)
+    let salt = Array("tossy-invite-v1".utf8)
+    var derived = [UInt8](repeating: 0, count: 32)
+    _ = password.withUnsafeBufferPointer { pw in
+        CCKeyDerivationPBKDF(CCPBKDFAlgorithm(kCCPBKDF2), UnsafeRawPointer(pw.baseAddress!).assumingMemoryBound(to: Int8.self),
+                             pw.count, salt, salt.count, CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), 300_000,
+                             &derived, derived.count)
+    }
+    return SymmetricKey(data: Data(derived))
+}
+
+func runSync(_ request: URLRequest) -> (Int, Data) {
+    var result = (0, Data())
+    let done = DispatchSemaphore(value: 0)
+    URLSession.shared.dataTask(with: request) { data, response, _ in
+        result = ((response as? HTTPURLResponse)?.statusCode ?? 0, data ?? Data())
+        done.signal()
+    }.resume()
+    done.wait()
+    return result
+}
+
+if !joinCode.isEmpty {
+    let server = joinServer.hasPrefix("http") ? joinServer : "https://" + joinServer
+    var r = URLRequest(url: URL(string: "\(server.hasSuffix("/") ? String(server.dropLast()) : server)/\(inviteTopic(joinCode))/json?poll=1&since=30m")!)
+    r.timeoutInterval = 20
+    let (code, body) = runSync(r)
+    guard code == 200 else {
+        print(code == 401 || code == 403 ? "сервер не пускает к приглашениям: ntfy access everyone 'tossy-inv-*' read-only"
+                                         : "нет связи с сервером: HTTP \(code)")
+        exit(3)
+    }
+    let key = inviteKey(joinCode)
+    for line in body.split(separator: 0x0A).reversed() {
+        guard let event = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+              let message = event["message"] as? String, let sealed = Data(base64Encoded: message),
+              let box = try? AES.GCM.SealedBox(combined: sealed), let plain = try? AES.GCM.open(box, using: key),
+              let invite = (try? JSONSerialization.jsonObject(with: plain)) as? [String: Any] else { continue }
+        guard (invite["exp"] as? Double ?? 0) > Date().timeIntervalSince1970 else {
+            print("приглашение устарело: на первом Mac — mnrh clip invite")
+            exit(4)
+        }
+        let fd = open(joinOut, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+        guard fd >= 0 else { exit(1) }
+        _ = plain.withUnsafeBytes { write(fd, $0.baseAddress, plain.count) }
+        close(fd)
+        print(invite["n"] as? String ?? "Mac")
+        exit(0)
+    }
+    print("приглашение не найдено: проверь код или создай новое — mnrh clip invite")
+    exit(5)
+}
+
 struct Config {
     var server = ""
     var token = ""
-    var toMac = ""
-    var toPhone = ""
+    var room = ""
+    var publishTopic = ""
+    var listenTopics = [String]()
+    var legacyToPhone = ""
+    var deviceID = ""
     var key = SymmetricKey(size: .bits256)
     var keyText = ""
     var pausedUntil = 0.0
@@ -69,14 +147,23 @@ func loadConfig() -> Config? {
     guard let data = FileManager.default.contents(atPath: configFile),
           let raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
           let server = raw["server"] as? String,
-          let toMac = raw["to_mac"] as? String, let toPhone = raw["to_phone"] as? String,
           let keyText = raw["key"] as? String, let keyData = Data(base64Encoded: keyText), keyData.count == 32
     else { return nil }
     var c = Config()
     c.server = server.hasSuffix("/") ? String(server.dropLast()) : server
     c.token = raw["token"] as? String ?? ""
-    c.toMac = toMac
-    c.toPhone = toPhone
+    c.deviceID = raw["device_id"] as? String ?? ""
+    if let room = raw["room"] as? String, !room.isEmpty {
+        c.room = room
+        c.publishTopic = room
+        c.listenTopics = [room] + [raw["legacy_to_mac"] as? String].compactMap { $0 }.filter { !$0.isEmpty }
+        c.legacyToPhone = raw["legacy_to_phone"] as? String ?? ""
+    } else if let toMac = raw["to_mac"] as? String, let toPhone = raw["to_phone"] as? String {
+        c.publishTopic = toPhone
+        c.listenTopics = [toMac]
+    } else {
+        return nil
+    }
     c.key = SymmetricKey(data: keyData)
     c.keyText = keyText
     c.pausedUntil = raw["paused_until"] as? Double ?? 0
@@ -94,10 +181,36 @@ if let loaded = loadConfig() {
     exit(2)
 }
 
+if !inviteCode.isEmpty {
+    guard !conf.room.isEmpty else {
+        print("сначала mnrh clip on: старые настройки без комнаты")
+        exit(2)
+    }
+    let invite: [String: Any] = ["s": conf.server, "t": conf.token, "r": conf.room, "k": conf.keyText,
+                                 "n": computerName, "exp": Date().timeIntervalSince1970 + 600]
+    let plain = try! JSONSerialization.data(withJSONObject: invite)
+    let sealed = try! AES.GCM.seal(plain, using: inviteKey(inviteCode)).combined!
+    var r = URLRequest(url: URL(string: "\(conf.server)/\(inviteTopic(inviteCode))")!)
+    r.httpMethod = "POST"
+    if !conf.token.isEmpty { r.setValue("Bearer \(conf.token)", forHTTPHeaderField: "Authorization") }
+    r.httpBody = sealed.base64EncodedString().data(using: .utf8)
+    r.timeoutInterval = 20
+    let (code, _) = runSync(r)
+    print(code == 200 ? "ok" : "не отправил приглашение: HTTP \(code)")
+    exit(code == 200 ? 0 : 1)
+}
+
 if !qrOut.isEmpty {
-    let payload: [String: Any] = ["v": 1, "s": conf.server, "t": conf.token, "in": conf.toPhone,
-                                  "out": conf.toMac, "k": conf.keyText,
-                                  "n": (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? "Mac"]
+    var payload: [String: Any] = ["s": conf.server, "t": conf.token, "k": conf.keyText, "n": computerName]
+    if conf.room.isEmpty {
+        payload["v"] = 1
+        payload["in"] = conf.publishTopic
+        payload["out"] = conf.listenTopics.first ?? ""
+    } else {
+        payload["v"] = 2
+        payload["r"] = conf.room
+        payload["id"] = conf.deviceID
+    }
     let json = try! JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
     guard let filter = CIFilter(name: "CIQRCodeGenerator") else { exit(1) }
     filter.setValue(json, forKey: "inputMessage")
@@ -127,6 +240,8 @@ var lastID = ""
 var connected = false
 var phone = ""
 var phoneAt = 0.0
+var moved = false
+var members = [String: [String: Any]]()
 
 func readSavedID() {
     guard !stateFile.isEmpty, let data = FileManager.default.contents(atPath: stateFile),
@@ -134,6 +249,8 @@ func readSavedID() {
     lastID = raw["last_id"] as? String ?? ""
     phone = raw["phone"] as? String ?? ""
     phoneAt = raw["phone_at"] as? Double ?? 0
+    moved = raw["moved"] as? Bool ?? false
+    members = raw["members"] as? [String: [String: Any]] ?? [:]
 }
 
 func writeState() {
@@ -141,7 +258,7 @@ func writeState() {
     let state: [String: Any] = ["pid": getpid(), "started": Int(started.timeIntervalSince1970),
                                 "sent": sentCount, "received": receivedCount, "last_sent": Int(lastSent),
                                 "last_received": Int(lastReceived), "last_id": lastID, "connected": connected,
-                                "phone": phone, "phone_at": phoneAt]
+                                "phone": phone, "phone_at": phoneAt, "moved": moved, "members": members]
     if let data = try? JSONSerialization.data(withJSONObject: state) {
         try? data.write(to: URL(fileURLWithPath: stateFile), options: .atomic)
     }
@@ -162,8 +279,11 @@ func describe(_ kind: String, _ size: Int, _ text: String?) -> String {
     return "\(kind == "image" ? "картинка" : kind) \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))"
 }
 
-func publish(kind: String, mime: String, data: Data, text: String?, done: ((Bool) -> Void)? = nil) {
-    var meta: [String: Any] = ["k": kind, "m": mime, "src": "mac", "n": (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? "Mac"]
+func publish(kind: String, mime: String, data: Data, text: String?, topic: String? = nil, extra: [String: Any] = [:],
+             done: ((Bool) -> Void)? = nil) {
+    var meta: [String: Any] = ["k": kind, "m": mime, "src": "mac", "n": computerName]
+    if !conf.deviceID.isEmpty { meta["id"] = conf.deviceID }
+    meta.merge(extra) { _, new in new }
     var body: Data? = nil
     if let text = text, data.count <= inlineLimit {
         meta["v"] = text
@@ -174,7 +294,22 @@ func publish(kind: String, mime: String, data: Data, text: String?, done: ((Bool
         done?(false)
         return
     }
-    var r = request(conf.toPhone, method: body == nil ? "POST" : "PUT")
+    let content = kind == "text" || kind == "image"
+    let legacy = topic == nil && content && !conf.legacyToPhone.isEmpty && !moved ? [conf.legacyToPhone] : []
+    for extraTopic in legacy {
+        var copy = request(extraTopic, method: body == nil ? "POST" : "PUT")
+        copy.setValue("4", forHTTPHeaderField: "X-Priority")
+        copy.timeoutInterval = 60
+        if let body = body {
+            copy.setValue(sealedMeta.base64EncodedString(), forHTTPHeaderField: "X-Message")
+            copy.setValue("clip.bin", forHTTPHeaderField: "X-Filename")
+            copy.httpBody = body
+        } else {
+            copy.httpBody = sealedMeta.base64EncodedString().data(using: .utf8)
+        }
+        URLSession.shared.dataTask(with: copy).resume()
+    }
+    var r = request(topic ?? conf.publishTopic, method: body == nil ? "POST" : "PUT")
     r.setValue("4", forHTTPHeaderField: "X-Priority")
     r.timeoutInterval = 60
     if let body = body {
@@ -189,9 +324,11 @@ func publish(kind: String, mime: String, data: Data, text: String?, done: ((Bool
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         DispatchQueue.main.async {
             if code == 200 {
-                sentCount += 1
-                lastSent = Date().timeIntervalSince1970
-                log("→ телефон: \(what)")
+                if kind == "text" || kind == "image" {
+                    sentCount += 1
+                    lastSent = Date().timeIntervalSince1970
+                    log("→ \(conf.room.isEmpty ? "телефон" : "комната"): \(what)")
+                }
             } else {
                 let detail = error?.localizedDescription
                     ?? reply.flatMap { String(data: $0, encoding: .utf8) }?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -262,7 +399,7 @@ func capture() {
                                (NSPasteboard.PasteboardType("public.heic"), UTType.heic),
                                (NSPasteboard.PasteboardType.tiff, UTType.tiff)] where types.contains(ptype) {
             if let data = pasteboard.data(forType: ptype), isEcho(data) {
-                log("пропустил: эта картинка только что пришла с телефона")
+                log("пропустил: эта картинка только что пришла с другого устройства")
                 return
             }
             if let data = pasteboard.data(forType: ptype), let (body, mime) = imagePayload(data, utype) {
@@ -278,7 +415,7 @@ func capture() {
             return
         }
         if isEcho(data) {
-            log("пропустил: это только что пришло с телефона")
+            log("пропустил: это только что пришло с другого устройства")
             return
         }
         publish(kind: "text", mime: "text/plain", data: data, text: text)
@@ -294,14 +431,31 @@ func notify(_ body: String) {
     try? p.run()
 }
 
+func remember(_ meta: [String: Any]) -> Bool {
+    let name = meta["n"] as? String ?? "?"
+    let source = meta["src"] as? String ?? "android"
+    let id = meta["id"] as? String ?? "legacy-\(source)-\(name)"
+    let isNew = members[id] == nil
+    members[id] = ["name": name, "src": source, "seen": Date().timeIntervalSince1970]
+    if source != "mac" {
+        if conf.listenTopics.first == conf.room && meta["id"] != nil { moved = true }
+        phone = name
+        if isNew || meta["k"] as? String == "hello" { phoneAt = Date().timeIntervalSince1970 }
+    }
+    return isNew
+}
+
 func apply(_ meta: [String: Any], _ data: Data?) {
     let kind = meta["k"] as? String ?? ""
-    let from = meta["n"] as? String ?? "телефона"
+    let from = meta["n"] as? String ?? "устройства"
+    let isNew = remember(meta)
     if kind == "hello" {
-        phone = from
-        phoneAt = Date().timeIntervalSince1970
-        log("телефон подключён: \(from)")
-        notify("Подключён \(from)")
+        if isNew {
+            log("новое устройство: \(from)")
+            notify("Подключён \(from)")
+        } else {
+            log("на связи: \(from)")
+        }
         writeState()
         return
     }
@@ -336,9 +490,9 @@ func apply(_ meta: [String: Any], _ data: Data?) {
     writeState()
 }
 
-func handle(_ event: [String: Any]) {
+func handle(_ event: [String: Any], primary: Bool) {
     guard event["event"] as? String == "message", let id = event["id"] as? String else { return }
-    lastID = id
+    if primary { lastID = id }
     let time = event["time"] as? Double ?? Date().timeIntervalSince1970
     guard Date().timeIntervalSince1970 - time < staleAfter else {
         log("пропустил старое сообщение \(id)")
@@ -352,6 +506,8 @@ func handle(_ event: [String: Any]) {
         writeState()
         return
     }
+    if let sender = meta["id"] as? String, !conf.deviceID.isEmpty, sender == conf.deviceID { return }
+    if let targets = meta["to"] as? [String], !conf.deviceID.isEmpty, !targets.contains(conf.deviceID) { return }
     guard let attachment = event["attachment"] as? [String: Any], let url = attachment["url"] as? String,
           let link = URL(string: url) else {
         apply(meta, nil)
@@ -377,8 +533,12 @@ final class Stream: NSObject, URLSessionDataDelegate {
     var session: URLSession!
     var buffer = Data()
     var retry = 1.0
+    let topic: String
+    let primary: Bool
 
-    override init() {
+    init(topic: String, primary: Bool) {
+        self.topic = topic
+        self.primary = primary
         super.init()
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 120
@@ -387,8 +547,8 @@ final class Stream: NSObject, URLSessionDataDelegate {
     }
 
     func connect() {
-        var path = "\(conf.toMac)/json"
-        path += lastID.isEmpty ? "?since=\(Int(staleAfter))s" : "?since=\(lastID)"
+        var path = "\(topic)/json"
+        path += lastID.isEmpty || !primary ? "?since=\(Int(staleAfter))s" : "?since=\(lastID)"
         buffer = Data()
         session.dataTask(with: request(path)).resume()
     }
@@ -397,8 +557,8 @@ final class Stream: NSObject, URLSessionDataDelegate {
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         if code == 200 {
-            if !connected { log("подключился к \(conf.server)") }
-            connected = true
+            if primary && !connected { log("подключился к \(conf.server)") }
+            if primary { connected = true }
             retry = 1
             writeState()
             completionHandler(.allow)
@@ -415,14 +575,14 @@ final class Stream: NSObject, URLSessionDataDelegate {
             let line = buffer[buffer.startIndex..<nl]
             buffer.removeSubrange(buffer.startIndex...nl)
             if let event = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] {
-                handle(event)
+                handle(event, primary: primary)
             }
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if connected { log("связь с сервером прервалась\(error.map { ": \($0.localizedDescription)" } ?? "")") }
-        connected = false
+        if primary && connected { log("связь с сервером прервалась\(error.map { ": \($0.localizedDescription)" } ?? "")") }
+        if primary { connected = false }
         writeState()
         let delay = retry
         retry = min(retry * 2, 60)
@@ -467,8 +627,22 @@ if !sendItems.isEmpty {
 }
 
 readSavedID()
-let stream = Stream()
-stream.connect()
+let streams = conf.listenTopics.enumerated().map { Stream(topic: $0.element, primary: $0.offset == 0) }
+streams.forEach { $0.connect() }
+
+func announceMove() {
+    guard !conf.room.isEmpty, !conf.legacyToPhone.isEmpty, !moved else { return }
+    publish(kind: "move", mime: "text/plain", data: Data(), text: "", topic: conf.legacyToPhone,
+            extra: ["r": conf.room]) { ok in
+        if ok { log("старый канал телефона: отправил переезд в комнату") }
+    }
+}
+
+if !conf.room.isEmpty {
+    publish(kind: "hello", mime: "text/plain", data: Data(), text: "")
+    announceMove()
+    Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in announceMove() }
+}
 
 Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
     let count = pasteboard.changeCount
@@ -484,7 +658,7 @@ Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
 
 NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil,
                                                   queue: .main) { _ in
-    stream.reconnect()
+    streams.forEach { $0.reconnect() }
 }
 
 Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in writeState() }
