@@ -2,6 +2,7 @@
 
 launcher.py help <реестр> "<команды>" <версия> [all]  — список по группам
 launcher.py menu <реестр> "<команды>" <версия>        — меню; выбор печатает аргументы в stdout
+launcher.py actions <реестр> <команда>                — меню действий одной команды; печатает её аргументы
 """
 import os
 import shlex
@@ -100,6 +101,13 @@ def dim(text):
     return f"\x1b[2m{text}\x1b[0m"
 
 
+def pick_action(name, actions, esc):
+    width = max(len(l) for _, l in actions) + 3
+    j = pick([(f"{a} {label}", f"{label.ljust(width)}{dim(f'mnrh {name} {a}'.rstrip())}") for a, label in actions],
+             title=f"\x1b[1;35mmnrh {name}\x1b[0m", esc=esc)
+    return None if j is None else actions[j][0]
+
+
 def menu(items, version, at=0):
     width = max(len(n) for _, n, *_ in items) + 2
     rows, index, group = [], [], None
@@ -116,16 +124,9 @@ def menu(items, version, at=0):
             return None
         at = i
         _, name, _, actions = items[index[i]]
-        if len(actions) == 1:
-            action = actions[0][0]
-        else:
-            aw = max(len(f"mnrh {name} {a}".rstrip()) for a, _ in actions) + 3
-            j = pick([(f"{a} {label}", f"{label.ljust(max(len(l) for _, l in actions) + 3)}"
-                                       f"{dim(f'mnrh {name} {a}'.rstrip())}")
-                      for a, label in actions], title=f"\x1b[1;35mmnrh {name}\x1b[0m", esc="назад")
-            if j is None:
-                continue
-            action = actions[j][0]
+        action = actions[0][0] if len(actions) == 1 else pick_action(name, actions, esc="назад")
+        if action is None:
+            continue
         try:
             rest = ask(action)
         except (KeyboardInterrupt, EOFError):
@@ -137,6 +138,8 @@ def menu(items, version, at=0):
 def main():
     if sys.argv[1:2] == ["after"]:
         return after(sys.argv[2] if len(sys.argv) > 2 else "0")
+    if sys.argv[1:2] == ["actions"]:
+        return actions(*sys.argv[2:4])
     mode, registry, have, version = sys.argv[1:5]
     items = load(registry, have)
     if mode == "help":
@@ -151,6 +154,23 @@ def main():
         return 1
     at, choice = picked
     print(f"{at}\t" + " ".join(shlex.quote(a) for a in choice))
+    return 0
+
+
+def actions(registry, name):
+    found = [a for _, n, _, a in load(registry, name) if n == name]
+    if not found:
+        return 1
+    action = pick_action(name, found[0], esc="выход")
+    if action is None:
+        return 1
+    try:
+        rest = ask(action)
+    except (KeyboardInterrupt, EOFError):
+        return 1
+    if rest is None:
+        return 1
+    print(" ".join(shlex.quote(a) for a in rest))
     return 0
 
 

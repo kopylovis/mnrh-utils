@@ -114,7 +114,7 @@ if !joinCode.isEmpty {
               let box = try? AES.GCM.SealedBox(combined: sealed), let plain = try? AES.GCM.open(box, using: key),
               let invite = (try? JSONSerialization.jsonObject(with: plain)) as? [String: Any] else { continue }
         guard (invite["exp"] as? Double ?? 0) > Date().timeIntervalSince1970 else {
-            print("приглашение устарело: на первом Mac — mnrh clip invite")
+            print("приглашение устарело: на первом Mac — mnrh tossy invite")
             exit(4)
         }
         let fd = open(joinOut, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
@@ -124,7 +124,7 @@ if !joinCode.isEmpty {
         print(invite["n"] as? String ?? "Mac")
         exit(0)
     }
-    print("приглашение не найдено: проверь код или создай новое — mnrh clip invite")
+    print("приглашение не найдено: проверь код или создай новое — mnrh tossy invite")
     exit(5)
 }
 
@@ -141,6 +141,10 @@ struct Config {
     var pausedUntil = 0.0
     var images = true
     var notifyApp = ""
+    var name = ""
+    var aliases = [String: String]()
+
+    var deviceName: String { name.isEmpty ? computerName : name }
 }
 
 func loadConfig() -> Config? {
@@ -169,6 +173,8 @@ func loadConfig() -> Config? {
     c.pausedUntil = raw["paused_until"] as? Double ?? 0
     c.images = raw["images"] as? Bool ?? true
     c.notifyApp = raw["notify_app"] as? String ?? ""
+    c.name = (raw["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+    c.aliases = raw["aliases"] as? [String: String] ?? [:]
     return c
 }
 
@@ -176,18 +182,18 @@ var conf = Config()
 if let loaded = loadConfig() {
     conf = loaded
 } else {
-    log("нет настроек в \(configFile): mnrh clip setup")
-    print("нет настроек: mnrh clip setup")
+    log("нет настроек в \(configFile): mnrh tossy setup")
+    print("нет настроек: mnrh tossy setup")
     exit(2)
 }
 
 if !inviteCode.isEmpty {
     guard !conf.room.isEmpty else {
-        print("сначала mnrh clip on: старые настройки без комнаты")
+        print("сначала mnrh tossy on: старые настройки без комнаты")
         exit(2)
     }
     let invite: [String: Any] = ["s": conf.server, "t": conf.token, "r": conf.room, "k": conf.keyText,
-                                 "n": computerName, "exp": Date().timeIntervalSince1970 + 600]
+                                 "n": conf.deviceName, "exp": Date().timeIntervalSince1970 + 600]
     let plain = try! JSONSerialization.data(withJSONObject: invite)
     let sealed = try! AES.GCM.seal(plain, using: inviteKey(inviteCode)).combined!
     var r = URLRequest(url: URL(string: "\(conf.server)/\(inviteTopic(inviteCode))")!)
@@ -201,7 +207,7 @@ if !inviteCode.isEmpty {
 }
 
 if !qrOut.isEmpty {
-    var payload: [String: Any] = ["s": conf.server, "t": conf.token, "k": conf.keyText, "n": computerName]
+    var payload: [String: Any] = ["s": conf.server, "t": conf.token, "k": conf.keyText, "n": conf.deviceName]
     if conf.room.isEmpty {
         payload["v"] = 1
         payload["in"] = conf.publishTopic
@@ -281,7 +287,7 @@ func describe(_ kind: String, _ size: Int, _ text: String?) -> String {
 
 func publish(kind: String, mime: String, data: Data, text: String?, topic: String? = nil, extra: [String: Any] = [:],
              done: ((Bool) -> Void)? = nil) {
-    var meta: [String: Any] = ["k": kind, "m": mime, "src": "mac", "n": computerName]
+    var meta: [String: Any] = ["k": kind, "m": mime, "src": "mac", "n": conf.deviceName]
     if !conf.deviceID.isEmpty { meta["id"] = conf.deviceID }
     meta.merge(extra) { _, new in new }
     var body: Data? = nil
@@ -456,8 +462,13 @@ func rewriteConfig(_ change: (inout [String: Any]) -> Void) -> Bool {
     return rename(tmp, configFile) == 0
 }
 
+func shownName(_ meta: [String: Any], _ fallback: String) -> String {
+    if let id = meta["id"] as? String, let alias = conf.aliases[id], !alias.isEmpty { return alias }
+    return meta["n"] as? String ?? fallback
+}
+
 func control(_ kind: String, _ meta: [String: Any]) -> Bool {
-    let from = meta["n"] as? String ?? "устройство"
+    let from = shownName(meta, "устройство")
     let sender = meta["id"] as? String ?? ""
     switch kind {
     case "ping":
@@ -487,7 +498,7 @@ func control(_ kind: String, _ meta: [String: Any]) -> Bool {
         if saved { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { exit(0) } }
     case "kick":
         log("\(from) отключил этот Mac от комнаты")
-        notify("\(from) отключил этот Mac от комнаты. Вернуться: mnrh clip join или mnrh clip setup --new")
+        notify("\(from) отключил этот Mac от комнаты. Вернуться: mnrh tossy join или mnrh tossy setup --new")
         _ = rewriteConfig { raw in
             raw["room"] = nil
             raw["key"] = nil
@@ -504,7 +515,7 @@ func control(_ kind: String, _ meta: [String: Any]) -> Bool {
 
 func apply(_ meta: [String: Any], _ data: Data?) {
     let kind = meta["k"] as? String ?? ""
-    let from = meta["n"] as? String ?? "устройства"
+    let from = shownName(meta, "устройства")
     if control(kind, meta) { return }
     let isNew = remember(meta)
     if kind == "hello" {
@@ -564,7 +575,7 @@ func handle(_ event: [String: Any], primary: Bool) {
     guard let message = event["message"] as? String, let sealedMeta = Data(base64Encoded: message),
           let metaJSON = unseal(sealedMeta),
           let meta = (try? JSONSerialization.jsonObject(with: metaJSON)) as? [String: Any] else {
-        log("не расшифровал сообщение \(id): другой ключ? mnrh clip pair")
+        log("не расшифровал сообщение \(id): другой ключ? mnrh tossy pair")
         writeState()
         return
     }

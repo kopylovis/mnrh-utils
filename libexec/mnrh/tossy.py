@@ -4,6 +4,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -17,26 +18,35 @@ from mnrhlib import HOME, OK, WARN, BAD, has_flag, paint, tilde
 from swiftagent import SwiftAgent
 
 args = sys.argv[1:]
-ACTIONS = ("setup", "pair", "invite", "join", "on", "off", "pause", "resume", "send", "images", "log", "remove")
+ACTIONS = ("status", "setup", "pair", "invite", "join", "rename", "on", "off", "pause", "resume", "send", "images", "log",
+           "remove")
 if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
-    print("mnrh clip                    состояние: работает ли, связь с сервером, что передано")
-    print("mnrh clip setup [<сервер>]   подключить свой ntfy-сервер и телефон с приложением Tossy")
-    print("mnrh clip pair [--new]       показать QR для телефона; --new — новый ключ, все устройства подключать заново")
-    print("mnrh clip invite             код для второго Mac (10 минут, один раз)")
-    print("mnrh clip join <код>         подключить этот Mac к комнате другого: mnrh clip join ntfy.example.com/ABCD-EFGH")
-    print("mnrh clip send <файл|текст>  отправить на все устройства картинку или текст")
-    print("mnrh clip pause [мин]        не отправлять буфер этого Mac (по умолчанию 30 мин)")
-    print("mnrh clip resume             снова отправлять")
-    print("mnrh clip images on|off      передавать ли картинки")
-    print("mnrh clip log                что передано и почему что-то пропущено")
-    print("mnrh clip on | off           включить или выключить помощника")
-    print("mnrh clip remove             выключить и удалить помощника и настройки")
+    print("mnrh tossy                    меню с действиями (без терминала — то же, что status)")
+    print("mnrh tossy status             состояние: работает ли, связь с сервером, устройства, что передано")
+    print("mnrh tossy setup [<сервер>]   подключить свой ntfy-сервер и телефон с приложением Tossy")
+    print("mnrh tossy pair [--new]       показать QR для телефона; --new — новый ключ, все устройства подключать заново")
+    print("mnrh tossy invite             код для второго Mac (10 минут, один раз)")
+    print("mnrh tossy join <код>         подключить этот Mac к комнате другого: mnrh tossy join ntfy.example.com/ABCD-EFGH")
+    print("mnrh tossy rename             переименовать устройство в комнате (выбор из списка)")
+    print("mnrh tossy rename <имя>       новое имя этого Mac — его увидят все в комнате")
+    print("mnrh tossy rename <кто> <имя> как называть другое устройство на этом Mac (пустое имя — вернуть его собственное)")
+    print("mnrh tossy send <файл|текст>  отправить на все устройства картинку или текст")
+    print("mnrh tossy pause [мин]        не отправлять буфер этого Mac (по умолчанию 30 мин)")
+    print("mnrh tossy resume             снова отправлять")
+    print("mnrh tossy images on|off      передавать ли картинки")
+    print("mnrh tossy log                что передано и почему что-то пропущено")
+    print("mnrh tossy on | off           включить или выключить помощника")
+    print("mnrh tossy remove             выключить и удалить помощника и настройки")
     print()
     print("Общий буфер обмена твоих Mac и Android-телефона через свой ntfy-сервер: скопировал на одном —")
     print("вставляешь на остальных. Всё шифруется на устройствах, пароли из менеджеров паролей не передаются.")
+    print("Прежнее имя команды, mnrh clip, тоже работает.")
     sys.exit(0 if has_flag(args, "-h", "--help") else 2)
-cmd = args[0] if args else "status"
+cmd = args[0] if args else ("menu" if sys.stdin.isatty() and sys.stdout.isatty() else "status")
 
+LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
+REGISTRY = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "share", "mnrh",
+                        "commands.tsv")
 CONFIG = os.path.join(HOME, ".config", "mnrh", "clip.json")
 NOTIFY_APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "mnrh Notify.app")
 QR = os.path.join(HOME, ".cache", "mnrh", "clip-pair.png")
@@ -52,15 +62,25 @@ def read_conf():
         return {}
 
 
-def write_conf(**values):
-    conf = read_conf()
-    conf.update(values)
+def save_conf(conf):
     os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
     tmp = CONFIG + ".tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         json.dump(conf, f)
     os.replace(tmp, CONFIG)
+
+
+def write_conf(**values):
+    conf = read_conf()
+    conf.update(values)
+    save_conf(conf)
+
+
+def drop_conf(key):
+    conf = read_conf()
+    conf.pop(key, None)
+    save_conf(conf)
 
 
 def configured():
@@ -77,12 +97,7 @@ def migrate():
     conf = {k: v for k, v in c.items() if k not in ("to_mac", "to_phone")}
     conf.update(room=f"tossy-{secrets.token_hex(12)}", legacy_to_mac=c["to_mac"], legacy_to_phone=c["to_phone"],
                 device_id=c.get("device_id") or secrets.token_hex(8))
-    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
-    tmp = CONFIG + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(conf, f)
-    os.replace(tmp, CONFIG)
+    save_conf(conf)
     return True
 
 
@@ -209,7 +224,7 @@ def paired_at():
 
 def pair(fresh=None):
     if not configured():
-        sys.exit("Сначала mnrh clip setup <сервер>")
+        sys.exit("Сначала mnrh tossy setup <сервер>")
     if fresh is None and "--new" in args:
         write_conf(**new_channel())
         start()
@@ -231,7 +246,7 @@ def pair(fresh=None):
                 break
             time.sleep(1)
         else:
-            print("Не дождался ответа телефона. Повторить: mnrh clip pair")
+            print("Не дождался ответа телефона. Повторить: mnrh tossy pair")
     except KeyboardInterrupt:
         print()
     finally:
@@ -244,7 +259,7 @@ def pair(fresh=None):
 
 def invite():
     if not configured():
-        sys.exit("Сначала mnrh clip setup <сервер>")
+        sys.exit("Сначала mnrh tossy setup <сервер>")
     migrate()
     agent.build()
     code = new_code()
@@ -254,19 +269,19 @@ def invite():
     host = read_conf()["server"].split("://", 1)[-1]
     print(f"{OK} приглашение на 10 минут. На втором Mac выполни:")
     print()
-    print(f"    mnrh clip join {host}/{code}")
+    print(f"    mnrh tossy join {host}/{code}")
     print()
     print(paint("  Код одноразовый по смыслу: кто его знает, тот войдёт в комнату. Не публикуй его.", "2"))
 
 
 def join():
     if len(args) < 2:
-        sys.exit("mnrh clip join <сервер>/<КОД> — команду показывает mnrh clip invite на первом Mac")
+        sys.exit("mnrh tossy join <сервер>/<КОД> — команду показывает mnrh tossy invite на первом Mac")
     target = args[1].strip()
     server, _, code = target.rpartition("/")
     server = normalize_server(server or read_conf().get("server", ""))
     if not server or not re.match(r"^[0-9A-Za-z]{4}-?[0-9A-Za-z]{4}$", code):
-        sys.exit("Нужно вида: mnrh clip join ntfy.example.com/ABCD-EFGH")
+        sys.exit("Нужно вида: mnrh tossy join ntfy.example.com/ABCD-EFGH")
     agent.build()
     out = os.path.join(os.path.dirname(CONFIG), "clip-join.tmp")
     try:
@@ -285,27 +300,23 @@ def join():
     conf = {"server": normalize_server(invite["s"]), "token": invite["t"], "room": invite["r"], "key": invite["k"],
             "device_id": old.get("device_id") or secrets.token_hex(8), "images": old.get("images", True),
             "notify_app": ensure_notify_app()}
-    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
-    tmp = CONFIG + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(conf, f)
-    os.replace(tmp, CONFIG)
+    conf.update({k: old[k] for k in ("name", "aliases") if old.get(k)})
+    save_conf(conf)
     start()
     print(f"{OK} этот Mac в одной комнате с {r.stdout.strip()}: скопированное здесь появится там и на телефоне.")
 
 
 def on():
     if not configured():
-        sys.exit("Сначала mnrh clip setup <сервер>")
+        sys.exit("Сначала mnrh tossy setup <сервер>")
     start()
-    print(f"{OK} mnrh clip включён: буфер обмена общий с телефоном.")
+    print(f"{OK} mnrh tossy включён: буфер обмена общий с телефоном.")
 
 
 def off():
     was = agent.installed()
     agent.uninstall()
-    print("mnrh clip выключен." if was else "mnrh clip и так выключен.")
+    print("mnrh tossy выключен." if was else "mnrh tossy и так выключен.")
 
 
 def remove():
@@ -323,7 +334,7 @@ def pause():
     until = time.time() + minutes * 60
     write_conf(paused_until=until)
     print(f"{OK} не отправляю буфер на телефон до {datetime.fromtimestamp(until):%H:%M}. "
-          f"С телефона на Mac — по-прежнему. Раньше: mnrh clip resume")
+          f"С телефона на Mac — по-прежнему. Раньше: mnrh tossy resume")
 
 
 def resume():
@@ -333,16 +344,16 @@ def resume():
 
 def images():
     if len(args) < 2 or args[1] not in ("on", "off"):
-        sys.exit("mnrh clip images on|off")
+        sys.exit("mnrh tossy images on|off")
     write_conf(images=args[1] == "on")
     print(f"{OK} картинки {'передаю' if args[1] == 'on' else 'не передаю, только текст'}.")
 
 
 def send():
     if len(args) < 2:
-        sys.exit("mnrh clip send <файл-картинка | текст>")
+        sys.exit("mnrh tossy send <файл-картинка | текст>")
     if not configured():
-        sys.exit("Сначала mnrh clip setup <сервер>")
+        sys.exit("Сначала mnrh tossy setup <сервер>")
     agent.build()
     items = []
     for a in args[1:]:
@@ -371,35 +382,141 @@ def ago(ts):
 def status():
     conf = read_conf()
     if not configured():
-        print("mnrh clip не настроен." + paint("   -> mnrh clip setup <адрес ntfy-сервера>", "2"))
+        print("mnrh tossy не настроен." + paint("   -> mnrh tossy setup <адрес ntfy-сервера>", "2"))
         return
     if not agent.installed():
-        print("mnrh clip выключен." + paint("   -> mnrh clip on", "2"))
+        print("mnrh tossy выключен." + paint("   -> mnrh tossy on", "2"))
         return
     s = agent.state()
     if not s:
-        print(f"{BAD} mnrh clip включён, но помощник не работает." + paint("   -> mnrh clip on", "2"))
+        print(f"{BAD} mnrh tossy включён, но помощник не работает." + paint("   -> mnrh tossy on", "2"))
         print(f"  лог: {tilde(agent.log)}")
         return
     link = f"{OK} на связи с {conf['server']}" if s.get("connected") else f"{WARN} нет связи с {conf['server']}"
     print(f"{link} (pid {s['pid']}, с {ago(s['started'])})")
-    members = s.get("members") or {}
-    if members:
-        names = [f"{m.get('name', '?')} ({'Mac' if m.get('src') == 'mac' else 'телефон'}, {ago(m.get('seen'))})"
-                 for m in sorted(members.values(), key=lambda m: -(m.get("seen") or 0))]
+    print(f"  этот Mac: {my_name(conf)}")
+    others = room_devices(conf, s)
+    if others:
+        names = [f"{d['title']} ({'Mac' if d['mac'] else 'телефон'}, {ago(d['seen'])})" for d in others]
         print(f"  устройства в комнате: {', '.join(names)}")
     else:
-        print(f"  телефон: {s.get('phone') or 'ещё не подключался — mnrh clip pair'}")
+        print(f"  телефон: {s.get('phone') or 'ещё не подключался — mnrh tossy pair'}")
     if not conf.get("room"):
-        print(f"{WARN} старая схема без комнаты" + paint("   -> mnrh clip on", "2"))
+        print(f"{WARN} старая схема без комнаты" + paint("   -> mnrh tossy on", "2"))
     print(f"  отправлено: {s.get('sent', 0)} (последнее {ago(s.get('last_sent'))}) · "
           f"получено: {s.get('received', 0)} (последнее {ago(s.get('last_received'))})")
     until = conf.get("paused_until") or 0
     if until > time.time():
-        print(f"{WARN} на паузе до {datetime.fromtimestamp(until):%H:%M}" + paint("   -> mnrh clip resume", "2"))
+        print(f"{WARN} на паузе до {datetime.fromtimestamp(until):%H:%M}" + paint("   -> mnrh tossy resume", "2"))
     if not conf.get("images", True):
-        print("  картинки не передаю (mnrh clip images on)")
+        print("  картинки не передаю (mnrh tossy images on)")
 
 
-{"status": status, "setup": setup, "pair": pair, "invite": invite, "join": join, "on": on, "off": off, "pause": pause, "resume": resume,
+def computer_name():
+    r = subprocess.run(["scutil", "--get", "ComputerName"], capture_output=True, text=True)
+    return r.stdout.strip() or "Mac"
+
+
+def my_name(conf):
+    return conf.get("name") or computer_name()
+
+
+def room_devices(conf, state):
+    aliases = conf.get("aliases") or {}
+    me = conf.get("device_id", "")
+    out = []
+    for key, m in (state.get("members") or {}).items():
+        if key == me:
+            continue
+        name = m.get("name", "?")
+        out.append({"id": key, "name": name, "title": aliases.get(key) or name, "mac": m.get("src") == "mac",
+                    "seen": m.get("seen") or 0})
+    return sorted(out, key=lambda d: -d["seen"])
+
+
+def apply_names():
+    if agent.installed() and agent.state():
+        agent.restart()
+        agent.wait_state()
+
+
+def rename_self(name):
+    if name:
+        write_conf(name=name)
+    else:
+        drop_conf("name")
+    apply_names()
+    print(f"{OK} этот Mac теперь «{my_name(read_conf())}» — имя увидят все устройства в комнате.")
+
+
+def rename_other(device, name):
+    aliases = dict(read_conf().get("aliases") or {})
+    if name and name != device["name"]:
+        aliases[device["id"]] = name
+    else:
+        aliases.pop(device["id"], None)
+    if aliases:
+        write_conf(aliases=aliases)
+    else:
+        drop_conf("aliases")
+    apply_names()
+    if device["id"] in aliases:
+        print(f"{OK} «{device['name']}» на этом Mac называется «{aliases[device['id']]}». На других устройствах имя не меняется.")
+    else:
+        print(f"{OK} «{device['name']}» снова называется своим именем.")
+
+
+def rename():
+    if not configured():
+        sys.exit("Сначала mnrh tossy setup <сервер>")
+    conf = read_conf()
+    others = room_devices(conf, agent.state() or {})
+    if len(args) == 2:
+        rename_self(args[1].strip())
+        return
+    if len(args) >= 3:
+        wanted = args[1].strip().lower()
+        found = [d for d in others if wanted in (d["title"].lower(), d["name"].lower(), d["id"].lower())]
+        if not found:
+            sys.exit(f"Нет устройства «{args[1]}» в комнате. Список: mnrh tossy status")
+        rename_other(found[0], " ".join(args[2:]).strip())
+        return
+    if not sys.stdin.isatty():
+        sys.exit("mnrh tossy rename <имя> | mnrh tossy rename <кто> <имя>")
+    sys.path.insert(0, LIB)
+    from menu import pick
+    rows = [(f"{my_name(conf)} этот mac", f"{my_name(conf)}  {paint('этот Mac · имя видят все', '2')}")]
+    for d in others:
+        note = "Mac" if d["mac"] else "телефон"
+        if d["title"] != d["name"]:
+            note += f" · сам называет себя «{d['name']}»"
+        rows.append((f"{d['title']} {d['name']}", f"{d['title']}  {paint(note + ' · имя только на этом Mac', '2')}"))
+    i = pick(rows, title="\x1b[1;35mКого переименовать?\x1b[0m", esc="назад")
+    if i is None:
+        return
+    try:
+        name = input("Новое имя (пусто — прежнее): ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return
+    if i == 0:
+        rename_self(name)
+    else:
+        rename_other(others[i - 1], name)
+
+
+def menu():
+    launcher = os.path.join(LIB, "launcher.py")
+    while True:
+        r = subprocess.run([sys.executable, launcher, "actions", REGISTRY, "tossy"], stdout=subprocess.PIPE, text=True)
+        if r.returncode != 0 or not r.stdout.strip():
+            return
+        picked = shlex.split(r.stdout)
+        print(paint(f"$ mnrh tossy {' '.join(picked)}", "2"))
+        rc = subprocess.run([sys.executable, os.path.abspath(__file__), *picked]).returncode
+        if subprocess.run([sys.executable, launcher, "after", str(rc)]).returncode != 0:
+            return
+
+
+{"menu": menu, "status": status, "rename": rename, "setup": setup, "pair": pair, "invite": invite, "join": join, "on": on, "off": off, "pause": pause, "resume": resume,
  "send": send, "images": images, "log": show_log, "remove": remove}[cmd]()
