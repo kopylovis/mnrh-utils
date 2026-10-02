@@ -431,6 +431,7 @@ func notify(_ body: String) {
     try? p.run()
 }
 
+@discardableResult
 func remember(_ meta: [String: Any]) -> Bool {
     let name = meta["n"] as? String ?? "?"
     let source = meta["src"] as? String ?? "android"
@@ -445,9 +446,66 @@ func remember(_ meta: [String: Any]) -> Bool {
     return isNew
 }
 
+func rewriteConfig(_ change: (inout [String: Any]) -> Void) -> Bool {
+    guard let data = FileManager.default.contents(atPath: configFile),
+          var raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
+    change(&raw)
+    guard let out = try? JSONSerialization.data(withJSONObject: raw) else { return false }
+    let tmp = configFile + ".tmp"
+    guard FileManager.default.createFile(atPath: tmp, contents: out, attributes: [.posixPermissions: 0o600]) else { return false }
+    return rename(tmp, configFile) == 0
+}
+
+func control(_ kind: String, _ meta: [String: Any]) -> Bool {
+    let from = meta["n"] as? String ?? "устройство"
+    let sender = meta["id"] as? String ?? ""
+    switch kind {
+    case "ping":
+        remember(meta)
+        if !sender.isEmpty {
+            publish(kind: "hello", mime: "text/plain", data: Data(), text: "", extra: ["to": [sender]])
+        }
+        writeState()
+    case "bye":
+        members[sender] = nil
+        log("вышел из комнаты: \(from)")
+        writeState()
+    case "rekey":
+        guard let room = meta["r"] as? String, let key = meta["key"] as? String,
+              let keyData = Data(base64Encoded: key), keyData.count == 32 else { return true }
+        let keep = Set((meta["to"] as? [String] ?? []) + [sender])
+        members = members.filter { keep.contains($0.key) }
+        let saved = rewriteConfig { raw in
+            raw["room"] = room
+            raw["key"] = key
+            raw["legacy_to_mac"] = ""
+            raw["legacy_to_phone"] = ""
+        }
+        lastID = ""
+        writeState()
+        log(saved ? "\(from) отключил одно из устройств: комната сменила ключ, перезапускаюсь" : "не записал новый ключ комнаты в \(configFile)")
+        if saved { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { exit(0) } }
+    case "kick":
+        log("\(from) отключил этот Mac от комнаты")
+        notify("\(from) отключил этот Mac от комнаты. Вернуться: mnrh clip join или mnrh clip setup --new")
+        _ = rewriteConfig { raw in
+            raw["room"] = nil
+            raw["key"] = nil
+            raw["legacy_to_mac"] = nil
+            raw["legacy_to_phone"] = nil
+        }
+        try? SMAppService.agent(plistName: (Bundle.main.bundleIdentifier ?? "com.mnrh.clip") + ".plist").unregister()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { exit(0) }
+    default:
+        return false
+    }
+    return true
+}
+
 func apply(_ meta: [String: Any], _ data: Data?) {
     let kind = meta["k"] as? String ?? ""
     let from = meta["n"] as? String ?? "устройства"
+    if control(kind, meta) { return }
     let isNew = remember(meta)
     if kind == "hello" {
         if isNew {
@@ -457,6 +515,10 @@ func apply(_ meta: [String: Any], _ data: Data?) {
             log("на связи: \(from)")
         }
         writeState()
+        return
+    }
+    guard kind == "text" || (kind == "image" && data != nil) else {
+        log("непонятное сообщение: \(kind)")
         return
     }
     pasteboard.clearContents()
