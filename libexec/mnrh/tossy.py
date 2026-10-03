@@ -18,8 +18,8 @@ from mnrhlib import HOME, OK, WARN, BAD, has_flag, paint, tilde
 from swiftagent import SwiftAgent
 
 args = sys.argv[1:]
-ACTIONS = ("status", "setup", "pair", "invite", "join", "rename", "on", "off", "pause", "resume", "send", "images", "files",
-           "log", "remove")
+ACTIONS = ("status", "setup", "pair", "invite", "join", "rename", "on", "off", "pause", "resume", "send", "images", "auto",
+           "hotkey", "log", "remove")
 if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
     print("mnrh tossy                    меню с действиями (без терминала — то же, что status)")
     print("mnrh tossy status             состояние: работает ли, связь с сервером, устройства, что передано")
@@ -30,19 +30,22 @@ if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
     print("mnrh tossy rename             переименовать устройство в комнате (выбор из списка)")
     print("mnrh tossy rename <имя>       новое имя этого Mac — его увидят все в комнате")
     print("mnrh tossy rename <кто> <имя> как называть другое устройство на этом Mac (пустое имя — вернуть его собственное)")
-    print("mnrh tossy send <файл|текст>  отправить текст, картинку или любой файл до 24 МБ на все устройства")
+    print("mnrh tossy send <файл|текст>  отправить текст, картинку или любой файл до 500 МБ на все устройства")
     print("  … | mnrh tossy send         отправить то, что пришло в пайп (текст или файл)")
     print("  --to <кто>                  только этому устройству (имя из status; можно несколько)")
+    print("  --pick                      спросить в окне, кому отправить")
     print("mnrh tossy pause [мин]        не отправлять буфер этого Mac (по умолчанию 30 мин)")
     print("mnrh tossy resume             снова отправлять")
     print("mnrh tossy images on|off      передавать ли картинки")
-    print("mnrh tossy files on|off       передавать ли файл, скопированный в Finder (до 24 МБ)")
+    print("mnrh tossy auto on|off        отправлять ли буфер сам по ⌘C (off — только по ⌃⌥⌘C)")
+    print("mnrh tossy hotkey on|off      ⌃⌥⌘C отправляет то, что в буфере, включая файлы из Finder")
     print("mnrh tossy log                что передано и почему что-то пропущено")
     print("mnrh tossy on | off           включить или выключить помощника")
     print("mnrh tossy remove             выключить и удалить помощника и настройки")
     print()
     print("Общий буфер обмена твоих Mac и Android-телефона через свой ntfy-сервер: скопировал на одном —")
     print("вставляешь на остальных. Всё шифруется на устройствах, пароли из менеджеров паролей не передаются.")
+    print("Файлы из Finder уходят только явно: ⌃⌥⌘C или правый клик → Быстрые действия → «Отправить в Tossy».")
     print("Прежнее имя команды, mnrh clip, тоже работает.")
     sys.exit(0 if has_flag(args, "-h", "--help") else 2)
 cmd = args[0] if args else ("menu" if sys.stdin.isatty() and sys.stdout.isatty() else "status")
@@ -218,6 +221,7 @@ def start():
         started = agent.start()
     if not started:
         sys.exit(f"Помощник не запустился. Лог: {tilde(agent.log)}")
+    install_quick_actions()
 
 
 def paired_at():
@@ -324,6 +328,7 @@ def off():
 
 def remove():
     off()
+    remove_quick_actions()
     shutil.rmtree(agent.app, ignore_errors=True)
     try:
         os.remove(CONFIG)
@@ -352,11 +357,96 @@ def images():
     print(f"{OK} картинки {'передаю' if args[1] == 'on' else 'не передаю, только текст'}.")
 
 
-def files():
+def auto():
     if len(args) < 2 or args[1] not in ("on", "off"):
-        sys.exit("mnrh tossy files on|off")
-    write_conf(files=args[1] == "on")
-    print(f"{OK} файлы из Finder {'передаю' if args[1] == 'on' else 'не передаю — только mnrh tossy send'}.")
+        sys.exit("mnrh tossy auto on|off")
+    write_conf(auto=args[1] == "on")
+    if args[1] == "on":
+        print(f"{OK} скопированные текст и картинки уходят сами. Файлы — только по ⌃⌥⌘C или «Отправить в Tossy».")
+    else:
+        print(f"{OK} по ⌘C ничего не уходит. Отправить буфер: ⌃⌥⌘C или «Отправить в Tossy» в Finder.")
+
+
+def hotkey():
+    if len(args) < 2 or args[1] not in ("on", "off"):
+        sys.exit("mnrh tossy hotkey on|off")
+    write_conf(hotkey=args[1] == "on")
+    apply_names()
+    print(f"{OK} ⌃⌥⌘C {'отправляет буфер' if args[1] == 'on' else 'больше не занят Tossy'}.")
+
+
+SERVICES = os.path.join(HOME, "Library", "Services")
+QUICK_ACTIONS = (("Отправить в Tossy", "--notify"), ("Отправить в Tossy…", "--notify --pick"))
+
+
+def quick_action_files(title, command):
+    import plistlib
+    info = {"NSServices": [{
+        "NSBackgroundColorName": "background", "NSIconName": "NSActionTemplate",
+        "NSMenuItem": {"default": title}, "NSMessage": "runWorkflowAsService",
+        "NSRequiredContext": {"NSApplicationIdentifier": "com.apple.finder"}, "NSSendFileTypes": ["public.item"],
+    }]}
+    arg = lambda i, name, default: {"default value": default, "name": name, "required": "0", "type": "0", "uuid": str(i)}
+    action = {
+        "AMAccepts": {"Container": "List", "Optional": True, "Types": ["com.apple.cocoa.path"]},
+        "AMActionVersion": "2.0.3", "AMApplication": ["Automator"],
+        "AMParameterProperties": {k: {} for k in ("COMMAND_STRING", "CheckedForUserDefaultShell", "inputMethod", "shell", "source")},
+        "AMProvides": {"Container": "List", "Types": ["com.apple.cocoa.string"]},
+        "ActionBundlePath": "/System/Library/Automator/Run Shell Script.action", "ActionName": "Run Shell Script",
+        "ActionParameters": {"COMMAND_STRING": command, "CheckedForUserDefaultShell": True, "inputMethod": 1,
+                             "shell": "/bin/zsh", "source": ""},
+        "BundleIdentifier": "com.apple.RunShellScript", "CFBundleVersion": "2.0.3",
+        "CanShowSelectedItemsWhenRun": False, "CanShowWhenRun": True, "Category": ["AMCategoryUtilities"],
+        "Class Name": "RunShellScriptAction",
+        "InputUUID": "6E0A3C9D-3D2B-4C1E-9F0A-1A2B3C4D5E61", "OutputUUID": "6E0A3C9D-3D2B-4C1E-9F0A-1A2B3C4D5E62",
+        "UUID": "6E0A3C9D-3D2B-4C1E-9F0A-1A2B3C4D5E63", "UnlocalizedApplications": ["Automator"],
+        "arguments": {"0": arg(0, "inputMethod", 0), "1": arg(1, "CheckedForUserDefaultShell", False),
+                      "2": arg(2, "source", ""), "3": arg(3, "COMMAND_STRING", ""), "4": arg(4, "shell", "/bin/sh")},
+        "conversionLabel": 0, "isViewVisible": 1, "location": "309.000000:305.000000",
+        "nibPath": "/System/Library/Automator/Run Shell Script.action/Contents/Resources/Base.lproj/main.nib",
+    }
+    document = {
+        "AMApplicationBuild": "534", "AMApplicationVersion": "2.10", "AMDocumentVersion": "2",
+        "actions": [{"action": action, "isViewVisible": 1}], "connectors": {},
+        "workflowMetaData": {
+            "applicationBundleIDsByPath": {}, "applicationPaths": [],
+            "inputTypeIdentifier": "com.apple.Automator.fileSystemObject",
+            "outputTypeIdentifier": "com.apple.Automator.nothing", "presentationMode": 15, "processesInput": False,
+            "serviceInputTypeIdentifier": "com.apple.Automator.fileSystemObject",
+            "serviceOutputTypeIdentifier": "com.apple.Automator.nothing", "serviceProcessesInput": False,
+            "systemImageName": "NSActionTemplate", "useAutomaticInputType": False,
+            "workflowTypeIdentifier": "com.apple.Automator.servicesMenu",
+        },
+    }
+    return plistlib.dumps(info), plistlib.dumps(document)
+
+
+def install_quick_actions():
+    mnrh = shutil.which("mnrh") or os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin", "mnrh"))
+    changed = False
+    for title, flags in QUICK_ACTIONS:
+        contents = os.path.join(SERVICES, f"{title}.workflow", "Contents")
+        files = dict(zip(("Info.plist", "document.wflow"), quick_action_files(title, f'"{mnrh}" tossy send {flags} "$@"')))
+        for name, data in files.items():
+            path = os.path.join(contents, name)
+            try:
+                with open(path, "rb") as f:
+                    if f.read() == data:
+                        continue
+            except OSError:
+                pass
+            os.makedirs(contents, exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(data)
+            changed = True
+    if changed:
+        subprocess.run(["/System/Library/CoreServices/pbs", "-update"], capture_output=True)
+
+
+def remove_quick_actions():
+    for title, _ in QUICK_ACTIONS:
+        shutil.rmtree(os.path.join(SERVICES, f"{title}.workflow"), ignore_errors=True)
+    subprocess.run(["/System/Library/CoreServices/pbs", "-update"], capture_output=True)
 
 
 def refresh_helper():
@@ -392,15 +482,21 @@ def refresh_helper():
     agent.build()
     if agent.start() is not True:
         print(f"{WARN} новый помощник не запустился" + paint("   -> mnrh tossy on", "2"))
+    install_quick_actions()
 
 
 def send():
     if not configured():
         sys.exit("Сначала mnrh tossy setup <сервер>")
-    rest, targets = [], []
+    rest, targets, flags = [], [], []
+    pick = False
     items = iter(args[1:])
     for a in items:
-        if a in ("--to", "-t"):
+        if a == "--notify":
+            flags.append(a)
+        elif a == "--pick":
+            pick = True
+        elif a in ("--to", "-t"):
             targets.append(next(items, ""))
         elif a.startswith("--to="):
             targets.append(a[5:])
@@ -417,13 +513,18 @@ def send():
                 names = ", ".join(d["title"] for d in devices) or "в комнате пока никого"
                 sys.exit(f"Нет устройства «{t}». Есть: {names}")
             ids.append(found[0]["id"])
+    if pick and not ids:
+        chosen = pick_targets()
+        if chosen is None:
+            return
+        ids = chosen
     piped = None
     if not rest and not sys.stdin.isatty():
         piped = sys.stdin.buffer.read()
     if not rest and not piped:
         sys.exit("mnrh tossy send [--to <кто>] <файл|текст>…  или  … | mnrh tossy send [--to <кто>]")
     agent.build()
-    cmd_args = [a for i in ids for a in ("--to", i)]
+    cmd_args = flags + [a for i in ids for a in ("--to", i)]
     tmp = None
     if piped is not None:
         os.makedirs(os.path.dirname(QR), exist_ok=True)
@@ -451,6 +552,24 @@ def send():
             except OSError:
                 pass
     sys.exit(code)
+
+
+def pick_targets():
+    devices = room_devices(read_conf(), agent.state() or {})
+    if len(devices) < 2:
+        return []
+    everyone = "Все устройства"
+    quote = lambda v: '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    titles = [d["title"] for d in devices]
+    script = (f'choose from list {{{", ".join(quote(t) for t in [everyone] + titles)}}} with title "Tossy" '
+              f'with prompt "Кому отправить?" default items {{{quote(everyone)}}} with multiple selections allowed')
+    r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    picked = [p.strip() for p in r.stdout.strip().split(", ")] if r.returncode == 0 else []
+    if not picked or picked == ["false"]:
+        return None
+    if everyone in picked:
+        return []
+    return [d["id"] for d in devices if d["title"] in picked]
 
 
 def show_log():
@@ -502,8 +621,10 @@ def status():
         print(f"{WARN} на паузе до {datetime.fromtimestamp(until):%H:%M}" + paint("   -> mnrh tossy resume", "2"))
     if not conf.get("images", True):
         print("  картинки не передаю (mnrh tossy images on)")
-    if not conf.get("files", True):
-        print("  файлы из Finder не передаю (mnrh tossy files on)")
+    if not conf.get("auto", True):
+        print("  по ⌘C ничего не отправляю, только по ⌃⌥⌘C (mnrh tossy auto on)")
+    if not conf.get("hotkey", True):
+        print("  ⌃⌥⌘C выключена (mnrh tossy hotkey on)")
 
 
 def computer_name():
@@ -613,5 +734,5 @@ def menu():
 
 
 refresh_helper()
-{"menu": menu, "status": status, "files": files, "rename": rename, "setup": setup, "pair": pair, "invite": invite, "join": join, "on": on, "off": off, "pause": pause, "resume": resume,
+{"menu": menu, "status": status, "auto": auto, "hotkey": hotkey, "rename": rename, "setup": setup, "pair": pair, "invite": invite, "join": join, "on": on, "off": off, "pause": pause, "resume": resume,
  "send": send, "images": images, "log": show_log, "remove": remove}[cmd]()

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import CommonCrypto
 import CryptoKit
 import ServiceManagement
@@ -7,7 +8,10 @@ import UniformTypeIdentifiers
 
 let maxText = 1_000_000
 let maxImage = 15_000_000
-let maxFile = 24_000_000
+let maxFile = 500_000_000
+let streamChunk = 1 << 20
+let streamMagic = Data("TSY2".utf8)
+let bigFile: Int64 = 5_000_000
 let inlineLimit = 2_400
 let staleAfter = 15.0 * 60
 var configFile = ""
@@ -20,6 +24,7 @@ var inviteCode = ""
 var joinServer = ""
 var joinCode = ""
 var joinOut = ""
+var sendNotify = false
 
 var argv = CommandLine.arguments.dropFirst().makeIterator()
 while let arg = argv.next() {
@@ -35,6 +40,7 @@ while let arg = argv.next() {
         joinServer = argv.next() ?? ""
         joinCode = argv.next() ?? ""
     case "--out": joinOut = argv.next() ?? ""
+    case "--notify": sendNotify = true
     default: break
     }
 }
@@ -145,7 +151,8 @@ struct Config {
     var keyText = ""
     var pausedUntil = 0.0
     var images = true
-    var files = true
+    var auto = true
+    var hotkey = true
     var notifyApp = ""
     var name = ""
     var aliases = [String: String]()
@@ -178,7 +185,8 @@ func loadConfig() -> Config? {
     c.keyText = keyText
     c.pausedUntil = raw["paused_until"] as? Double ?? 0
     c.images = raw["images"] as? Bool ?? true
-    c.files = raw["files"] as? Bool ?? true
+    c.auto = raw["auto"] as? Bool ?? true
+    c.hotkey = raw["hotkey"] as? Bool ?? true
     c.notifyApp = raw["notify_app"] as? String ?? ""
     c.name = (raw["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
     c.aliases = raw["aliases"] as? [String: String] ?? [:]
@@ -285,11 +293,110 @@ func request(_ path: String, method: String = "GET") -> URLRequest {
 }
 
 func describe(_ kind: String, _ size: Int, _ text: String?) -> String {
-    if let text = text {
-        let one = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-        return "текст \(text.count) зн. «\(one.prefix(40))\(one.count > 40 ? "…" : "")»"
+    if let text = text { return "текст \(text.count) зн." }
+    return "\(kind == "image" ? "картинка" : kind) \(sizeText(Int64(size)))"
+}
+
+func sizeText(_ size: Int64) -> String {
+    ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+}
+
+func sealedSize(_ size: Int64) -> Int64 {
+    16 + size + 16 * (size / Int64(streamChunk) + 1)
+}
+
+func chunkNonce(_ header: Data, _ index: UInt32, _ last: Bool) throws -> AES.GCM.Nonce {
+    var nonce = Data(header[header.startIndex + 8 ..< header.startIndex + 15])
+    withUnsafeBytes(of: index.bigEndian) { nonce.append(contentsOf: $0) }
+    nonce.append(last ? 1 : 0)
+    return try AES.GCM.Nonce(data: nonce)
+}
+
+func readExactly(_ handle: FileHandle, _ count: Int) throws -> Data {
+    var data = Data()
+    while data.count < count {
+        guard let part = try handle.read(upToCount: count - data.count), !part.isEmpty else { break }
+        data.append(part)
     }
-    return "\(kind == "image" ? "картинка" : kind) \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))"
+    return data
+}
+
+struct StreamResult {
+    let size: Int64
+    let hash: String
+}
+
+struct StreamError: Error {
+    let text: String
+}
+
+func sealFile(_ src: URL, _ dst: URL, progress: (Int64) -> Void) throws -> StreamResult {
+    let input = try FileHandle(forReadingFrom: src)
+    defer { try? input.close() }
+    let size = (try FileManager.default.attributesOfItem(atPath: src.path)[.size] as? NSNumber)?.int64Value ?? 0
+    guard FileManager.default.createFile(atPath: dst.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
+        throw StreamError(text: "не создал временный файл")
+    }
+    let output = try FileHandle(forWritingTo: dst)
+    defer { try? output.close() }
+    var header = streamMagic
+    withUnsafeBytes(of: UInt32(streamChunk).bigEndian) { header.append(contentsOf: $0) }
+    var prefix = [UInt8](repeating: 0, count: 7)
+    guard SecRandomCopyBytes(kSecRandomDefault, prefix.count, &prefix) == errSecSuccess else { throw StreamError(text: "нет случайных чисел") }
+    header.append(contentsOf: prefix)
+    header.append(0)
+    try output.write(contentsOf: header)
+    var hasher = SHA256()
+    let chunks = size / Int64(streamChunk) + 1
+    var done: Int64 = 0
+    for index in 0 ..< chunks {
+        try autoreleasepool {
+            let last = index == chunks - 1
+            let length = last ? Int(size % Int64(streamChunk)) : streamChunk
+            let plain = try readExactly(input, length)
+            guard plain.count == length else { throw StreamError(text: "файл изменился во время отправки") }
+            hasher.update(data: plain)
+            let box = try AES.GCM.seal(plain, using: conf.key, nonce: chunkNonce(header, UInt32(index), last), authenticating: header)
+            try output.write(contentsOf: box.ciphertext + box.tag)
+            done += Int64(length)
+            progress(done)
+        }
+    }
+    return StreamResult(size: size, hash: hasher.finalize().map { String(format: "%02x", $0) }.joined())
+}
+
+func openFile(_ src: URL, _ dst: URL) throws -> StreamResult {
+    let input = try FileHandle(forReadingFrom: src)
+    defer { try? input.close() }
+    let header = Data(try readExactly(input, 16))
+    guard header.count == 16, header.prefix(4) == streamMagic else { throw StreamError(text: "это не файл Tossy") }
+    let chunk = Int(header[4 ..< 8].reduce(UInt32(0)) { $0 << 8 | UInt32($1) })
+    guard chunk > 0, chunk <= 16 << 20 else { throw StreamError(text: "неверный размер куска") }
+    guard FileManager.default.createFile(atPath: dst.path, contents: nil, attributes: nil) else {
+        throw StreamError(text: "не создал \(dst.lastPathComponent)")
+    }
+    let output = try FileHandle(forWritingTo: dst)
+    defer { try? output.close() }
+    var hasher = SHA256()
+    var index: UInt32 = 0
+    var size: Int64 = 0
+    var finished = false
+    while !finished {
+        try autoreleasepool {
+            let frame = try readExactly(input, chunk + 16)
+            guard frame.count >= 16 else { throw StreamError(text: "файл обрезан") }
+            let last = frame.count < chunk + 16
+            let box = try AES.GCM.SealedBox(nonce: chunkNonce(header, index, last), ciphertext: frame.prefix(frame.count - 16),
+                                            tag: frame.suffix(16))
+            let plain = try AES.GCM.open(box, using: conf.key, authenticating: header)
+            try output.write(contentsOf: plain)
+            hasher.update(data: plain)
+            size += Int64(plain.count)
+            finished = last
+            index += 1
+        }
+    }
+    return StreamResult(size: size, hash: hasher.finalize().map { String(format: "%02x", $0) }.joined())
 }
 
 func publish(kind: String, mime: String, data: Data, text: String?, topic: String? = nil, extra: [String: Any] = [:],
@@ -354,6 +461,154 @@ func publish(kind: String, mime: String, data: Data, text: String?, topic: Strin
     }.resume()
 }
 
+final class NetTask: NSObject, URLSessionDataDelegate, URLSessionDownloadDelegate {
+    var session: URLSession!
+    let onProgress: (Int64, Int64) -> Void
+    let onDone: (Int, Data, URL?, Error?) -> Void
+    var body = Data()
+    var downloaded: URL?
+
+    init(onProgress: @escaping (Int64, Int64) -> Void, onDone: @escaping (Int, Data, URL?, Error?) -> Void) {
+        self.onProgress = onProgress
+        self.onDone = onDone
+        super.init()
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 300
+        cfg.timeoutIntervalForResource = 6 * 3600
+        session = URLSession(configuration: cfg, delegate: self, delegateQueue: .main)
+    }
+
+    func upload(_ request: URLRequest, file: URL) {
+        session.uploadTask(with: request, fromFile: file).resume()
+    }
+
+    func download(_ request: URLRequest) {
+        session.downloadTask(with: request).resume()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64,
+                    totalBytesExpectedToSend: Int64) {
+        onProgress(totalBytesSent, totalBytesExpectedToSend)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        body.append(data)
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
+                    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        onProgress(totalBytesWritten, totalBytesExpectedToWrite)
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        let keep = scratchFile("download")
+        if (try? FileManager.default.moveItem(at: location, to: keep)) != nil { downloaded = keep }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let code = (task.response as? HTTPURLResponse)?.statusCode ?? 0
+        onDone(code, body, downloaded, error)
+        session.finishTasksAndInvalidate()
+    }
+}
+
+func scratchFile(_ kind: String) -> URL {
+    let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("mnrh-tossy", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    return dir.appendingPathComponent("\(kind)-\(UUID().uuidString)")
+}
+
+final class Meter {
+    let name: String
+    let total: Int64
+    let terminal = isatty(STDERR_FILENO) != 0
+    var lastAt = 0.0
+    var started = Date()
+
+    init(name: String, total: Int64) {
+        self.name = name
+        self.total = total
+    }
+
+    func update(_ done: Int64) {
+        guard terminal else { return }
+        let now = Date().timeIntervalSince1970
+        guard now - lastAt >= 0.2 || done >= total else { return }
+        lastAt = now
+        let percent = total > 0 ? Int(done * 100 / total) : 0
+        let width = 24
+        let filled = total > 0 ? Int(done * Int64(width) / total) : 0
+        let bar = String(repeating: "█", count: filled) + String(repeating: "░", count: width - filled)
+        let speed = Double(done) / max(Date().timeIntervalSince(started), 0.1)
+        let line = "  \(bar) \(percent)%  \(sizeText(done)) из \(sizeText(total))  \(sizeText(Int64(speed)))/с  \(name)"
+        FileHandle.standardError.write("\r\u{1B}[2K\(line)".data(using: .utf8)!)
+    }
+
+    func finish() {
+        guard terminal else { return }
+        FileHandle.standardError.write("\r\u{1B}[2K".data(using: .utf8)!)
+    }
+}
+
+func publishFile(_ src: URL, extra: [String: Any], announce: Bool, done: ((Bool) -> Void)?) {
+    let name = src.lastPathComponent
+    let type = UTType(filenameExtension: src.pathExtension)
+    let tmp = scratchFile("send")
+    let size = (try? src.resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map(Int64.init) ?? 0
+    let meter = Meter(name: name, total: size)
+    let where_ = extra["to"] == nil ? "в комнату" : "выбранным устройствам"
+    if announce { notify("Отправляю «\(name)» (\(sizeText(size))) \(where_)…") }
+    let fail: (String) -> Void = { reason in
+        meter.finish()
+        try? FileManager.default.removeItem(at: tmp)
+        log("не отправил файл \(name) (\(sizeText(size))): \(reason)")
+        if announce { notify("Не отправил «\(name)»: \(reason)") }
+        writeState()
+        done?(false)
+    }
+    DispatchQueue.global(qos: .userInitiated).async {
+        let sealed: StreamResult
+        do {
+            sealed = try sealFile(src, tmp) { _ in }
+        } catch {
+            DispatchQueue.main.async { fail((error as? StreamError)?.text ?? error.localizedDescription) }
+            return
+        }
+        DispatchQueue.main.async {
+            var meta: [String: Any] = ["k": "file", "m": type?.preferredMIMEType ?? "application/octet-stream", "src": "mac",
+                                       "n": conf.deviceName, "f": name, "x": 2, "s": sealed.size]
+            if !conf.deviceID.isEmpty { meta["id"] = conf.deviceID }
+            meta.merge(extra) { _, new in new }
+            guard let metaJSON = try? JSONSerialization.data(withJSONObject: meta), let sealedMeta = seal(metaJSON) else {
+                fail("не зашифровал описание")
+                return
+            }
+            var r = request(conf.publishTopic, method: "PUT")
+            r.setValue("4", forHTTPHeaderField: "X-Priority")
+            r.setValue(sealedMeta.base64EncodedString(), forHTTPHeaderField: "X-Message")
+            r.setValue("clip.bin", forHTTPHeaderField: "X-Filename")
+            let task = NetTask(onProgress: { sent, _ in meter.update(min(sent, sealed.size)) }) { code, reply, _, error in
+                guard code == 200 else {
+                    let detail = error?.localizedDescription
+                        ?? String(data: reply, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    fail("HTTP \(code) \(detail)".trimmingCharacters(in: .whitespaces))
+                    return
+                }
+                meter.update(sealed.size)
+                meter.finish()
+                try? FileManager.default.removeItem(at: tmp)
+                sentCount += 1
+                lastSent = Date().timeIntervalSince1970
+                log("→ \(conf.room.isEmpty ? "телефон" : "комната"): файл \(name) (\(sizeText(sealed.size)))")
+                if announce { notify("Отправил «\(name)» \(where_)") }
+                writeState()
+                done?(true)
+            }
+            task.upload(r, file: tmp)
+        }
+    }
+}
+
 let pasteboard = NSPasteboard.general
 var seenCount = pasteboard.changeCount
 var ownCount = -1
@@ -386,59 +641,85 @@ func imagePayload(_ data: Data, _ type: UTType) -> (Data, String)? {
     return nil
 }
 
+let imageTypes: [(NSPasteboard.PasteboardType, UTType)] = [(.png, .png), (NSPasteboard.PasteboardType("public.jpeg"), .jpeg),
+                                                            (NSPasteboard.PasteboardType("public.heic"), .heic), (.tiff, .tiff)]
+
 func capture() {
-    guard Date().timeIntervalSince1970 >= conf.pausedUntil else { return }
+    guard conf.auto, Date().timeIntervalSince1970 >= conf.pausedUntil else { return }
     let types = pasteboard.types ?? []
     if types.contains(where: { skipTypes.contains($0.rawValue) }) {
         log("пропустил: пароль или служебное содержимое")
         return
     }
-    if types.contains(.fileURL) {
-        let urls = pasteboard.readObjects(forClasses: [NSURL.self],
-                                          options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        guard urls.count == 1, let url = urls.first else {
-            log("пропустил: скопировано несколько файлов, передаю по одному")
-            return
-        }
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else {
-            log("пропустил: папки не передаю")
-            return
-        }
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-        let type = UTType(filenameExtension: url.pathExtension)
-        if conf.images, let type = type, type.conforms(to: .image), size <= maxImage * 2,
-           let data = try? Data(contentsOf: url), let (body, mime) = imagePayload(data, type) {
-            publish(kind: "image", mime: mime, data: body, text: nil)
-            return
-        }
-        guard conf.files else {
-            log("пропустил: передача файлов выключена — mnrh tossy files on")
-            return
-        }
-        guard size <= maxFile, let data = try? Data(contentsOf: url) else {
-            log("пропустил: \(url.lastPathComponent) больше \(maxFile / 1_000_000) МБ")
-            return
-        }
-        if isEcho(data) {
-            log("пропустил: этот файл только что пришёл с другого устройства")
-            return
-        }
-        publish(kind: "file", mime: type?.preferredMIMEType ?? "application/octet-stream", data: data, text: nil,
-                extra: ["f": url.lastPathComponent])
+    let fromFinder = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder"
+    if types.contains(.fileURL) && (fromFinder || !types.contains(where: { t in imageTypes.contains { $0.0 == t } })) {
+        log("пропустил: файлы отправляю только явно — ⌃⌥⌘C или «Отправить в Tossy» в меню Finder")
         return
     }
-    if conf.images {
-        for (ptype, utype) in [(NSPasteboard.PasteboardType.png, UTType.png),
-                               (NSPasteboard.PasteboardType("public.jpeg"), UTType.jpeg),
-                               (NSPasteboard.PasteboardType("public.heic"), UTType.heic),
-                               (NSPasteboard.PasteboardType.tiff, UTType.tiff)] where types.contains(ptype) {
-            if let data = pasteboard.data(forType: ptype), isEcho(data) {
+    copyContent(types: types)
+}
+
+func sendNow() {
+    if let fresh = loadConfig() { conf = fresh }
+    let types = pasteboard.types ?? []
+    if types.contains(where: { skipTypes.contains($0.rawValue) }) {
+        notify("Не отправил: в буфере пароль или служебные данные")
+        return
+    }
+    if types.contains(.fileURL) {
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        let files = urls.filter { url in
+            var isDir: ObjCBool = false
+            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && !isDir.boolValue
+        }
+        guard !files.isEmpty else {
+            notify("Не отправил: папки не передаю")
+            return
+        }
+        sendQueue(files.map { url in { next in sendItem(url, extra: [:], announce: true, done: { _ in next() }) } })
+        return
+    }
+    copyContent(types: types, explicit: true)
+}
+
+func sendQueue(_ jobs: [(@escaping () -> Void) -> Void]) {
+    guard let first = jobs.first else { return }
+    first { sendQueue(Array(jobs.dropFirst())) }
+}
+
+func sendItem(_ url: URL, extra: [String: Any], announce: Bool, done: @escaping (Bool) -> Void) {
+    let name = url.lastPathComponent
+    let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+    let type = UTType(filenameExtension: url.pathExtension)
+    if conf.images, let type = type, type.conforms(to: .image), size <= maxImage * 2,
+       let data = try? Data(contentsOf: url), let (body, mime) = imagePayload(data, type) {
+        publish(kind: "image", mime: mime, data: body, text: nil, extra: extra) { ok in
+            if announce { notify(ok ? "Отправил «\(name)»" : "Не отправил «\(name)»") }
+            done(ok)
+        }
+        return
+    }
+    guard size <= maxFile else {
+        let reason = "«\(name)» больше \(maxFile / 1_000_000) МБ"
+        log("не отправил: \(reason)")
+        if announce { notify("Не отправил: \(reason)") }
+        done(false)
+        return
+    }
+    publishFile(url, extra: extra, announce: announce || Int64(size) >= bigFile, done: done)
+}
+
+func copyContent(types: [NSPasteboard.PasteboardType], explicit: Bool = false) {
+    if conf.images || explicit {
+        for (ptype, utype) in imageTypes where types.contains(ptype) {
+            if !explicit, let data = pasteboard.data(forType: ptype), isEcho(data) {
                 log("пропустил: эта картинка только что пришла с другого устройства")
                 return
             }
             if let data = pasteboard.data(forType: ptype), let (body, mime) = imagePayload(data, utype) {
-                publish(kind: "image", mime: mime, data: body, text: nil)
+                publish(kind: "image", mime: mime, data: body, text: nil) { ok in
+                    if explicit { notify(ok ? "Отправил картинку" : "Не отправил картинку") }
+                }
                 return
             }
         }
@@ -449,11 +730,15 @@ func capture() {
             log("пропустил: текст больше \(maxText / 1_000_000) МБ")
             return
         }
-        if isEcho(data) {
+        if !explicit && isEcho(data) {
             log("пропустил: это только что пришло с другого устройства")
             return
         }
-        publish(kind: "text", mime: "text/plain", data: data, text: text)
+        publish(kind: "text", mime: "text/plain", data: data, text: text) { ok in
+            if explicit { notify(ok ? "Отправил текст" : "Не отправил текст") }
+        }
+    } else if explicit {
+        notify("Нечего отправлять: буфер пуст")
     }
 }
 
@@ -491,7 +776,7 @@ func rewriteConfig(_ change: (inout [String: Any]) -> Void) -> Bool {
     return rename(tmp, configFile) == 0
 }
 
-func saveDownload(_ name: String, _ data: Data) -> URL? {
+func downloadURL(_ name: String) -> URL {
     let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/Tossy", isDirectory: true)
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let clean = String(name.split(separator: "/").last ?? "file").replacingOccurrences(of: ":", with: "_")
@@ -503,7 +788,62 @@ func saveDownload(_ name: String, _ data: Data) -> URL? {
         url = dir.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)")
         n += 1
     }
+    return url
+}
+
+func saveDownload(_ name: String, _ data: Data) -> URL? {
+    let url = downloadURL(name)
     return (try? data.write(to: url)) != nil ? url : nil
+}
+
+func deliverFile(_ meta: [String: Any], _ url: URL, size: Int64, hash: String) {
+    let from = shownName(meta, "устройства")
+    pasteboard.clearContents()
+    pasteboard.writeObjects([url as NSURL])
+    lastReceivedHash = hash
+    lastReceivedAt = Date().timeIntervalSince1970
+    ownCount = pasteboard.changeCount
+    seenCount = ownCount
+    receivedCount += 1
+    lastReceived = Date().timeIntervalSince1970
+    let what = "файл \(url.lastPathComponent) (\(sizeText(size))) — в Загрузках/Tossy"
+    log("← \(from): \(what)")
+    notify("С \(from): \(what) — можно вставлять")
+    writeState()
+}
+
+func receiveStream(_ meta: [String: Any], _ link: URL, _ id: String) {
+    remember(meta)
+    let from = shownName(meta, "устройства")
+    let name = meta["f"] as? String ?? "file"
+    let size = (meta["s"] as? NSNumber)?.int64Value ?? 0
+    log("← \(from): получаю файл \(name) (\(sizeText(size)))")
+    if size >= bigFile { notify("Получаю «\(name)» (\(sizeText(size))) от \(from)…") }
+    var r = URLRequest(url: link)
+    if !conf.token.isEmpty { r.setValue("Bearer \(conf.token)", forHTTPHeaderField: "Authorization") }
+    let fail: (String) -> Void = { reason in
+        log("не получил файл \(name) от \(from): \(reason)")
+        notify("Не получил «\(name)» от \(from): \(reason)")
+        writeState()
+    }
+    NetTask(onProgress: { _, _ in }) { code, _, file, error in
+        guard code == 200, let file = file else {
+            fail(error?.localizedDescription ?? "HTTP \(code)")
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let dst = downloadURL(name)
+            do {
+                let result = try openFile(file, dst)
+                try? FileManager.default.removeItem(at: file)
+                DispatchQueue.main.async { deliverFile(meta, dst, size: result.size, hash: result.hash) }
+            } catch {
+                try? FileManager.default.removeItem(at: file)
+                try? FileManager.default.removeItem(at: dst)
+                DispatchQueue.main.async { fail((error as? StreamError)?.text ?? "не расшифровал: другой ключ?") }
+            }
+        }
+    }.download(r)
 }
 
 func shownName(_ meta: [String: Any], _ fallback: String) -> String {
@@ -599,10 +939,8 @@ func apply(_ meta: [String: Any], _ data: Data?) {
             log("не сохранил файл от \(from)")
             return
         }
-        pasteboard.writeObjects([url as NSURL])
-        lastReceivedHash = digest(data)
-        lastReceivedAt = Date().timeIntervalSince1970
-        what = "файл \(url.lastPathComponent) (\(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))) — в Загрузках/Tossy"
+        deliverFile(meta, url, size: Int64(data.count), hash: digest(data))
+        return
     } else {
         log("непонятное сообщение: \(kind)")
         return
@@ -637,6 +975,10 @@ func handle(_ event: [String: Any], primary: Bool) {
     guard let attachment = event["attachment"] as? [String: Any], let url = attachment["url"] as? String,
           let link = URL(string: url) else {
         apply(meta, nil)
+        return
+    }
+    if meta["k"] as? String == "file", (meta["x"] as? NSNumber)?.intValue == 2 {
+        receiveStream(meta, link, id)
         return
     }
     var r = URLRequest(url: link)
@@ -721,67 +1063,58 @@ final class Stream: NSObject, URLSessionDataDelegate {
 }
 
 if !sendItems.isEmpty || !sendTexts.isEmpty {
-    var pending = sendItems.count + sendTexts.count
     var failed = false
     let target: [String: Any] = sendTo.isEmpty ? [:] : ["to": sendTo]
-    let finish: (Bool) -> Void = { ok in
+    var jobs = [(@escaping () -> Void) -> Void]()
+    func report(_ ok: Bool, _ what: String) {
         failed = failed || !ok
-        pending -= 1
-        if pending == 0 { exit(failed ? 1 : 0) }
+        print(ok ? "✓ отправил \(what)" : "✗ не отправил \(what)")
     }
-    func sendText(_ text: String) {
-        guard Data(text.utf8).count <= maxText else {
-            print("текст больше \(maxText / 1_000_000) МБ")
-            finish(false)
-            return
-        }
-        publish(kind: "text", mime: "text/plain", data: Data(text.utf8), text: text, extra: target) { ok in
-            print(ok ? "✓ отправил текст" : "✗ не отправил текст")
-            finish(ok)
+    func textJob(_ text: String) -> (@escaping () -> Void) -> Void {
+        { next in
+            guard Data(text.utf8).count <= maxText else {
+                print("текст больше \(maxText / 1_000_000) МБ")
+                failed = true
+                next()
+                return
+            }
+            publish(kind: "text", mime: "text/plain", data: Data(text.utf8), text: text, extra: target) { ok in
+                report(ok, "текст")
+                if sendNotify { notify(ok ? "Отправил текст" : "Не отправил текст") }
+                next()
+            }
         }
     }
     for path in sendTexts {
         guard let data = FileManager.default.contents(atPath: path), let text = String(data: data, encoding: .utf8) else {
             print("не прочитал текст")
-            finish(false)
+            failed = true
             continue
         }
-        sendText(text)
+        jobs.append(textJob(text))
     }
     for item in sendItems {
         let url = URL(fileURLWithPath: (item as NSString).expandingTildeInPath)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
-            sendText(item)
+            jobs.append(textJob(item))
             continue
         }
         guard !isDir.boolValue else {
             print("папки не передаю: \(url.lastPathComponent)")
-            finish(false)
+            if sendNotify { notify("Папки не передаю: \(url.lastPathComponent)") }
+            failed = true
             continue
         }
-        let name = url.lastPathComponent
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-        let type = UTType(filenameExtension: url.pathExtension)
-        if let type = type, type.conforms(to: .image), size <= maxImage * 2,
-           let data = try? Data(contentsOf: url), let (body, mime) = imagePayload(data, type) {
-            publish(kind: "image", mime: mime, data: body, text: nil, extra: target) { ok in
-                print(ok ? "✓ отправил \(name)" : "✗ не отправил \(name)")
-                finish(ok)
+        jobs.append { next in
+            sendItem(url, extra: target, announce: sendNotify) { ok in
+                report(ok, url.lastPathComponent)
+                next()
             }
-            continue
-        }
-        guard size <= maxFile, let data = try? Data(contentsOf: url) else {
-            print("файл больше \(maxFile / 1_000_000) МБ или не читается: \(name)")
-            finish(false)
-            continue
-        }
-        let mime = type?.preferredMIMEType ?? "application/octet-stream"
-        publish(kind: "file", mime: mime, data: data, text: nil, extra: target.merging(["f": name]) { _, new in new }) { ok in
-            print(ok ? "✓ отправил \(name)" : "✗ не отправил \(name)")
-            finish(ok)
         }
     }
+    jobs.append { _ in exit(failed ? 1 : 0) }
+    sendQueue(jobs)
     RunLoop.main.run()
 }
 
@@ -822,6 +1155,18 @@ NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNo
 
 Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in writeState() }
 writeState()
+
+var hotKeyRef: EventHotKeyRef?
+if conf.hotkey {
+    var pressed = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+    InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+        DispatchQueue.main.async { sendNow() }
+        return noErr
+    }, 1, &pressed, nil, nil)
+    let status = RegisterEventHotKey(UInt32(kVK_ANSI_C), UInt32(cmdKey | optionKey | controlKey),
+                                     EventHotKeyID(signature: OSType(0x54535359), id: 1), GetApplicationEventTarget(), 0, &hotKeyRef)
+    log(status == noErr ? "⌃⌥⌘C — отправить буфер вручную" : "не занял ⌃⌥⌘C: \(status)")
+}
 log("слежу за буфером, сервер \(conf.server)")
 
 signal(SIGTERM, SIG_IGN)
@@ -830,5 +1175,5 @@ term.setEventHandler { exit(0) }
 term.resume()
 
 let app = NSApplication.shared
-app.setActivationPolicy(.prohibited)
+app.setActivationPolicy(.accessory)
 app.run()
