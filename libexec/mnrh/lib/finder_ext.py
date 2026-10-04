@@ -27,7 +27,7 @@ def identity():
 
 
 def source_hash(sign):
-    h = hashlib.sha256(sign.encode())
+    h = hashlib.sha256((sign + "2").encode())
     for name in sorted(os.listdir(SRC)):
         with open(os.path.join(SRC, name), "rb") as f:
             h.update(name.encode() + f.read())
@@ -40,10 +40,10 @@ def swiftc(*args):
         raise RuntimeError(r.stderr[-2000:])
 
 
-def info(identifier, executable, package, extra):
+def info(identifier, executable, package, extra, name="Tossy"):
     version = "1." + time.strftime("%Y%m%d")
-    return plistlib.dumps({"CFBundleIdentifier": identifier, "CFBundleName": "mnrh Tossy Finder",
-                           "CFBundleDisplayName": "mnrh Tossy Finder", "CFBundleExecutable": executable,
+    return plistlib.dumps({"CFBundleIdentifier": identifier, "CFBundleName": name,
+                           "CFBundleDisplayName": name, "CFBundleExecutable": executable,
                            "CFBundlePackageType": package, "CFBundleVersion": str(int(time.time())),
                            "CFBundleShortVersionString": version, "LSMinimumSystemVersion": "13.0", **extra})
 
@@ -66,16 +66,19 @@ def build(icon=None):
         swiftc("-parse-as-library", "-application-extension", "-module-name", "TossyFinder",
                "-Xlinker", "-e", "-Xlinker", "_NSExtensionMain", "-framework", "FinderSync",
                os.path.join(SRC, "FinderSync.swift"), "-o", os.path.join(appex, "Contents", "MacOS", "TossyFinder"))
-        with open(os.path.join(appex, "Contents", "Info.plist"), "wb") as f:
-            f.write(info(EXT_ID, "TossyFinder", "XPC!", {"NSExtension": {
-                "NSExtensionAttributes": {}, "NSExtensionPointIdentifier": "com.apple.FinderSync",
-                "NSExtensionPrincipalClass": "TossyFinder.FinderSync"}}))
+        appex_extra = {"NSExtension": {"NSExtensionAttributes": {}, "NSExtensionPointIdentifier": "com.apple.FinderSync",
+                                       "NSExtensionPrincipalClass": "TossyFinder.FinderSync"}}
         extra = {"LSUIElement": True}
         if icon and os.path.exists(icon):
             shutil.copy(icon, os.path.join(contents, "Resources", "AppIcon.icns"))
+            os.makedirs(os.path.join(appex, "Contents", "Resources"), exist_ok=True)
+            shutil.copy(icon, os.path.join(appex, "Contents", "Resources", "AppIcon.icns"))
             extra["CFBundleIconFile"] = "AppIcon"
+            appex_extra["CFBundleIconFile"] = "AppIcon"
+        with open(os.path.join(appex, "Contents", "Info.plist"), "wb") as f:
+            f.write(info(EXT_ID, "TossyFinder", "XPC!", appex_extra))
         with open(os.path.join(contents, "Info.plist"), "wb") as f:
-            f.write(info(HOST_ID, "mnrh-tossy-finder", "APPL", extra))
+            f.write(info(HOST_ID, "mnrh-tossy-finder", "APPL", extra, name="Tossy Finder"))
         with open(os.path.join(contents, "Resources", "source.sha256"), "w") as f:
             f.write(want + "\n")
         entitlements = os.path.join(tmp, "sandbox.plist")

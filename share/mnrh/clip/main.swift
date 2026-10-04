@@ -51,9 +51,10 @@ while let arg = argv.next() {
     }
 }
 
+let serviceLabel = Bundle.main.object(forInfoDictionaryKey: "MnrhServiceLabel") as? String ?? Bundle.main.bundleIdentifier ?? "com.mnrh.clip"
 let serviceCommands = ["--register", "--unregister", "--service-status"]
 if let command = CommandLine.arguments.dropFirst().first(where: serviceCommands.contains) {
-    let service = SMAppService.agent(plistName: (Bundle.main.bundleIdentifier ?? "com.mnrh.clip") + ".plist")
+    let service = SMAppService.agent(plistName: serviceLabel + ".plist")
     do {
         if command == "--register" && service.status != .enabled { try service.register() }
         if command == "--unregister" && service.status != .notRegistered { try service.unregister() }
@@ -1229,7 +1230,7 @@ func control(_ kind: String, _ meta: [String: Any]) -> Bool {
             raw["legacy_to_mac"] = nil
             raw["legacy_to_phone"] = nil
         }
-        try? SMAppService.agent(plistName: (Bundle.main.bundleIdentifier ?? "com.mnrh.clip") + ".plist").unregister()
+        try? SMAppService.agent(plistName: serviceLabel + ".plist").unregister()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { exit(0) }
     default:
         return false
@@ -1513,7 +1514,7 @@ writeState()
 var hotKeyRef: EventHotKeyRef?
 var pressed = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
 InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-    DispatchQueue.main.async { sendNow() }
+    DispatchQueue.main.async { copyAndSend() }
     return noErr
 }, 1, &pressed, nil, nil)
 
@@ -1524,6 +1525,38 @@ let hotkeyChoices: [(keys: String, title: String, carbon: Int, menu: NSEvent.Mod
 
 var hotkeyChoice: (keys: String, title: String, carbon: Int, menu: NSEvent.ModifierFlags) {
     hotkeyChoices.first { $0.keys == conf.hotkeyKeys } ?? hotkeyChoices[0]
+}
+
+var askedAccessibility = false
+
+func copyAndSend() {
+    guard AXIsProcessTrusted() else {
+        if !askedAccessibility {
+            askedAccessibility = true
+            let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+            _ = AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
+            notify("Разреши Tossy «Универсальный доступ»: тогда \(hotkeyChoice.title) будет само копировать выделенное. Пока отправляю то, что уже в буфере")
+        }
+        sendNow()
+        return
+    }
+    let before = pasteboard.changeCount
+    let source = CGEventSource(stateID: .combinedSessionState)
+    for down in [true, false] {
+        let event = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: down)
+        event?.flags = .maskCommand
+        event?.post(tap: .cghidEventTap)
+    }
+    var waited = 0.0
+    func check() {
+        if pasteboard.changeCount != before || waited >= 0.6 {
+            sendNow()
+            return
+        }
+        waited += 0.05
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: check)
+    }
+    check()
 }
 
 func registerHotKey() {

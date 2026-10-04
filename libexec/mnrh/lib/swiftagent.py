@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -20,10 +21,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 
 
 class SwiftAgent:
-    def __init__(self, name, display, label, service_args=None, url_schemes=()):
+    def __init__(self, name, display, label, service_args=None, url_schemes=(), title=None, stable_id=False):
         self.name, self.display, self.base = name, display, label
         self.service_args = service_args
         self.url_schemes = tuple(url_schemes)
+        self.title = title or display
+        self.stable_id = stable_id
         self.src = os.path.join(ROOT, "share", "mnrh", name, "main.swift")
         self.app = os.path.join(HOME, "Library", "Application Support", "mnrh", f"{display}.app")
         self.bin = os.path.join(self.app, "Contents", "MacOS", f"mnrh-{name}")
@@ -39,7 +42,8 @@ class SwiftAgent:
         if self.service_args is not None:
             try:
                 with open(os.path.join(self.app, "Contents", "Info.plist"), "rb") as f:
-                    return plistlib.load(f).get("CFBundleIdentifier") or self.base
+                    info = plistlib.load(f)
+                    return info.get("MnrhServiceLabel") or info.get("CFBundleIdentifier") or self.base
             except (OSError, ValueError):
                 pass
         return self.base
@@ -120,6 +124,13 @@ class SwiftAgent:
         return [self.src] + sorted(os.path.join(folder, f) for f in os.listdir(folder)
                                    if f.endswith(".swift") and f != "main.swift")
 
+    def signing_identity(self):
+        if not self.stable_id:
+            return "-"
+        out = subprocess.run(["security", "find-identity", "-v", "-p", "codesigning"], capture_output=True, text=True).stdout
+        m = re.search(r'"(Apple Development: [^"]+)"', out)
+        return m.group(1) if m else "-"
+
     def icon(self):
         for p in (os.path.join(os.path.dirname(self.src), "icon.png"), os.path.join(ROOT, "share", "mnrh", "icon.png")):
             if os.path.exists(p):
@@ -134,7 +145,7 @@ class SwiftAgent:
                     h.update(f.read())
         if self.service_args is not None:
             h.update(self.service_plist(self.build_label()))
-        h.update(repr(self.url_schemes).encode())
+        h.update(repr((self.url_schemes, self.title, self.stable_id, self.signing_identity())).encode())
         return h.hexdigest()
 
     def make_icns(self, tmp, resources):
@@ -181,8 +192,9 @@ class SwiftAgent:
                 os.makedirs(agents)
                 with open(os.path.join(agents, f"{label}.plist"), "wb") as f:
                     f.write(self.service_plist(label))
-            info = {"CFBundleIdentifier": label, "CFBundleName": self.display,
-                    "CFBundleDisplayName": self.display, "CFBundleExecutable": os.path.basename(self.bin),
+            bundle_id = self.base if self.stable_id else label
+            info = {"CFBundleIdentifier": bundle_id, "CFBundleName": self.title, "MnrhServiceLabel": label,
+                    "CFBundleDisplayName": self.title, "CFBundleExecutable": os.path.basename(self.bin),
                     "CFBundlePackageType": "APPL", "CFBundleVersion": str(int(time.time())),
                     "CFBundleShortVersionString": "1." + time.strftime("%Y%m%d"), "LSUIElement": True}
             if has_icon:
@@ -193,7 +205,7 @@ class SwiftAgent:
                 plistlib.dump(info, f)
             with open(os.path.join(resources, os.path.basename(self.stamp)), "w") as f:
                 f.write(want + "\n")
-            r = subprocess.run(["codesign", "--force", "--sign", "-", "--identifier", label, app],
+            r = subprocess.run(["codesign", "--force", "--sign", self.signing_identity(), "--identifier", bundle_id, app],
                                capture_output=True, text=True)
             if r.returncode != 0:
                 sys.exit("Не удалось подписать помощника:\n" + r.stderr)

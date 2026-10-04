@@ -41,7 +41,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
 
     private var item: NSStatusItem?
     private var panel: NSPanel?
-    private var panelText: NSTextField?
+    private var panelModel: PanelModel?
     private var inviteProcess: Process?
     private var waitsForPhone = false
 
@@ -65,7 +65,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
     func deviceJoined(_ name: String, isMac: Bool) {
         guard panel != nil, waitsForPhone, !isMac else { return }
         waitsForPhone = false
-        showDone("\(name) подключён. Можно закрыть окно.")
+        showDone("\(name) подключён")
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -318,7 +318,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
     private func turnOff() {
         confirm("Выключить Tossy на этом Mac?", "Буфер перестанет синхронизироваться, пока не выполнишь mnrh tossy on.", button: "Выключить") {
             log("выключен из строки меню")
-            let plist = (Bundle.main.bundleIdentifier ?? "com.mnrh.clip") + ".plist"
+            let plist = serviceLabel + ".plist"
             try? SMAppService.agent(plistName: plist).unregister()
             exit(0)
         }
@@ -349,56 +349,29 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         if alert.runModal() == .alertFirstButtonReturn { done() }
     }
 
-    private func showPanel(title: String, image: NSImage?, text: String, copy: String? = nil) {
+    private func showPanel(title: String, image: NSImage?, note: String, status: String) -> PanelModel {
         closePanel()
-        let width = 380.0
-        let imageSide = image == nil ? 0.0 : 300.0
-        let height = imageSide + 150
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-                            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let model = PanelModel(status: status)
+        let panel = makePanelWindow(PanelView(title: title, image: image, note: note, model: model) { [weak self] in self?.closePanel() })
         panel.title = title
-        panel.isReleasedWhenClosed = false
         panel.delegate = self
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
-        if let image = image {
-            let view = NSImageView(frame: NSRect(x: (width - imageSide) / 2, y: height - imageSide - 16, width: imageSide, height: imageSide))
-            view.image = image
-            view.imageScaling = .scaleProportionallyUpOrDown
-            content.addSubview(view)
-        }
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.frame = NSRect(x: 20, y: copy == nil ? 20 : 56, width: width - 40, height: copy == nil ? 110 : 76)
-        label.isSelectable = true
-        content.addSubview(label)
-        if let copy = copy {
-            let button = NSButton(title: "Скопировать команду", target: nil, action: nil)
-            button.frame = NSRect(x: 20, y: 16, width: 180, height: 30)
-            button.bezelStyle = .rounded
-            let action = ActionItem("") {
-                pasteboard.clearContents()
-                pasteboard.setString(copy, forType: .string)
-            }
-            button.target = action
-            button.action = action.action
-            objc_setAssociatedObject(button, "action", action, .OBJC_ASSOCIATION_RETAIN)
-            content.addSubview(button)
-        }
-        panel.contentView = content
         panel.center()
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         self.panel = panel
-        panelText = label
+        panelModel = model
+        return model
     }
 
     private func showDone(_ text: String) {
-        panelText?.stringValue = "✓ " + text
+        panelModel?.done(text)
     }
 
     private func closePanel() {
         inviteProcess?.terminate()
         inviteProcess = nil
         waitsForPhone = false
+        panelModel = nil
         panel?.delegate = nil
         panel?.close()
         panel = nil
@@ -408,6 +381,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         inviteProcess?.terminate()
         inviteProcess = nil
         waitsForPhone = false
+        panelModel = nil
         panel = nil
     }
 
@@ -416,8 +390,9 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
             notify("Не собрал QR-код")
             return
         }
-        showPanel(title: "Подключить телефон", image: image,
-                  text: "В Tossy на телефоне: «Добавить Mac» → наведи камеру на код. В коде ключ комнаты и токен — не показывай его посторонним.")
+        _ = showPanel(title: "Подключить телефон", image: image,
+                      note: "В Tossy на телефоне: «Добавить Mac» → наведи камеру на код. В коде ключ комнаты и токен, не показывай его посторонним.",
+                      status: "Жду телефон…")
         waitsForPhone = true
     }
 
@@ -427,20 +402,23 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         let code = "\(raw.prefix(4))-\(raw.suffix(4))"
         let host = conf.server.components(separatedBy: "://").last ?? conf.server
         let command = "mnrh tossy join \(host)/\(code)"
-        showPanel(title: "Пригласить Mac", image: nil, text: "Готовлю приглашение…", copy: command)
+        let model = showPanel(title: "Пригласить Mac", image: nil,
+                              note: "Выполни эту команду на втором Mac. Код действует 10 минут, никому его не показывай.",
+                              status: "Готовлю приглашение…")
         var lines = 0
-        inviteProcess = helperCommand(["--invite", code], output: { [weak self] line in
+        inviteProcess = helperCommand(["--invite", code], output: { line in
             lines += 1
             if lines == 1 {
                 guard line == "ok" else {
-                    self?.panelText?.stringValue = "Не отправил приглашение: \(line)"
+                    model.failed("Не отправил приглашение: \(line)")
                     return
                 }
-                self?.panelText?.stringValue = "На втором Mac выполни:\n\n\(command)\n\nЖду до 10 минут. Код никому не показывай."
+                model.command = command
+                model.status = "Жду второй Mac…"
             } else if line == "timeout" {
-                self?.panelText?.stringValue = "За 10 минут никто не подключился. Закрой окно и пригласи заново."
+                model.failed("За 10 минут никто не подключился")
             } else {
-                self?.showDone("\(line) в комнате.")
+                model.done("\(line) в комнате")
             }
         })
     }

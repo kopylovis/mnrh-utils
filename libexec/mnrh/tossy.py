@@ -55,7 +55,8 @@ CONFIG = os.path.join(HOME, ".config", "mnrh", "clip.json")
 NOTIFY_APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "mnrh Notify.app")
 QR = os.path.join(HOME, ".cache", "mnrh", "clip-pair.png")
 TOKEN_RE = re.compile(r"^tk_[A-Za-z0-9]{20,}$")
-agent = SwiftAgent("clip", "mnrh Clip", "com.mnrh.clip", service_args=["--config", CONFIG], url_schemes=["mnrh-tossy"])
+agent = SwiftAgent("clip", "mnrh Clip", "com.mnrh.clip", service_args=["--config", CONFIG], url_schemes=["mnrh-tossy"],
+                   title="Tossy", stable_id=True)
 
 
 def read_conf():
