@@ -1541,4 +1541,5 @@ Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { _ in retireTokens(
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 StatusMenu.shared.install()
+LinkHandler.shared.install()
 app.run()

@@ -274,6 +274,26 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         return menu
     }
 
+    func pickTargets(_ done: @escaping ([String]?) -> Void) {
+        let others = members.filter { $0.key != conf.deviceID }.sorted {
+            ($0.value["seen"] as? Double ?? 0) > ($1.value["seen"] as? Double ?? 0)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Кому отправить?"
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 26), pullsDown: false)
+        popup.addItem(withTitle: "Всем устройствам комнаты")
+        for (id, value) in others {
+            popup.addItem(withTitle: conf.aliases[id] ?? value["name"] as? String ?? id)
+        }
+        alert.accessoryView = popup
+        alert.addButton(withTitle: "Отправить")
+        alert.addButton(withTitle: "Отмена")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let index = popup.indexOfSelectedItem
+        done(index == 0 ? nil : [others[index - 1].key])
+    }
+
     private func pickFiles() {
         NSApp.activate(ignoringOtherApps: true)
         let open = NSOpenPanel()

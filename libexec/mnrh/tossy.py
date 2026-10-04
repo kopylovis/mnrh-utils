@@ -55,7 +55,7 @@ CONFIG = os.path.join(HOME, ".config", "mnrh", "clip.json")
 NOTIFY_APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "mnrh Notify.app")
 QR = os.path.join(HOME, ".cache", "mnrh", "clip-pair.png")
 TOKEN_RE = re.compile(r"^tk_[A-Za-z0-9]{20,}$")
-agent = SwiftAgent("clip", "mnrh Clip", "com.mnrh.clip", service_args=["--config", CONFIG])
+agent = SwiftAgent("clip", "mnrh Clip", "com.mnrh.clip", service_args=["--config", CONFIG], url_schemes=["mnrh-tossy"])
 
 
 def read_conf():
@@ -452,6 +452,14 @@ def quick_action_files(title, command):
 
 
 def install_quick_actions():
+    import finder_ext
+    icon = os.path.join(agent.app, "Contents", "Resources", "AppIcon.icns")
+    error = finder_ext.install(icon=icon)
+    if error is None:
+        if any(os.path.exists(os.path.join(SERVICES, f"{title}.workflow")) for title, _ in QUICK_ACTIONS):
+            remove_services()
+        return
+    print(f"{WARN} пункт в меню Finder не собрался, ставлю быстрые действия: {error.splitlines()[0] if error else ''}")
     mnrh = shutil.which("mnrh") or os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin", "mnrh"))
     changed = False
     for title, flags in QUICK_ACTIONS:
@@ -494,6 +502,12 @@ def enable_quick_actions():
 
 
 def remove_quick_actions():
+    import finder_ext
+    finder_ext.remove()
+    remove_services()
+
+
+def remove_services():
     for title, _ in QUICK_ACTIONS:
         shutil.rmtree(os.path.join(SERVICES, f"{title}.workflow"), ignore_errors=True)
     subprocess.run(["/System/Library/CoreServices/pbs", "-update"], capture_output=True)

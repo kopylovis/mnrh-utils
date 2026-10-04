@@ -20,9 +20,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 
 
 class SwiftAgent:
-    def __init__(self, name, display, label, service_args=None):
+    def __init__(self, name, display, label, service_args=None, url_schemes=()):
         self.name, self.display, self.base = name, display, label
         self.service_args = service_args
+        self.url_schemes = tuple(url_schemes)
         self.src = os.path.join(ROOT, "share", "mnrh", name, "main.swift")
         self.app = os.path.join(HOME, "Library", "Application Support", "mnrh", f"{display}.app")
         self.bin = os.path.join(self.app, "Contents", "MacOS", f"mnrh-{name}")
@@ -133,6 +134,7 @@ class SwiftAgent:
                     h.update(f.read())
         if self.service_args is not None:
             h.update(self.service_plist(self.build_label()))
+        h.update(repr(self.url_schemes).encode())
         return h.hexdigest()
 
     def make_icns(self, tmp, resources):
@@ -185,6 +187,8 @@ class SwiftAgent:
                     "CFBundleShortVersionString": "1." + time.strftime("%Y%m%d"), "LSUIElement": True}
             if has_icon:
                 info["CFBundleIconFile"] = "AppIcon"
+            if self.url_schemes:
+                info["CFBundleURLTypes"] = [{"CFBundleURLName": label, "CFBundleURLSchemes": list(self.url_schemes)}]
             with open(os.path.join(contents, "Info.plist"), "wb") as f:
                 plistlib.dump(info, f)
             with open(os.path.join(resources, os.path.basename(self.stamp)), "w") as f:
