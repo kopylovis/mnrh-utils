@@ -407,7 +407,7 @@ if !qrOut.isEmpty {
         payload["id"] = conf.deviceID
         if !conf.publicKey.isEmpty { payload["pk"] = conf.publicKey }
     }
-    let json = try! JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+    guard let json = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else { exit(1) }
     guard let filter = CIFilter(name: "CIQRCodeGenerator") else { exit(1) }
     filter.setValue(json, forKey: "inputMessage")
     filter.setValue("M", forKey: "inputCorrectionLevel")
@@ -461,7 +461,7 @@ func writeState() {
 }
 
 func request(_ path: String, method: String = "GET") -> URLRequest {
-    var r = URLRequest(url: URL(string: "\(conf.server)/\(path)")!)
+    var r = URLRequest(url: URL(string: "\(conf.server)/\(path)") ?? URL(fileURLWithPath: "/dev/null"))
     r.httpMethod = method
     if !conf.token.isEmpty { r.setValue("Bearer \(conf.token)", forHTTPHeaderField: "Authorization") }
     return r
@@ -574,8 +574,14 @@ func openFile(_ src: URL, _ dst: URL) throws -> StreamResult {
     return StreamResult(size: size, hash: hasher.finalize().map { String(format: "%02x", $0) }.joined())
 }
 
+var contentSeq = 0
+let retryDelays: [Double] = [3, 10, 30, 60, 120, 300]
+
 func publish(kind: String, mime: String, data: Data, text: String?, topic: String? = nil, extra: [String: Any] = [:],
-             done: ((Bool) -> Void)? = nil) {
+             attempt: Int = 0, seq: Int? = nil, done: ((Bool) -> Void)? = nil) {
+    let isContent = kind == "text" || kind == "image"
+    if isContent && seq == nil { contentSeq += 1 }
+    let mySeq = seq ?? contentSeq
     var meta: [String: Any] = ["k": kind, "m": mime, "src": "mac", "n": conf.deviceName]
     if !conf.deviceID.isEmpty { meta["id"] = conf.deviceID }
     if !["text", "image", "file"].contains(kind), !conf.publicKey.isEmpty { meta["pk"] = conf.publicKey }
@@ -629,6 +635,22 @@ func publish(kind: String, mime: String, data: Data, text: String?, topic: Strin
                 let detail = error?.localizedDescription
                     ?? reply.flatMap { String(data: $0, encoding: .utf8) }?.trimmingCharacters(in: .whitespacesAndNewlines)
                     ?? ""
+                let transient = code == 0 || code == 429 || code >= 500
+                if isContent && transient && attempt < retryDelays.count {
+                    let delay = retryDelays[attempt]
+                    log("не отправил \(what): \(code == 0 ? detail : "HTTP \(code)"), повторю через \(Int(delay)) с")
+                    writeState()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                        guard mySeq == contentSeq else {
+                            log("не повторяю \(what): уже скопировано новое")
+                            done?(false)
+                            return
+                        }
+                        publish(kind: kind, mime: mime, data: data, text: text, topic: topic, extra: extra,
+                                attempt: attempt + 1, seq: mySeq, done: done)
+                    }
+                    return
+                }
                 log("не отправил \(what): HTTP \(code) \(detail)")
             }
             writeState()
@@ -814,6 +836,23 @@ func imagePayload(_ data: Data, _ type: UTType) -> (Data, String)? {
     if let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]), jpeg.count <= maxImage {
         return (jpeg, "image/jpeg")
     }
+    let side = Double(max(rep.pixelsWide, rep.pixelsHigh))
+    guard side > 0, let source = rep.cgImage else { return nil }
+    for limit in [4096.0, 2048.0] where side > limit {
+        let scale = limit / side
+        let width = Int(Double(rep.pixelsWide) * scale), height = Int(Double(rep.pixelsHigh) * scale)
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+        if let scaled = context.makeImage(),
+           let jpeg = NSBitmapImageRep(cgImage: scaled).representation(using: .jpeg, properties: [.compressionFactor: 0.85]),
+           jpeg.count <= maxImage {
+            log("картинка большая: уменьшил до \(width)×\(height)")
+            return (jpeg, "image/jpeg")
+        }
+    }
     return nil
 }
 
@@ -892,12 +931,15 @@ func copyContent(types: [NSPasteboard.PasteboardType], explicit: Bool = false) {
                 log("пропустил: эта картинка только что пришла с другого устройства")
                 return
             }
-            if let data = pasteboard.data(forType: ptype), let (body, mime) = imagePayload(data, utype) {
+            guard let data = pasteboard.data(forType: ptype) else { continue }
+            if let (body, mime) = imagePayload(data, utype) {
                 publish(kind: "image", mime: mime, data: body, text: nil) { ok in
                     if explicit { notify(ok ? "Отправил картинку" : "Не отправил картинку") }
                 }
                 return
             }
+            log("картинку не ужал до \(maxImage / 1_000_000) МБ, отправляю текст, если он есть")
+            break
         }
     }
     if let text = pasteboard.string(forType: .string), !text.isEmpty {
