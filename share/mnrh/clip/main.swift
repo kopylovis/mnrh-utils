@@ -14,6 +14,8 @@ let streamMagic = Data("TSY2".utf8)
 let bigFile: Int64 = 5_000_000
 let inlineLimit = 2_400
 let staleAfter = 15.0 * 60
+let fileStaleAfter = 3.0 * 60 * 60
+let gone = "сервер его уже удалил, отправьте ещё раз"
 var configFile = ""
 var stateFile = ""
 var qrOut = ""
@@ -796,23 +798,25 @@ func saveDownload(_ name: String, _ data: Data) -> URL? {
     return (try? data.write(to: url)) != nil ? url : nil
 }
 
-func deliverFile(_ meta: [String: Any], _ url: URL, size: Int64, hash: String) {
+func deliverFile(_ meta: [String: Any], _ url: URL, size: Int64, hash: String, fresh: Bool) {
     let from = shownName(meta, "устройства")
-    pasteboard.clearContents()
-    pasteboard.writeObjects([url as NSURL])
-    lastReceivedHash = hash
-    lastReceivedAt = Date().timeIntervalSince1970
-    ownCount = pasteboard.changeCount
-    seenCount = ownCount
+    if fresh {
+        pasteboard.clearContents()
+        pasteboard.writeObjects([url as NSURL])
+        lastReceivedHash = hash
+        lastReceivedAt = Date().timeIntervalSince1970
+        ownCount = pasteboard.changeCount
+        seenCount = ownCount
+    }
     receivedCount += 1
     lastReceived = Date().timeIntervalSince1970
     let what = "файл \(url.lastPathComponent) (\(sizeText(size))) — в Загрузках/Tossy"
     log("← \(from): \(what)")
-    notify("С \(from): \(what) — можно вставлять")
+    notify(fresh ? "С \(from): \(what) — можно вставлять" : "С \(from): \(what)")
     writeState()
 }
 
-func receiveStream(_ meta: [String: Any], _ link: URL, _ id: String) {
+func receiveStream(_ meta: [String: Any], _ link: URL, _ id: String, fresh: Bool) {
     remember(meta)
     let from = shownName(meta, "устройства")
     let name = meta["f"] as? String ?? "file"
@@ -828,7 +832,7 @@ func receiveStream(_ meta: [String: Any], _ link: URL, _ id: String) {
     }
     NetTask(onProgress: { _, _ in }) { code, _, file, error in
         guard code == 200, let file = file else {
-            fail(error?.localizedDescription ?? "HTTP \(code)")
+            fail(code == 404 || code == 410 ? gone : error?.localizedDescription ?? "HTTP \(code)")
             return
         }
         DispatchQueue.global(qos: .userInitiated).async {
@@ -836,7 +840,7 @@ func receiveStream(_ meta: [String: Any], _ link: URL, _ id: String) {
             do {
                 let result = try openFile(file, dst)
                 try? FileManager.default.removeItem(at: file)
-                DispatchQueue.main.async { deliverFile(meta, dst, size: result.size, hash: result.hash) }
+                DispatchQueue.main.async { deliverFile(meta, dst, size: result.size, hash: result.hash, fresh: fresh) }
             } catch {
                 try? FileManager.default.removeItem(at: file)
                 try? FileManager.default.removeItem(at: dst)
@@ -897,7 +901,7 @@ func control(_ kind: String, _ meta: [String: Any]) -> Bool {
     return true
 }
 
-func apply(_ meta: [String: Any], _ data: Data?) {
+func apply(_ meta: [String: Any], _ data: Data?, fresh: Bool = true) {
     let kind = meta["k"] as? String ?? ""
     let from = shownName(meta, "устройства")
     if control(kind, meta) { return }
@@ -939,7 +943,7 @@ func apply(_ meta: [String: Any], _ data: Data?) {
             log("не сохранил файл от \(from)")
             return
         }
-        deliverFile(meta, url, size: Int64(data.count), hash: digest(data))
+        deliverFile(meta, url, size: Int64(data.count), hash: digest(data), fresh: fresh)
         return
     } else {
         log("непонятное сообщение: \(kind)")
@@ -958,11 +962,7 @@ func handle(_ event: [String: Any], primary: Bool) {
     guard event["event"] as? String == "message", let id = event["id"] as? String else { return }
     if primary { lastID = id }
     let time = event["time"] as? Double ?? Date().timeIntervalSince1970
-    guard Date().timeIntervalSince1970 - time < staleAfter else {
-        log("пропустил старое сообщение \(id)")
-        writeState()
-        return
-    }
+    let age = Date().timeIntervalSince1970 - time
     guard let message = event["message"] as? String, let sealedMeta = Data(base64Encoded: message),
           let metaJSON = unseal(sealedMeta),
           let meta = (try? JSONSerialization.jsonObject(with: metaJSON)) as? [String: Any] else {
@@ -972,13 +972,27 @@ func handle(_ event: [String: Any], primary: Bool) {
     }
     if let sender = meta["id"] as? String, !conf.deviceID.isEmpty, sender == conf.deviceID { return }
     if let targets = meta["to"] as? [String], !conf.deviceID.isEmpty, !targets.contains(conf.deviceID) { return }
+    let kind = meta["k"] as? String ?? ""
+    if age >= staleAfter && !["bye", "rekey", "kick", "file"].contains(kind) {
+        log("пропустил старое сообщение \(id)")
+        writeState()
+        return
+    }
+    if kind == "file" && age >= fileStaleAfter {
+        let name = meta["f"] as? String ?? "file"
+        let from = shownName(meta, "устройства")
+        log("не получил файл \(name) от \(from): отправлен больше 3 часов назад")
+        notify("Не получил «\(name)» от \(from): \(gone)")
+        writeState()
+        return
+    }
     guard let attachment = event["attachment"] as? [String: Any], let url = attachment["url"] as? String,
           let link = URL(string: url) else {
         apply(meta, nil)
         return
     }
     if meta["k"] as? String == "file", (meta["x"] as? NSNumber)?.intValue == 2 {
-        receiveStream(meta, link, id)
+        receiveStream(meta, link, id, fresh: age < staleAfter)
         return
     }
     var r = URLRequest(url: link)
@@ -989,10 +1003,13 @@ func handle(_ event: [String: Any], primary: Bool) {
         DispatchQueue.main.async {
             guard code == 200, let data = data, let plain = unseal(data) else {
                 log("не скачал вложение \(id): HTTP \(code)")
+                if kind == "file", code == 404 || code == 410 {
+                    notify("Не получил «\(meta["f"] as? String ?? "file")» от \(shownName(meta, "устройства")): \(gone)")
+                }
                 writeState()
                 return
             }
-            apply(meta, plain)
+            apply(meta, plain, fresh: age < staleAfter)
         }
     }.resume()
 }
