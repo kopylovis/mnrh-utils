@@ -151,8 +151,9 @@ def normalize_server(value):
 
 
 def new_channel():
+    device_id = read_conf().get("device_id") or secrets.token_hex(8)
     return {"room": f"tossy-{secrets.token_hex(12)}", "key": base64.b64encode(secrets.token_bytes(32)).decode(),
-            "device_id": read_conf().get("device_id") or secrets.token_hex(8), "legacy_to_mac": "", "legacy_to_phone": ""}
+            "device_id": device_id, "owner": device_id, "legacy_to_mac": "", "legacy_to_phone": ""}
 
 
 CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -334,7 +335,7 @@ def join():
         except OSError:
             pass
     conf = {"server": normalize_server(invite["s"]), "token": invite["t"], "room": invite["r"], "key": invite["k"],
-            "device_id": device_id, "images": old.get("images", True),
+            "device_id": device_id, "owner": invite.get("o", ""), "images": old.get("images", True),
             "notify_app": ensure_notify_app()}
     conf.update({k: old[k] for k in ("name", "aliases", "identity") if old.get(k)})
     save_conf(conf)

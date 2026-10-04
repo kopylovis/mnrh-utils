@@ -202,7 +202,8 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
             let isMac = value["src"] as? String == "mac"
             let state = now - seen < StatusMenu.onlineWindow ? "на связи" : "был \(ago(seen))"
             let item = submenu(name, symbol: isMac ? "laptopcomputer" : "iphone", deviceMenu(id: id, name: name))
-            item.attributedTitle = styled(name, memberKey(value) == nil ? "\(state) · старая версия" : state)
+            let role = id == conf.owner ? " · создатель комнаты" : ""
+            item.attributedTitle = styled(name, (memberKey(value) == nil ? "\(state) · старая версия" : state) + role)
             menu.addItem(item)
         }
         menu.addItem(.separator())
@@ -211,7 +212,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
             self?.ask("Как назвать этот Mac?", value: conf.deviceName) { renameSelf($0) }
         })
         let self_ = submenu(conf.deviceName, symbol: "desktopcomputer", me)
-        self_.attributedTitle = styled(conf.deviceName, "этот Mac")
+        self_.attributedTitle = styled(conf.deviceName, conf.isOwner ? "этот Mac · создатель комнаты" : "этот Mac")
         menu.addItem(self_)
         menu.addItem(.separator())
         menu.addItem(ActionItem("Подключить телефон…", symbol: "qrcode") { [weak self] in self?.showQR() })
@@ -224,6 +225,11 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         menu.addItem(ActionItem("Переименовать…") { [weak self] in
             self?.ask("Как подписать «\(name)» на этом Mac?", value: name) { setAlias(id, $0) }
         })
+        guard id != conf.owner else {
+            menu.addItem(.separator())
+            menu.addItem(info("Создатель комнаты: отключить нельзя"))
+            return menu
+        }
         menu.addItem(.separator())
         menu.addItem(ActionItem("Отключить от комнаты…") { [weak self] in
             self?.confirm("Отключить \(name)?",

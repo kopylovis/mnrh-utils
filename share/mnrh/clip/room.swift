@@ -57,6 +57,10 @@ func retireTokens() {
 }
 
 func revokeDevice(_ id: String) {
+    guard id != conf.owner else {
+        notify("Создателя комнаты нельзя отключить")
+        return
+    }
     let name = (members[id]?["name"] as? String).map { conf.aliases[id] ?? $0 } ?? "устройство"
     let others = members.filter { $0.key != id && $0.key != conf.deviceID && !$0.key.hasPrefix("legacy-") }
     let isLegacy = others.values.contains { memberKey($0) == nil }

@@ -305,6 +305,9 @@ struct Config {
     var name = ""
     var aliases = [String: String]()
     var identity: Curve25519.KeyAgreement.PrivateKey?
+    var owner = ""
+
+    var isOwner: Bool { !owner.isEmpty && owner == deviceID }
 
     var publicKey: String { identity?.publicKey.rawRepresentation.base64EncodedString() ?? "" }
 
@@ -339,6 +342,7 @@ func loadConfig() -> Config? {
     c.auto = raw["auto"] as? Bool ?? true
     c.hotkey = raw["hotkey"] as? Bool ?? true
     c.notifications = raw["notifications"] as? Bool ?? true
+    c.owner = raw["owner"] as? String ?? ""
     c.notifyApp = raw["notify_app"] as? String ?? ""
     c.name = (raw["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
     c.aliases = raw["aliases"] as? [String: String] ?? [:]
@@ -369,8 +373,9 @@ if !inviteCode.isEmpty {
         exit(2)
     }
     let topic = inviteTopic(inviteCode)
-    let invite: [String: Any] = ["s": conf.server, "t": conf.token, "r": conf.room, "k": conf.keyText,
+    var invite: [String: Any] = ["s": conf.server, "t": conf.token, "r": conf.room, "k": conf.keyText,
                                  "n": conf.deviceName, "exp": Date().timeIntervalSince1970 + 600]
+    if !conf.owner.isEmpty { invite["o"] = conf.owner }
     guard let plain = try? JSONSerialization.data(withJSONObject: invite),
           let sealed = try? AES.GCM.seal(plain, using: inviteKey(inviteCode)).combined,
           let url = URL(string: "\(conf.server)/\(topic)"), let roomURL = URL(string: "\(conf.server)/\(conf.room)/json") else {
@@ -429,6 +434,7 @@ func pairingQR() -> Data? {
         payload["r"] = conf.room
         payload["id"] = conf.deviceID
         if !conf.publicKey.isEmpty { payload["pk"] = conf.publicKey }
+        if !conf.owner.isEmpty { payload["o"] = conf.owner }
     }
     guard let json = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
           let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
@@ -1208,6 +1214,10 @@ func control(_ kind: String, _ meta: [String: Any]) -> Bool {
         log(saved ? "\(from) отключил одно из устройств: комната сменила ключ, перезапускаюсь" : "не записал новый ключ комнаты в \(configFile)")
         if saved { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { exit(0) } }
     case "kick":
+        guard !conf.isOwner else {
+            log("\(from) пытался отключить этот Mac, но он создатель комнаты: остаюсь")
+            return true
+        }
         log("\(from) отключил этот Mac от комнаты")
         notify("\(from) отключил этот Mac от комнаты. Вернуться: mnrh tossy join или mnrh tossy setup --new")
         _ = rewriteConfig { raw in
