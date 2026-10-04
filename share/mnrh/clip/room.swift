@@ -129,6 +129,12 @@ func pause(until: Double) {
     log(until == 0 ? "снова отправляю" : "пауза до \(DateFormatter.localizedString(from: Date(timeIntervalSince1970: until), dateStyle: .none, timeStyle: .short))")
 }
 
+func setHotkeyKeys(_ keys: String) {
+    changeConfig { $0["hotkey_keys"] = keys }
+    unregisterHotKey()
+    if conf.hotkey { registerHotKey() }
+}
+
 func setFlag(_ key: String, _ value: Bool) {
     changeConfig { $0[key] = value }
     if key == "hotkey" { value ? registerHotKey() : unregisterHotKey() }

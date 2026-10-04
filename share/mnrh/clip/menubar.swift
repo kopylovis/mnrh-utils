@@ -78,7 +78,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         let send = ActionItem("Отправить буфер сейчас", symbol: "paperplane") { sendNow() }
         if conf.hotkey {
             send.keyEquivalent = "c"
-            send.keyEquivalentModifierMask = [.control, .option, .command]
+            send.keyEquivalentModifierMask = hotkeyChoice.menu
         }
         menu.addItem(send)
         menu.addItem(ActionItem("Отправить файл…", symbol: "doc.badge.arrow.up") { [weak self] in self?.pickFiles() })
@@ -105,7 +105,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         let host = conf.server.components(separatedBy: "://").last ?? conf.server
         if !connected { return "Нет связи с \(host), переподключаюсь" }
         if isPaused { return "На паузе до \(clock(conf.pausedUntil)), принимаю" }
-        if !conf.auto { return "На связи · отправляю только по ⌃⌥⌘C" }
+        if !conf.auto { return "На связи · отправляю только по \(hotkeyChoice.title)" }
         return "На связи · \(host)"
     }
 
@@ -263,7 +263,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         let flags: [(String, String, Bool)] = [
             ("Отправлять сам после ⌘C", "auto", conf.auto),
             ("Передавать картинки", "images", conf.images),
-            ("⌃⌥⌘C — отправить вручную", "hotkey", conf.hotkey),
+            ("\(hotkeyChoice.title) — отправить вручную", "hotkey", conf.hotkey),
             ("Уведомления", "notifications", conf.notifications),
         ]
         for (title, key, value) in flags {
@@ -271,6 +271,16 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
             item.state = value ? .on : .off
             menu.addItem(item)
         }
+        let keys = NSMenu()
+        for choice in hotkeyChoices {
+            let item = ActionItem(choice.title) { setHotkeyKeys(choice.keys) }
+            item.state = choice.keys == hotkeyChoice.keys ? .on : .off
+            keys.addItem(item)
+        }
+        keys.addItem(.separator())
+        keys.addItem(info("⇧⌘C перехватит его в Chrome, Finder, Android Studio и Xcode"))
+        menu.addItem(.separator())
+        menu.addItem(submenu("Сочетание: \(hotkeyChoice.title)", symbol: "keyboard", keys))
         return menu
     }
 

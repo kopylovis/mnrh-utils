@@ -300,6 +300,7 @@ struct Config {
     var images = true
     var auto = true
     var hotkey = true
+    var hotkeyKeys = "ctrl-opt-cmd-c"
     var notifications = true
     var notifyApp = ""
     var name = ""
@@ -341,6 +342,7 @@ func loadConfig() -> Config? {
     c.images = raw["images"] as? Bool ?? true
     c.auto = raw["auto"] as? Bool ?? true
     c.hotkey = raw["hotkey"] as? Bool ?? true
+    c.hotkeyKeys = raw["hotkey_keys"] as? String ?? "ctrl-opt-cmd-c"
     c.notifications = raw["notifications"] as? Bool ?? true
     c.owner = raw["owner"] as? String ?? ""
     c.notifyApp = raw["notify_app"] as? String ?? ""
@@ -1514,11 +1516,21 @@ InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
     return noErr
 }, 1, &pressed, nil, nil)
 
+let hotkeyChoices: [(keys: String, title: String, carbon: Int, menu: NSEvent.ModifierFlags)] = [
+    ("ctrl-opt-cmd-c", "⌃⌥⌘C", cmdKey | optionKey | controlKey, [.control, .option, .command]),
+    ("shift-cmd-c", "⇧⌘C", cmdKey | shiftKey, [.shift, .command]),
+]
+
+var hotkeyChoice: (keys: String, title: String, carbon: Int, menu: NSEvent.ModifierFlags) {
+    hotkeyChoices.first { $0.keys == conf.hotkeyKeys } ?? hotkeyChoices[0]
+}
+
 func registerHotKey() {
     guard hotKeyRef == nil else { return }
-    let status = RegisterEventHotKey(UInt32(kVK_ANSI_C), UInt32(cmdKey | optionKey | controlKey),
+    let choice = hotkeyChoice
+    let status = RegisterEventHotKey(UInt32(kVK_ANSI_C), UInt32(choice.carbon),
                                      EventHotKeyID(signature: OSType(0x54535359), id: 1), GetApplicationEventTarget(), 0, &hotKeyRef)
-    log(status == noErr ? "⌃⌥⌘C — отправить буфер вручную" : "не занял ⌃⌥⌘C: \(status)")
+    log(status == noErr ? "\(choice.title) — отправить буфер вручную" : "не занял \(choice.title): \(status)")
 }
 
 func unregisterHotKey() {
