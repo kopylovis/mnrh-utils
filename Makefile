@@ -71,6 +71,9 @@ test:
 	@./bin/mnrh clip -h | grep -q "mnrh clip"
 	@./bin/mnrh tossy rename a b c </dev/null 2>&1 | grep -q "Нет устройства\|Сначала"
 	@./bin/mnrh deps -h >/dev/null
+	@./bin/mnrh alert -h | grep -q "alert run"
+	@./bin/mnrh alert status </dev/null >/dev/null || true
+	@./bin/mnrh claude notify -h | grep -q "notify phone"
 	@./bin/mnrh claude guard >/dev/null
 	@./bin/mnrh claude guard -h >/dev/null
 	@cd /tmp && $(CURDIR)/bin/mnrh claude guard test 'git push -f origin master' | grep -q пропущу

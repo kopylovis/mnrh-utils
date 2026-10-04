@@ -11,6 +11,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mnrhlib import HOME, read_config, settings_name, settings_path, tilde, write_config
 from swiftagent import SwiftAgent
+import ntfy_alert
 import telegram
 
 AGENT = SwiftAgent("notify", "mnrh Notify", "com.mnrh.notify")
@@ -70,6 +71,8 @@ def usage():
     print("mnrh claude notify sound on|off звук")
     print("mnrh claude notify test         показать пробное уведомление")
     print("mnrh claude notify telegram     ещё и в Telegram, когда ты не за Mac: подключить бота")
+    print(f"mnrh claude notify phone away   ещё и в Tossy на телефон (канал {ntfy_alert.CLAUDE_TOPIC}), когда ты не за Mac")
+    print("  … phone always | off | test")
     print("  … telegram test | off | always | away <сек>")
     print()
     print("Уведомление приходит, если Claude просит разрешение или задаёт вопрос, долго ждёт ответа")
@@ -280,8 +283,10 @@ def hook():
         return 0
     bundle = os.environ.get("__CFBundleIdentifier", "")
     to_phone = telegram.wanted()
+    phone_mode = ntfy_alert.phone_mode()
+    to_tossy = ntfy_alert.configured() and (phone_mode == "always" or (phone_mode == "away" and telegram.away()))
     on_mac = not watching(bundle, tty)
-    if not on_mac and not to_phone:
+    if not on_mac and not to_phone and not to_tossy:
         return 0
     head, body = what
     cwd = payload.get("cwd") or ""
@@ -296,6 +301,12 @@ def hook():
             telegram.send(f"{project}: {head}", title, body)
         except telegram.TelegramError as e:
             log_error(f"telegram: {e}")
+    if to_tossy:
+        try:
+            ntfy_alert.publish(ntfy_alert.CLAUDE_TOPIC, "\n\n".join(p for p in (title, body) if p),
+                               title=f"{project}: {head}", priority=3 if head.startswith("Готово") else 4)
+        except ntfy_alert.AlertError as e:
+            log_error(f"tossy: {e}")
     st["notified"] = True
     save_state(sid, st)
     return 0
@@ -326,6 +337,10 @@ def status():
         have = []
     print("Хуки Claude Code: " + (", ".join(have) if have else "не стоят — mnrh claude setup"))
     print(telegram.describe())
+    mode = ntfy_alert.phone_mode()
+    print("Tossy: " + {"off": "выключено — mnrh claude notify phone away",
+                       "away": f"когда ты не за Mac, канал «{ntfy_alert.CLAUDE_TOPIC}»",
+                       "always": f"всегда, канал «{ntfy_alert.CLAUDE_TOPIC}»"}[mode])
 
 
 def test():
@@ -348,6 +363,31 @@ def test():
     else:
         print(f"✗ не получилось: {r}")
     return 1
+
+
+def phone(rest):
+    value = rest[0] if rest else ""
+    if value in ("on", "away", "always", "off"):
+        if value != "off" and not ntfy_alert.configured():
+            print("Сначала mnrh tossy setup: уведомления уходят через сервер Tossy")
+            return 1
+        write_config(notify_phone="away" if value == "on" else value)
+        print({"off": "В Tossy больше не отправляю",
+               "always": f"Отправляю в Tossy всегда, канал «{ntfy_alert.CLAUDE_TOPIC}»"}.get(
+            value, f"Отправляю в Tossy, когда ты не за Mac, канал «{ntfy_alert.CLAUDE_TOPIC}»"))
+        print(f"На телефоне: Tossy → Уведомления → + → канал {ntfy_alert.CLAUDE_TOPIC}")
+        return 0
+    if value == "test":
+        try:
+            ntfy_alert.publish(ntfy_alert.CLAUDE_TOPIC, "Так будут приходить вопросы и ответы Claude Code.",
+                               title="Claude Code: проверка")
+        except ntfy_alert.AlertError as e:
+            print(f"Не отправил: {e}")
+            return 1
+        print("Отправил пробное уведомление")
+        return 0
+    print(f"В Tossy: {ntfy_alert.phone_mode()}. mnrh claude notify phone away | always | off | test")
+    return 0
 
 
 def main():
@@ -380,6 +420,8 @@ def main():
         return test()
     if rest[0] == "telegram":
         return telegram.main(rest[1:])
+    if rest[0] == "phone":
+        return phone(rest[1:])
     usage()
     return 2
 
