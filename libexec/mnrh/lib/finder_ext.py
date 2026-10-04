@@ -14,7 +14,7 @@ SRC = os.path.join(ROOT, "share", "mnrh", "tossy-finder")
 APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "mnrh Tossy Finder.app")
 APPEX = os.path.join(APP, "Contents", "PlugIns", "TossyFinder.appex")
 STAMP = os.path.join(APP, "Contents", "Resources", "source.sha256")
-HOST_ID = "com.mnrh.tossy.finder"
+HOST_ID = "com.kopylovis.tossy.desktop.finder"
 EXT_ID = f"{HOST_ID}.send"
 LSREGISTER = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/"
               "Support/lsregister")
@@ -27,7 +27,7 @@ def identity():
 
 
 def source_hash(sign):
-    h = hashlib.sha256((sign + "2").encode())
+    h = hashlib.sha256((sign + HOST_ID).encode())
     for name in sorted(os.listdir(SRC)):
         with open(os.path.join(SRC, name), "rb") as f:
             h.update(name.encode() + f.read())

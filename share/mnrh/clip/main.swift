@@ -51,7 +51,7 @@ while let arg = argv.next() {
     }
 }
 
-let serviceLabel = Bundle.main.object(forInfoDictionaryKey: "MnrhServiceLabel") as? String ?? Bundle.main.bundleIdentifier ?? "com.mnrh.clip"
+let serviceLabel = Bundle.main.object(forInfoDictionaryKey: "MnrhServiceLabel") as? String ?? Bundle.main.bundleIdentifier ?? "com.kopylovis.tossy.desktop"
 let serviceCommands = ["--register", "--unregister", "--service-status"]
 if let command = CommandLine.arguments.dropFirst().first(where: serviceCommands.contains) {
     let service = SMAppService.agent(plistName: serviceLabel + ".plist")

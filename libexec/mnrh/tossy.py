@@ -55,7 +55,8 @@ CONFIG = os.path.join(HOME, ".config", "mnrh", "clip.json")
 NOTIFY_APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "mnrh Notify.app")
 QR = os.path.join(HOME, ".cache", "mnrh", "clip-pair.png")
 TOKEN_RE = re.compile(r"^tk_[A-Za-z0-9]{20,}$")
-agent = SwiftAgent("clip", "mnrh Clip", "com.mnrh.clip", service_args=["--config", CONFIG], url_schemes=["mnrh-tossy"],
+LEGACY_LABELS = ("com.mnrh.clip.",)
+agent = SwiftAgent("clip", "mnrh Clip", "com.kopylovis.tossy.desktop", service_args=["--config", CONFIG], url_schemes=["mnrh-tossy"],
                    title="Tossy", stable_id=True)
 
 
@@ -536,7 +537,7 @@ def refresh_helper():
     listed = subprocess.run(["launchctl", "list"], capture_output=True, text=True).stdout.splitlines()
     for line in listed:
         label = line.split("\t")[-1]
-        if label.startswith(agent.base + "."):
+        if label.startswith((agent.base + ".", *LEGACY_LABELS)):
             agent.launchctl("bootout", f"{agent.domain}/{label}")
     if s:
         try:
