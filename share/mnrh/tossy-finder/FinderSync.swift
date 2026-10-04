@@ -13,21 +13,22 @@ final class FinderSync: FIFinderSync {
         guard menuKind == .contextualMenuForItems || menuKind == .contextualMenuForContainer else { return menu }
         let russian = Locale.preferredLanguages.first?.hasPrefix("ru") == true
         let devices = roomDevices()
-        let send = NSMenuItem(title: russian ? "Отправить в Tossy" : "Send via Tossy", action: devices.isEmpty ? #selector(sendAll(_:)) : nil, keyEquivalent: "")
+        let send = NSMenuItem(title: russian ? "Отправить в Tossy" : "Send via Tossy", action: #selector(sendAll(_:)), keyEquivalent: "")
         send.image = icon()
-        if !devices.isEmpty {
+        menu.addItem(send)
+        if devices.count > 1 {
             let targets = NSMenu(title: "")
-            targets.addItem(NSMenuItem(title: russian ? "Всем устройствам" : "All devices", action: #selector(sendAll(_:)), keyEquivalent: ""))
-            targets.addItem(.separator())
             for (index, device) in devices.enumerated() {
                 let item = NSMenuItem(title: device.name, action: #selector(sendOne(_:)), keyEquivalent: "")
                 item.tag = index
                 item.image = symbol(device.isMac ? "laptopcomputer" : "iphone")
                 targets.addItem(item)
             }
-            send.submenu = targets
+            let choose = NSMenuItem(title: russian ? "Отправить в Tossy на устройство" : "Send via Tossy to", action: nil, keyEquivalent: "")
+            choose.image = icon()
+            choose.submenu = targets
+            menu.addItem(choose)
         }
-        menu.addItem(send)
         return menu
     }
 
