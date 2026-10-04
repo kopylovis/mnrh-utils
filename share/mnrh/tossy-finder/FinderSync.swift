@@ -22,7 +22,7 @@ final class FinderSync: FIFinderSync {
             for (index, device) in devices.enumerated() {
                 let item = NSMenuItem(title: device.name, action: #selector(sendOne(_:)), keyEquivalent: "")
                 item.tag = index
-                item.image = NSImage(systemSymbolName: device.isMac ? "laptopcomputer" : "iphone", accessibilityDescription: nil)
+                item.image = symbol(device.isMac ? "laptopcomputer" : "iphone")
                 targets.addItem(item)
             }
             send.submenu = targets
@@ -31,9 +31,24 @@ final class FinderSync: FIFinderSync {
         return menu
     }
 
+    private var menuColor: NSColor {
+        UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark" ? .white : .black
+    }
+
+    private func symbol(_ name: String) -> NSImage? {
+        guard let base = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)) else { return nil }
+        let color = menuColor
+        return NSImage(size: base.size, flipped: false) { rect in
+            base.draw(in: rect)
+            color.set()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+    }
+
     private func icon() -> NSImage {
-        let isDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
-        let color = isDark ? NSColor.white : NSColor.black
+        let color = menuColor
         let image = NSImage(size: NSSize(width: 16, height: 16), flipped: true) { _ in
             color.setFill()
             let scale = 16.0 / 18.0
