@@ -1017,7 +1017,14 @@ func shellQuote(_ text: String) -> String {
     "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
-func notify(_ body: String, file: URL? = nil) {
+func linkIn(_ text: String) -> URL? {
+    let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !clean.isEmpty, !clean.contains(where: { $0.isWhitespace }), let url = URL(string: clean),
+          ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else { return nil }
+    return url
+}
+
+func notify(_ body: String, file: URL? = nil, link: URL? = nil) {
     guard conf.notifications, !conf.notifyApp.isEmpty, FileManager.default.fileExists(atPath: conf.notifyApp) else { return }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
@@ -1026,6 +1033,9 @@ func notify(_ body: String, file: URL? = nil) {
     if let file = file {
         let path = shellQuote(file.path)
         args += ["--click", "open \(path)", "--action", "Открыть=open \(path)", "--action", "Показать в Finder=open -R \(path)"]
+    } else if let link = link {
+        let url = shellQuote(link.absoluteString)
+        args += ["--action", "Открыть ссылку=open \(url)"]
     }
     p.arguments = args
     try? p.run()
@@ -1212,6 +1222,7 @@ func apply(_ meta: [String: Any], _ data: Data?, fresh: Bool = true) {
     }
     pasteboard.clearContents()
     var what = ""
+    var link: URL? = nil
     if kind == "text" {
         let text = meta["v"] as? String ?? data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
         pasteboard.setString(text, forType: .string)
@@ -1219,6 +1230,8 @@ func apply(_ meta: [String: Any], _ data: Data?, fresh: Bool = true) {
         lastReceivedHash = digest(Data(text.utf8))
         lastReceivedAt = Date().timeIntervalSince1970
         what = describe(kind, text.utf8.count, text)
+        link = linkIn(text)
+        if link != nil { what = "ссылка \(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))" }
     } else if kind == "image", let data = data {
         let mime = meta["m"] as? String ?? "image/png"
         let type = UTType(mimeType: mime) ?? .png
@@ -1246,7 +1259,7 @@ func apply(_ meta: [String: Any], _ data: Data?, fresh: Bool = true) {
     receivedCount += 1
     lastReceived = Date().timeIntervalSince1970
     log("← \(from): \(what)")
-    notify("С \(from): \(what) — можно вставлять")
+    notify("С \(from): \(what) — можно вставлять", link: link)
     writeState()
 }
 
