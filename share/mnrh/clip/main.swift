@@ -133,6 +133,27 @@ if let at = CommandLine.arguments.firstIndex(of: "--selftest"), at + 1 < Command
         check(name + " open", opened?.room == room && opened?.key == key)
         check(name + " wrong id", openRoomKey(identity: recipient, id: id + "x", ephemeral: v["ephemeral"] ?? "", box: v["box"] ?? "") == nil)
     }
+    let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("mnrh-clip-selftest-\(getpid())")
+    try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: scratch) }
+    for v in vectors["tsy2"] as? [[String: Any]] ?? [] {
+        guard let key = Data(base64Encoded: v["key"] as? String ?? ""), let prefix = Data(base64Encoded: v["prefix"] as? String ?? ""),
+              let plain = Data(base64Encoded: v["plain"] as? String ?? ""), let sealed = Data(base64Encoded: v["sealed"] as? String ?? ""),
+              let chunk = v["chunk"] as? Int else {
+            check("tsy2", false)
+            continue
+        }
+        let name = "tsy2 \(plain.count) bytes"
+        let src = scratch.appendingPathComponent("plain"), out = scratch.appendingPathComponent("sealed")
+        let back = scratch.appendingPathComponent("back"), given = scratch.appendingPathComponent("given")
+        try? plain.write(to: src)
+        try? sealed.write(to: given)
+        _ = try? sealFile(src, out, key: SymmetricKey(data: key), chunkSize: chunk, prefix: [UInt8](prefix)) { _ in }
+        check(name + " seal", (try? Data(contentsOf: out)) == sealed)
+        _ = try? openFile(given, back, key: SymmetricKey(data: key))
+        check(name + " open", (try? Data(contentsOf: back)) == plain)
+        [src, out, back, given].forEach { try? FileManager.default.removeItem(at: $0) }
+    }
     exit(failed == 0 ? 0 : 1)
 }
 
@@ -510,7 +531,8 @@ struct StreamError: Error {
     let text: String
 }
 
-func sealFile(_ src: URL, _ dst: URL, progress: (Int64) -> Void) throws -> StreamResult {
+func sealFile(_ src: URL, _ dst: URL, key: SymmetricKey = conf.key, chunkSize: Int = streamChunk, prefix fixed: [UInt8]? = nil,
+              progress: (Int64) -> Void) throws -> StreamResult {
     let input = try FileHandle(forReadingFrom: src)
     defer { try? input.close() }
     let size = (try FileManager.default.attributesOfItem(atPath: src.path)[.size] as? NSNumber)?.int64Value ?? 0
@@ -520,23 +542,25 @@ func sealFile(_ src: URL, _ dst: URL, progress: (Int64) -> Void) throws -> Strea
     let output = try FileHandle(forWritingTo: dst)
     defer { try? output.close() }
     var header = streamMagic
-    withUnsafeBytes(of: UInt32(streamChunk).bigEndian) { header.append(contentsOf: $0) }
-    var prefix = [UInt8](repeating: 0, count: 7)
-    guard SecRandomCopyBytes(kSecRandomDefault, prefix.count, &prefix) == errSecSuccess else { throw StreamError(text: "нет случайных чисел") }
+    withUnsafeBytes(of: UInt32(chunkSize).bigEndian) { header.append(contentsOf: $0) }
+    var prefix = fixed ?? [UInt8](repeating: 0, count: 7)
+    if fixed == nil {
+        guard SecRandomCopyBytes(kSecRandomDefault, prefix.count, &prefix) == errSecSuccess else { throw StreamError(text: "нет случайных чисел") }
+    }
     header.append(contentsOf: prefix)
     header.append(0)
     try output.write(contentsOf: header)
     var hasher = SHA256()
-    let chunks = size / Int64(streamChunk) + 1
+    let chunks = size / Int64(chunkSize) + 1
     var done: Int64 = 0
     for index in 0 ..< chunks {
         try autoreleasepool {
             let last = index == chunks - 1
-            let length = last ? Int(size % Int64(streamChunk)) : streamChunk
+            let length = last ? Int(size % Int64(chunkSize)) : chunkSize
             let plain = try readExactly(input, length)
             guard plain.count == length else { throw StreamError(text: "файл изменился во время отправки") }
             hasher.update(data: plain)
-            let box = try AES.GCM.seal(plain, using: conf.key, nonce: chunkNonce(header, UInt32(index), last), authenticating: header)
+            let box = try AES.GCM.seal(plain, using: key, nonce: chunkNonce(header, UInt32(index), last), authenticating: header)
             try output.write(contentsOf: box.ciphertext + box.tag)
             done += Int64(length)
             progress(done)
@@ -545,7 +569,7 @@ func sealFile(_ src: URL, _ dst: URL, progress: (Int64) -> Void) throws -> Strea
     return StreamResult(size: size, hash: hasher.finalize().map { String(format: "%02x", $0) }.joined())
 }
 
-func openFile(_ src: URL, _ dst: URL) throws -> StreamResult {
+func openFile(_ src: URL, _ dst: URL, key: SymmetricKey = conf.key) throws -> StreamResult {
     let input = try FileHandle(forReadingFrom: src)
     defer { try? input.close() }
     let header = Data(try readExactly(input, 16))
@@ -568,7 +592,7 @@ func openFile(_ src: URL, _ dst: URL) throws -> StreamResult {
             let last = frame.count < chunk + 16
             let box = try AES.GCM.SealedBox(nonce: chunkNonce(header, index, last), ciphertext: frame.prefix(frame.count - 16),
                                             tag: frame.suffix(16))
-            let plain = try AES.GCM.open(box, using: conf.key, authenticating: header)
+            let plain = try AES.GCM.open(box, using: key, authenticating: header)
             try output.write(contentsOf: plain)
             hasher.update(data: plain)
             size += Int64(plain.count)
