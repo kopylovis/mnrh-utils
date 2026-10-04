@@ -99,12 +99,15 @@ def build(icon=None):
 
 def install(icon=None):
     try:
-        build(icon)
+        rebuilt = build(icon)
     except (RuntimeError, OSError) as e:
         return str(e)
     if os.path.exists(LSREGISTER):
         subprocess.run([LSREGISTER, "-f", APP], capture_output=True)
     subprocess.run(["pluginkit", "-a", APPEX], capture_output=True)
+    if rebuilt:
+        subprocess.run(["pluginkit", "-e", "ignore", "-i", EXT_ID], capture_output=True)
+        time.sleep(1)
     subprocess.run(["pluginkit", "-e", "use", "-i", EXT_ID], capture_output=True)
     return None
 
