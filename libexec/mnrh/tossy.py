@@ -270,15 +270,31 @@ def invite():
     migrate()
     agent.build()
     code = new_code()
-    r = subprocess.run([agent.bin, "--config", CONFIG, "--invite", code], capture_output=True, text=True, timeout=60)
-    if r.returncode != 0:
-        sys.exit(f"Не создал приглашение: {r.stdout.strip() or r.stderr.strip()}")
     host = read_conf()["server"].split("://", 1)[-1]
-    print(f"{OK} приглашение на 10 минут. На втором Mac выполни:")
-    print()
-    print(f"    mnrh tossy join {host}/{code}")
-    print()
-    print(paint("  Код одноразовый по смыслу: кто его знает, тот войдёт в комнату. Не публикуй его.", "2"))
+    proc = subprocess.Popen([agent.bin, "--config", CONFIG, "--invite", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        first = proc.stdout.readline().strip()
+        if first != "ok":
+            proc.wait()
+            sys.exit(f"Не создал приглашение: {first or proc.stderr.read().strip()}")
+        print("На втором Mac выполни:")
+        print()
+        print(f"    mnrh tossy join {host}/{code}")
+        print()
+        print(paint("  Приглашение не хранится на сервере: оно уходит, только пока эта команда ждёт, до 10 минут.", "2"))
+        print(paint("  Кто знает код, тот войдёт в комнату. Не публикуй его. Ctrl+C — отменить.", "2"))
+        result = proc.stdout.read().strip()
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
+        print()
+        sys.exit("Приглашение отменено.")
+    if proc.returncode == 0:
+        print(f"{OK} {result or 'Mac'} в комнате.")
+    elif result == "timeout":
+        sys.exit("За 10 минут никто не подключился. Новое приглашение: mnrh tossy invite")
+    else:
+        sys.exit(f"{BAD} приглашение прервалось: {result or proc.stderr.read().strip()}")
 
 
 def join():
@@ -290,9 +306,12 @@ def join():
     if not server or not re.match(r"^[0-9A-Za-z]{4}-?[0-9A-Za-z]{4}$", code):
         sys.exit("Нужно вида: mnrh tossy join ntfy.example.com/ABCD-EFGH")
     agent.build()
+    old = read_conf()
+    device_id = old.get("device_id") or secrets.token_hex(8)
     out = os.path.join(os.path.dirname(CONFIG), "clip-join.tmp")
     try:
-        r = subprocess.run([agent.bin, "--config", "/dev/null", "--join", server, code, "--out", out],
+        r = subprocess.run([agent.bin, "--config", "/dev/null", "--join", server, code, "--out", out,
+                            "--id", device_id, "--name", old.get("name", "")],
                            capture_output=True, text=True, timeout=120)
         if r.returncode != 0 or not os.path.exists(out):
             sys.exit(f"{BAD} {r.stdout.strip() or r.stderr.strip() or 'не получилось'}")
@@ -303,9 +322,8 @@ def join():
             os.remove(out)
         except OSError:
             pass
-    old = read_conf()
     conf = {"server": normalize_server(invite["s"]), "token": invite["t"], "room": invite["r"], "key": invite["k"],
-            "device_id": old.get("device_id") or secrets.token_hex(8), "images": old.get("images", True),
+            "device_id": device_id, "images": old.get("images", True),
             "notify_app": ensure_notify_app()}
     conf.update({k: old[k] for k in ("name", "aliases", "identity") if old.get(k)})
     save_conf(conf)

@@ -27,6 +27,8 @@ var joinServer = ""
 var joinCode = ""
 var joinOut = ""
 var sendNotify = false
+var joinID = ""
+var joinName = ""
 
 var argv = CommandLine.arguments.dropFirst().makeIterator()
 while let arg = argv.next() {
@@ -43,6 +45,8 @@ while let arg = argv.next() {
         joinCode = argv.next() ?? ""
     case "--out": joinOut = argv.next() ?? ""
     case "--notify": sendNotify = true
+    case "--id": joinID = argv.next() ?? ""
+    case "--name": joinName = argv.next() ?? ""
     default: break
     }
 }
@@ -72,10 +76,12 @@ func roomKeyKEK(_ shared: SharedSecret, ephemeral: Data, recipient: Data) -> Sym
     shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: ephemeral + recipient, sharedInfo: rekeyInfo, outputByteCount: 32)
 }
 
-func sealRoomKey(room: String, key: String, for recipients: [String: String],
+func sealRoomKey(room: String, key: String, token: String? = nil, for recipients: [String: String],
                  ephemeral: Curve25519.KeyAgreement.PrivateKey = .init(), nonce: AES.GCM.Nonce = .init()) -> (ephemeral: String, keys: [String: String]) {
     let ephemeralData = ephemeral.publicKey.rawRepresentation
-    let plain = (try? JSONSerialization.data(withJSONObject: ["r": room, "key": key], options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()
+    var secret = ["r": room, "key": key]
+    if let token = token, !token.isEmpty { secret["t"] = token }
+    let plain = (try? JSONSerialization.data(withJSONObject: secret, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()
     var keys = [String: String]()
     for (id, text) in recipients {
         guard let data = Data(base64Encoded: text), let recipient = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: data),
@@ -87,7 +93,7 @@ func sealRoomKey(room: String, key: String, for recipients: [String: String],
     return (ephemeralData.base64EncodedString(), keys)
 }
 
-func openRoomKey(identity: Curve25519.KeyAgreement.PrivateKey, id: String, ephemeral: String, box: String) -> (room: String, key: String)? {
+func openRoomKey(identity: Curve25519.KeyAgreement.PrivateKey, id: String, ephemeral: String, box: String) -> (room: String, key: String, token: String?)? {
     guard let ephemeralData = Data(base64Encoded: ephemeral), let sealed = Data(base64Encoded: box),
           let ephemeralKey = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: ephemeralData),
           let shared = try? identity.sharedSecretFromKeyAgreement(with: ephemeralKey),
@@ -97,7 +103,7 @@ func openRoomKey(identity: Curve25519.KeyAgreement.PrivateKey, id: String, ephem
                                         authenticating: Data(id.utf8)),
           let json = (try? JSONSerialization.jsonObject(with: plain)) as? [String: Any],
           let room = json["r"] as? String, let key = json["key"] as? String else { return nil }
-    return (room, key)
+    return (room, key, json["t"] as? String)
 }
 
 if let at = CommandLine.arguments.firstIndex(of: "--selftest"), at + 1 < CommandLine.arguments.count {
@@ -174,35 +180,89 @@ func runSync(_ request: URLRequest) -> (Int, Data) {
     return result
 }
 
+func waitForEvent(_ request: URLRequest, seconds: Double, _ match: @escaping ([String: Any]) -> Bool) -> (found: Bool, code: Int) {
+    var found = false
+    var code = 0
+    let done = DispatchSemaphore(value: 0)
+    let task = Task.detached {
+        defer { done.signal() }
+        guard let (bytes, response) = try? await URLSession.shared.bytes(for: request) else { return }
+        code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { return }
+        do {
+            for try await line in bytes.lines {
+                guard let event = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+                      event["event"] as? String == "message" else { continue }
+                if match(event) {
+                    found = true
+                    return
+                }
+            }
+        } catch {}
+    }
+    if done.wait(timeout: .now() + seconds) == .timedOut {
+        task.cancel()
+        _ = done.wait(timeout: .now() + 2)
+    }
+    return (found, code)
+}
+
+func trimmedServer(_ server: String) -> String {
+    server.hasSuffix("/") ? String(server.dropLast()) : server
+}
+
 if !joinCode.isEmpty {
-    let server = joinServer.hasPrefix("http") ? joinServer : "https://" + joinServer
-    var r = URLRequest(url: URL(string: "\(server.hasSuffix("/") ? String(server.dropLast()) : server)/\(inviteTopic(joinCode))/json?poll=1&since=30m")!)
-    r.timeoutInterval = 20
-    let (code, body) = runSync(r)
-    guard code == 200 else {
-        print(code == 401 || code == 403 ? "сервер не пускает к приглашениям: ntfy access everyone 'tossy-inv-*' read-only"
-                                         : "нет связи с сервером: HTTP \(code)")
+    let server = trimmedServer(joinServer.hasPrefix("http") ? joinServer : "https://" + joinServer)
+    let topic = inviteTopic(joinCode)
+    guard let url = URL(string: "\(server)/\(topic)/json") else {
+        print("не понял адрес сервера: \(joinServer)")
         exit(3)
     }
+    var r = URLRequest(url: url)
+    r.timeoutInterval = 90
     let key = inviteKey(joinCode)
-    for line in body.split(separator: 0x0A).reversed() {
-        guard let event = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
-              let message = event["message"] as? String, let sealed = Data(base64Encoded: message),
-              let box = try? AES.GCM.SealedBox(combined: sealed), let plain = try? AES.GCM.open(box, using: key),
-              let invite = (try? JSONSerialization.jsonObject(with: plain)) as? [String: Any] else { continue }
-        guard (invite["exp"] as? Double ?? 0) > Date().timeIntervalSince1970 else {
-            print("приглашение устарело: на первом Mac — mnrh tossy invite")
-            exit(4)
-        }
-        let fd = open(joinOut, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
-        guard fd >= 0 else { exit(1) }
-        _ = plain.withUnsafeBytes { write(fd, $0.baseAddress, plain.count) }
-        close(fd)
-        print(invite["n"] as? String ?? "Mac")
-        exit(0)
+    var plain = Data()
+    var invite = [String: Any]()
+    let result = waitForEvent(r, seconds: 45) { event in
+        guard let message = event["message"] as? String, let sealed = Data(base64Encoded: message),
+              let box = try? AES.GCM.SealedBox(combined: sealed), let opened = try? AES.GCM.open(box, using: key),
+              let parsed = (try? JSONSerialization.jsonObject(with: opened)) as? [String: Any] else { return false }
+        plain = opened
+        invite = parsed
+        return true
     }
-    print("приглашение не найдено: проверь код или создай новое — mnrh tossy invite")
-    exit(5)
+    guard result.found else {
+        switch result.code {
+        case 401, 403: print("сервер не пускает к приглашениям: ntfy access everyone 'tossy-inv-*' read-only")
+        case 200: print("приглашение не пришло: на первом Mac должна идти mnrh tossy invite с этим кодом")
+        default: print("нет связи с сервером: HTTP \(result.code)")
+        }
+        exit(result.code == 200 ? 5 : 3)
+    }
+    guard (invite["exp"] as? Double ?? 0) > Date().timeIntervalSince1970 else {
+        print("приглашение устарело: на первом Mac — mnrh tossy invite")
+        exit(4)
+    }
+    let fd = open(joinOut, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+    guard fd >= 0 else { exit(1) }
+    _ = plain.withUnsafeBytes { write(fd, $0.baseAddress, plain.count) }
+    close(fd)
+    if let room = invite["r"] as? String, let keyText = invite["k"] as? String, let roomKey = Data(base64Encoded: keyText),
+       let target = URL(string: "\(trimmedServer(invite["s"] as? String ?? server))/\(room)") {
+        var meta: [String: Any] = ["k": "hello", "m": "text/plain", "src": "mac", "n": joinName.isEmpty ? computerName : joinName, "inv": topic]
+        if !joinID.isEmpty { meta["id"] = joinID }
+        if let metaJSON = try? JSONSerialization.data(withJSONObject: meta),
+           let sealedMeta = try? AES.GCM.seal(metaJSON, using: SymmetricKey(data: roomKey)).combined {
+            var hello = URLRequest(url: target)
+            hello.httpMethod = "POST"
+            if let token = invite["t"] as? String, !token.isEmpty { hello.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+            hello.httpBody = sealedMeta.base64EncodedString().data(using: .utf8)
+            hello.timeoutInterval = 20
+            _ = runSync(hello)
+        }
+    }
+    print(invite["n"] as? String ?? "Mac")
+    exit(0)
 }
 
 struct Config {
@@ -285,18 +345,54 @@ if !inviteCode.isEmpty {
         print("сначала mnrh tossy on: старые настройки без комнаты")
         exit(2)
     }
+    let topic = inviteTopic(inviteCode)
     let invite: [String: Any] = ["s": conf.server, "t": conf.token, "r": conf.room, "k": conf.keyText,
                                  "n": conf.deviceName, "exp": Date().timeIntervalSince1970 + 600]
-    let plain = try! JSONSerialization.data(withJSONObject: invite)
-    let sealed = try! AES.GCM.seal(plain, using: inviteKey(inviteCode)).combined!
-    var r = URLRequest(url: URL(string: "\(conf.server)/\(inviteTopic(inviteCode))")!)
-    r.httpMethod = "POST"
-    if !conf.token.isEmpty { r.setValue("Bearer \(conf.token)", forHTTPHeaderField: "Authorization") }
-    r.httpBody = sealed.base64EncodedString().data(using: .utf8)
-    r.timeoutInterval = 20
-    let (code, _) = runSync(r)
-    print(code == 200 ? "ok" : "не отправил приглашение: HTTP \(code)")
-    exit(code == 200 ? 0 : 1)
+    guard let plain = try? JSONSerialization.data(withJSONObject: invite),
+          let sealed = try? AES.GCM.seal(plain, using: inviteKey(inviteCode)).combined,
+          let url = URL(string: "\(conf.server)/\(topic)"), let roomURL = URL(string: "\(conf.server)/\(conf.room)/json") else {
+        print("не собрал приглашение")
+        exit(1)
+    }
+    let offer: () -> Int = {
+        var r = URLRequest(url: url)
+        r.httpMethod = "POST"
+        r.setValue("no", forHTTPHeaderField: "X-Cache")
+        if !conf.token.isEmpty { r.setValue("Bearer \(conf.token)", forHTTPHeaderField: "Authorization") }
+        r.httpBody = sealed.base64EncodedString().data(using: .utf8)
+        r.timeoutInterval = 20
+        return runSync(r).0
+    }
+    let first = offer()
+    guard first == 200 else {
+        print("не отправил приглашение: HTTP \(first)")
+        exit(1)
+    }
+    print("ok")
+    fflush(stdout)
+    let timer = DispatchSource.makeTimerSource(queue: .global())
+    timer.schedule(deadline: .now() + 2, repeating: 2)
+    timer.setEventHandler { _ = offer() }
+    timer.resume()
+    var room = URLRequest(url: roomURL)
+    if !conf.token.isEmpty { room.setValue("Bearer \(conf.token)", forHTTPHeaderField: "Authorization") }
+    room.timeoutInterval = 700
+    var joined = ""
+    let result = waitForEvent(room, seconds: 600) { event in
+        guard let message = event["message"] as? String, let sealedMeta = Data(base64Encoded: message),
+              let box = try? AES.GCM.SealedBox(combined: sealedMeta), let metaJSON = try? AES.GCM.open(box, using: conf.key),
+              let meta = (try? JSONSerialization.jsonObject(with: metaJSON)) as? [String: Any],
+              meta["k"] as? String == "hello", meta["inv"] as? String == topic else { return false }
+        joined = meta["n"] as? String ?? "Mac"
+        return true
+    }
+    timer.cancel()
+    if result.found {
+        print(joined)
+        exit(0)
+    }
+    print(result.code == 200 || result.code == 0 ? "timeout" : "HTTP \(result.code)")
+    exit(6)
 }
 
 if !qrOut.isEmpty {
@@ -950,7 +1046,7 @@ func control(_ kind: String, _ meta: [String: Any]) -> Bool {
         log("вышел из комнаты: \(from)")
         writeState()
     case "rekey":
-        var opened: (room: String, key: String)? = nil
+        var opened: (room: String, key: String, token: String?)? = nil
         if let keys = meta["keys"] as? [String: String], let box = keys[conf.deviceID], let ephemeral = meta["e"] as? String {
             opened = conf.identity.flatMap { openRoomKey(identity: $0, id: conf.deviceID, ephemeral: ephemeral, box: box) }
         }
@@ -964,6 +1060,7 @@ func control(_ kind: String, _ meta: [String: Any]) -> Bool {
         let saved = rewriteConfig { raw in
             raw["room"] = room
             raw["key"] = key
+            if let token = opened?.token, !token.isEmpty { raw["token"] = token }
             raw["legacy_to_mac"] = ""
             raw["legacy_to_phone"] = ""
         }
