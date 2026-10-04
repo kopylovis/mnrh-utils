@@ -279,6 +279,7 @@ struct Config {
     var images = true
     var auto = true
     var hotkey = true
+    var notifications = true
     var notifyApp = ""
     var name = ""
     var aliases = [String: String]()
@@ -316,6 +317,7 @@ func loadConfig() -> Config? {
     c.images = raw["images"] as? Bool ?? true
     c.auto = raw["auto"] as? Bool ?? true
     c.hotkey = raw["hotkey"] as? Bool ?? true
+    c.notifications = raw["notifications"] as? Bool ?? true
     c.notifyApp = raw["notify_app"] as? String ?? ""
     c.name = (raw["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
     c.aliases = raw["aliases"] as? [String: String] ?? [:]
@@ -395,7 +397,7 @@ if !inviteCode.isEmpty {
     exit(6)
 }
 
-if !qrOut.isEmpty {
+func pairingQR() -> Data? {
     var payload: [String: Any] = ["s": conf.server, "t": conf.token, "k": conf.keyText, "n": conf.deviceName]
     if conf.room.isEmpty {
         payload["v"] = 1
@@ -407,14 +409,16 @@ if !qrOut.isEmpty {
         payload["id"] = conf.deviceID
         if !conf.publicKey.isEmpty { payload["pk"] = conf.publicKey }
     }
-    guard let json = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else { exit(1) }
-    guard let filter = CIFilter(name: "CIQRCodeGenerator") else { exit(1) }
+    guard let json = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+          let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
     filter.setValue(json, forKey: "inputMessage")
     filter.setValue("M", forKey: "inputCorrectionLevel")
-    guard let image = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)) else { exit(1) }
-    let rep = NSBitmapImageRep(ciImage: image)
-    guard let png = rep.representation(using: .png, properties: [:]),
-          (try? png.write(to: URL(fileURLWithPath: qrOut))) != nil else { exit(1) }
+    guard let image = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)) else { return nil }
+    return NSBitmapImageRep(ciImage: image).representation(using: .png, properties: [:])
+}
+
+if !qrOut.isEmpty {
+    guard let png = pairingQR(), (try? png.write(to: URL(fileURLWithPath: qrOut))) != nil else { exit(1) }
     exit(0)
 }
 
@@ -458,6 +462,7 @@ func writeState() {
     if let data = try? JSONSerialization.data(withJSONObject: state) {
         try? data.write(to: URL(fileURLWithPath: stateFile), options: .atomic)
     }
+    StatusMenu.shared.refresh()
 }
 
 func request(_ path: String, method: String = "GET") -> URLRequest {
@@ -574,7 +579,13 @@ func openFile(_ src: URL, _ dst: URL) throws -> StreamResult {
     return StreamResult(size: size, hash: hasher.finalize().map { String(format: "%02x", $0) }.joined())
 }
 
+var isAgent = false
 var contentSeq = 0
+
+func targetNames(_ ids: [String]?) -> String {
+    guard let ids = ids else { return "" }
+    return ids.map { id in conf.aliases[id] ?? members[id]?["name"] as? String ?? "?" }.joined(separator: ", ")
+}
 let retryDelays: [Double] = [3, 10, 30, 60, 120, 300]
 
 func publish(kind: String, mime: String, data: Data, text: String?, topic: String? = nil, extra: [String: Any] = [:],
@@ -629,6 +640,14 @@ func publish(kind: String, mime: String, data: Data, text: String?, topic: Strin
                 if kind == "text" || kind == "image" {
                     sentCount += 1
                     lastSent = Date().timeIntervalSince1970
+                    if isAgent {
+                        let device = targetNames(extra["to"] as? [String])
+                        if kind == "text" {
+                            History.shared.addText(text ?? String(decoding: data, as: UTF8.self), incoming: false, device: device)
+                        } else {
+                            History.shared.addImage(data, mime: mime, incoming: false, device: device)
+                        }
+                    }
                     log("→ \(conf.room.isEmpty ? "телефон" : "комната"): \(what)")
                 }
             } else {
@@ -799,6 +818,7 @@ func publishFile(_ src: URL, extra: [String: Any], announce: Bool, done: ((Bool)
                 lastSent = Date().timeIntervalSince1970
                 log("→ \(conf.room.isEmpty ? "телефон" : "комната"): файл \(name) (\(sizeText(sealed.size)))")
                 if announce { notify("Отправил «\(name)» \(where_)") }
+                if isAgent { History.shared.addFile(src, size: sealed.size, incoming: false, device: targetNames(extra["to"] as? [String])) }
                 writeState()
                 done?(true)
             }
@@ -960,12 +980,21 @@ func copyContent(types: [NSPasteboard.PasteboardType], explicit: Bool = false) {
     }
 }
 
-func notify(_ body: String) {
-    guard !conf.notifyApp.isEmpty, FileManager.default.fileExists(atPath: conf.notifyApp) else { return }
+func shellQuote(_ text: String) -> String {
+    "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
+func notify(_ body: String, file: URL? = nil) {
+    guard conf.notifications, !conf.notifyApp.isEmpty, FileManager.default.fileExists(atPath: conf.notifyApp) else { return }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    p.arguments = ["-g", "-n", "-a", conf.notifyApp, "--args", "post", "--title", "Tossy",
-                   "--body", body, "--id", "mnrh-clip", "--sound", "off"]
+    var args = ["-g", "-n", "-a", conf.notifyApp, "--args", "post", "--title", "Tossy",
+                "--body", body, "--id", file == nil ? "mnrh-clip" : "mnrh-clip-\(file!.path.hashValue)", "--sound", "off"]
+    if let file = file {
+        let path = shellQuote(file.path)
+        args += ["--click", "open \(path)", "--action", "Открыть=open \(path)", "--action", "Показать в Finder=open -R \(path)"]
+    }
+    p.arguments = args
     try? p.run()
 }
 
@@ -1030,7 +1059,8 @@ func deliverFile(_ meta: [String: Any], _ url: URL, size: Int64, hash: String, f
     lastReceived = Date().timeIntervalSince1970
     let what = "файл \(url.lastPathComponent) (\(sizeText(size))) — в Загрузках/Tossy"
     log("← \(from): \(what)")
-    notify(fresh ? "С \(from): \(what) — можно вставлять" : "С \(from): \(what)")
+    notify(fresh ? "С \(from): \(what) — можно вставлять" : "С \(from): \(what)", file: url)
+    if isAgent { History.shared.addFile(url, size: size, incoming: true, device: from) }
     writeState()
 }
 
@@ -1136,6 +1166,7 @@ func apply(_ meta: [String: Any], _ data: Data?, fresh: Bool = true) {
         if isNew {
             log("новое устройство: \(from)")
             notify("Подключён \(from)")
+            StatusMenu.shared.deviceJoined(from, isMac: meta["src"] as? String == "mac")
         } else {
             log("на связи: \(from)")
         }
@@ -1151,6 +1182,7 @@ func apply(_ meta: [String: Any], _ data: Data?, fresh: Bool = true) {
     if kind == "text" {
         let text = meta["v"] as? String ?? data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
         pasteboard.setString(text, forType: .string)
+        History.shared.addText(text, incoming: true, device: from)
         lastReceivedHash = digest(Data(text.utf8))
         lastReceivedAt = Date().timeIntervalSince1970
         what = describe(kind, text.utf8.count, text)
@@ -1161,6 +1193,7 @@ func apply(_ meta: [String: Any], _ data: Data?, fresh: Bool = true) {
             pasteboard.writeObjects([image])
         }
         pasteboard.setData(data, forType: NSPasteboard.PasteboardType(type.identifier))
+        History.shared.addImage(data, mime: mime, incoming: true, device: from)
         lastReceivedHash = digest(data)
         lastReceivedAt = Date().timeIntervalSince1970
         what = describe("картинка", data.count, nil)
@@ -1361,6 +1394,7 @@ if !sendItems.isEmpty || !sendTexts.isEmpty {
     RunLoop.main.run()
 }
 
+isAgent = true
 readSavedID()
 let streams = conf.listenTopics.enumerated().map { Stream(topic: $0.element, primary: $0.offset == 0) }
 streams.forEach { $0.connect() }
@@ -1400,16 +1434,26 @@ Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in writeState() }
 writeState()
 
 var hotKeyRef: EventHotKeyRef?
-if conf.hotkey {
-    var pressed = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-    InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-        DispatchQueue.main.async { sendNow() }
-        return noErr
-    }, 1, &pressed, nil, nil)
+var pressed = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+    DispatchQueue.main.async { sendNow() }
+    return noErr
+}, 1, &pressed, nil, nil)
+
+func registerHotKey() {
+    guard hotKeyRef == nil else { return }
     let status = RegisterEventHotKey(UInt32(kVK_ANSI_C), UInt32(cmdKey | optionKey | controlKey),
                                      EventHotKeyID(signature: OSType(0x54535359), id: 1), GetApplicationEventTarget(), 0, &hotKeyRef)
     log(status == noErr ? "⌃⌥⌘C — отправить буфер вручную" : "не занял ⌃⌥⌘C: \(status)")
 }
+
+func unregisterHotKey() {
+    guard let ref = hotKeyRef else { return }
+    UnregisterEventHotKey(ref)
+    hotKeyRef = nil
+}
+
+if conf.hotkey { registerHotKey() }
 log("слежу за буфером, сервер \(conf.server)")
 
 signal(SIGTERM, SIG_IGN)
@@ -1417,6 +1461,10 @@ let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
 term.setEventHandler { exit(0) }
 term.resume()
 
+retireTokens()
+Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { _ in retireTokens() }
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+StatusMenu.shared.install()
 app.run()

@@ -47,7 +47,7 @@ class SwiftAgent:
         if self.service_args is None:
             return self.base
         h = hashlib.sha256()
-        for p in (self.src, self.icon()):
+        for p in (*self.sources(), self.icon()):
             if p:
                 with open(p, "rb") as f:
                     h.update(f.read())
@@ -114,6 +114,11 @@ class SwiftAgent:
         except (OSError, ValueError, KeyError):
             return None
 
+    def sources(self):
+        folder = os.path.dirname(self.src)
+        return [self.src] + sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                                   if f.endswith(".swift") and f != "main.swift")
+
     def icon(self):
         for p in (os.path.join(os.path.dirname(self.src), "icon.png"), os.path.join(ROOT, "share", "mnrh", "icon.png")):
             if os.path.exists(p):
@@ -122,7 +127,7 @@ class SwiftAgent:
 
     def source_hash(self):
         h = hashlib.sha256()
-        for p in (self.src, self.icon()):
+        for p in (*self.sources(), self.icon()):
             if p:
                 with open(p, "rb") as f:
                     h.update(f.read())
@@ -163,7 +168,7 @@ class SwiftAgent:
             resources = os.path.join(contents, "Resources")
             os.makedirs(os.path.dirname(binary))
             os.makedirs(resources)
-            r = subprocess.run(["swiftc", "-O", "-swift-version", "5", self.src, "-o", binary],
+            r = subprocess.run(["swiftc", "-O", "-swift-version", "5", *self.sources(), "-o", binary],
                                capture_output=True, text=True)
             if r.returncode != 0:
                 sys.exit("Сборка не удалась:\n" + r.stderr[-2000:])

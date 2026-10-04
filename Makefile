@@ -62,8 +62,8 @@ test:
 	@! ./bin/mnrh scroll nothing >/dev/null
 	@swiftc -typecheck -swift-version 5 share/mnrh/scroll/main.swift
 	@swiftc -typecheck -swift-version 5 share/mnrh/notify/main.swift
-	@swiftc -typecheck -swift-version 5 share/mnrh/clip/main.swift
-	@swiftc -swift-version 5 share/mnrh/clip/main.swift -o /tmp/mnrh-clip-selftest && /tmp/mnrh-clip-selftest --selftest share/mnrh/clip/vectors.json >/dev/null
+	@swiftc -typecheck -swift-version 5 share/mnrh/clip/*.swift
+	@swiftc -swift-version 5 share/mnrh/clip/*.swift -o /tmp/mnrh-clip-selftest && /tmp/mnrh-clip-selftest --selftest share/mnrh/clip/vectors.json >/dev/null
 	@./bin/mnrh claude notify -h | grep -q telegram
 	@./bin/mnrh tossy -h | grep -q Tossy
 	@./bin/mnrh tossy status >/dev/null

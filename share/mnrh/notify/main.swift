@@ -6,6 +6,13 @@ func option(_ name: String, _ args: [String]) -> String? {
     return args[i + 1]
 }
 
+extension String {
+    func partitionOnce(_ separator: Character) -> (String, Character?, String) {
+        guard let i = firstIndex(of: separator) else { return (self, nil, "") }
+        return (String(self[..<i]), separator, String(self[index(after: i)...]))
+    }
+}
+
 func report(_ path: String?, _ text: String) {
     guard let path = path else { return }
     try? text.write(toFile: path, atomically: true, encoding: .utf8)
@@ -47,10 +54,28 @@ final class Delegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
             content.threadIdentifier = id
             var info: [String: String] = [:]
             if let cmd = option("--click", self.args) { info["click"] = cmd }
+            var actions = [UNNotificationAction]()
+            for (i, arg) in self.args.enumerated() where arg == "--action" && i + 1 < self.args.count {
+                let (title, _, cmd) = self.args[i + 1].partitionOnce("=")
+                guard !title.isEmpty, !cmd.isEmpty else { continue }
+                let key = "action\(actions.count)"
+                info[key] = cmd
+                actions.append(UNNotificationAction(identifier: key, title: title, options: [.foreground]))
+            }
             content.userInfo = info
-            center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { error in
-                report(result, error.map { "error \($0.localizedDescription)" } ?? "ok")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
+            let deliver = {
+                center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { error in
+                    report(result, error.map { "error \($0.localizedDescription)" } ?? "ok")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
+                }
+            }
+            guard !actions.isEmpty else { return deliver() }
+            let category = "actions-" + actions.map(\.title).joined(separator: "|")
+            content.categoryIdentifier = category
+            center.getNotificationCategories { known in
+                let fresh = UNNotificationCategory(identifier: category, actions: actions, intentIdentifiers: [])
+                center.setNotificationCategories(known.filter { $0.identifier != category }.union([fresh]))
+                deliver()
             }
         }
     }
@@ -64,8 +89,9 @@ final class Delegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler done: @escaping () -> Void) {
-        if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
-           let cmd = response.notification.request.content.userInfo["click"] as? String {
+        let info = response.notification.request.content.userInfo
+        let key = response.actionIdentifier == UNNotificationDefaultActionIdentifier ? "click" : response.actionIdentifier
+        if let cmd = info[key] as? String {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/sh")
             p.arguments = ["-c", cmd]
