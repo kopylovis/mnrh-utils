@@ -21,8 +21,9 @@ PROVIDERS = {
     "gitlab": {"title": "GitLab", "host": "gitlab.com", "greet": r"Welcome to GitLab, @([^!]+)!",
                "keys_page": "https://gitlab.com/-/user_settings/ssh_keys"},
 }
-if has_flag(args, "-h", "--help") or (args and args[0] not in PROVIDERS):
-    print("mnrh ssh                      ключи в ~/.ssh, какие загружены, кем они представляются GitHub и GitLab")
+if has_flag(args, "-h", "--help") or (args and args[0] not in (*PROVIDERS, "status")):
+    print("mnrh ssh                      меню с действиями (без терминала — то же, что status)")
+    print("mnrh ssh status               ключи в ~/.ssh, какие загружены, кем они представляются GitHub и GitLab")
     print("mnrh ssh github               пошагово: аккаунт, в который вошёл gh (или войти в другой),")
     print("                              ключ, Связка, ~/.ssh/config, GitHub, подпись, Sourcetree (если есть)")
     print("mnrh ssh github <логин>       то же для указанного аккаунта без вопроса")
@@ -610,7 +611,7 @@ def setup():
             subprocess.run(["gh", "config", "set", "git_protocol", "ssh", "-h", "github.com"], capture_output=True)
         switch_remotes(login, host)
     elif uploaded:
-        print(f"{BAD} git@{host} входит как {who or 'никто'}, а не {login}. mnrh ssh покажет подробности.")
+        print(f"{BAD} git@{host} входит как {who or 'никто'}, а не {login}. mnrh ssh status покажет подробности.")
     else:
         print(f"Пропускаю, пока ключа нет в {P['title']}.")
 
@@ -621,4 +622,4 @@ def setup():
         print(f"Клонировать этим аккаунтом: git clone git@{host}:<владелец>/<репо>.git")
 
 
-setup() if args else status()
+setup() if P else status()

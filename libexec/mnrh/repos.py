@@ -7,7 +7,8 @@ from mnrhlib import BAD, DEV, OK, WARN, has_flag, paint, projects, run, tilde
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help"):
-    print(f"mnrh repos           состояние всех git-проектов в {tilde(DEV)} (папка задаётся в mnrh init)")
+    print("mnrh repos           меню с действиями (без терминала — то же, что status)")
+    print(f"mnrh repos status    состояние всех git-проектов в {tilde(DEV)} (папка задаётся в mnrh init)")
     print("mnrh repos --fetch   сначала подтянуть свежие данные со всех remote")
     sys.exit(0)
 fetch = has_flag(args, "--fetch")

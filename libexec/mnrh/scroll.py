@@ -14,9 +14,10 @@ from mnrhlib import HOME, OK, WARN, BAD, has_flag, paint, process_commands, read
 from swiftagent import SwiftAgent
 
 args = sys.argv[1:]
-ACTIONS = ("on", "off", "test", "restart", "remove")
+ACTIONS = ("status", "on", "off", "test", "restart", "remove")
 if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
-    print("mnrh scroll                 состояние: работает ли, есть ли доступ, что переворачивается")
+    print("mnrh scroll                 меню с действиями (без терминала — то же, что status)")
+    print("mnrh scroll status          состояние: работает ли, есть ли доступ, что переворачивается")
     print("mnrh scroll on              включить: мышь переворачивается, трекпад нет (вместо Scroll Reverser)")
     print("   --mouse vh|v|h|on|off    какие оси мыши переворачивать (on = vh) (по умолчанию из Scroll Reverser, иначе v)")
     print("   --trackpad vh|v|h|on|off то же для трекпада (по умолчанию off)")
@@ -127,7 +128,7 @@ def wait_for_access():
         if i == 45 and not opened and not settings_open():
             opened = True
             run(["open", SETTINGS_URL])
-    print("\nНе дождался. Как включишь, прокрутка заработает сама: mnrh scroll покажет состояние.")
+    print("\nНе дождался. Как включишь, прокрутка заработает сама: mnrh scroll status покажет состояние.")
     return False
 
 

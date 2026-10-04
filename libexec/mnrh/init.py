@@ -14,7 +14,8 @@ CANDIDATES = ["Developer", "Projects", "AndroidStudioProjects", "StudioProjects"
 
 
 def usage():
-    print("mnrh init                 первая настройка: где лежат проекты, подключение к Claude Code")
+    print("mnrh init                 меню с действиями (без терминала нужна папка: mnrh init <папка>)")
+    print("mnrh init setup           первая настройка: где лежат проекты, подключение к Claude Code")
     print("mnrh init <папка>         сразу задать папку с проектами")
     print("mnrh init --show          показать текущую настройку")
     print()
@@ -99,6 +100,8 @@ def connect_claude():
 
 def main():
     args = sys.argv[1:]
+    if args[:1] == ["setup"]:
+        args = args[1:]
     if has_flag(args, "-h", "--help"):
         usage()
         return 0

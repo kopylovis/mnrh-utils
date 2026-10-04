@@ -16,7 +16,8 @@ MENU="$LIB/menu.py"
 
 help() {
   cat <<'EOF'
-mnrh claude                 выбрать проект в папке проектов (mnrh init) и запустить в нём Claude Code
+mnrh claude                 меню с действиями
+mnrh claude open            выбрать проект в папке проектов (mnrh init) и запустить в нём Claude Code
 mnrh claude root            запустить в домашнем каталоге
 mnrh claude <имя>           сразу в проекте (достаточно начала имени) или в папке по пути
 mnrh claude ... -n          обычная сессия без вопроса
@@ -42,6 +43,7 @@ EOF
 }
 
 case "${1:-}" in
+  open) shift ;;
   sessions) shift; exec /usr/bin/python3 "$(dirname "$MENU")/claude_sessions.py" "$@" ;;
   brief) exec /usr/bin/python3 "$(dirname "$MENU")/claude_brief.py" "$@" ;;
   parallel) exec /usr/bin/python3 "$(dirname "$MENU")/claude_parallel.py" "$@" ;;

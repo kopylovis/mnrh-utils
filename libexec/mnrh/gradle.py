@@ -13,8 +13,9 @@ from mnrhlib import (BAD, HOME, OK, confirm, du_bytes, gradle_build_dirs, gradle
                      paint, process_commands, process_memory, projects, remove_under_home, version_key)
 
 args = sys.argv[1:]
-if has_flag(args, "-h", "--help") or (args and args[0] not in ("clean", "--check", "update")):
-    print("mnrh gradle                    версии Gradle: какие проекты на чём, дистрибутивы, кеши, демоны, build/")
+if has_flag(args, "-h", "--help") or (args and args[0] not in ("status", "clean", "--check", "update")):
+    print("mnrh gradle                    меню с действиями (без терминала — то же, что status)")
+    print("mnrh gradle status             версии Gradle: какие проекты на чём, дистрибутивы, кеши, демоны, build/")
     print("mnrh gradle --check            ещё сверить с последней версией Gradle (нужна сеть)")
     print("mnrh gradle update             обновить Gradle wrapper до последней версии: выбрать проекты в списке")
     print("mnrh gradle update <проект>… -y   без вопросов; --all — все отстающие; --version 9.8.0 — своя версия")
@@ -89,7 +90,7 @@ def status():
         if not who and (dist or cache):
             hint = paint("   -> mnrh gradle clean", "2")
         if not who and v in running:
-            hint = paint("   -> mnrh killdaemons: демоны версии без проектов не нужны", "2")
+            hint = paint("   -> mnrh killdaemons stop: демоны версии без проектов не нужны", "2")
         if details:
             print(f"           {' · '.join(details)}{hint}")
 
@@ -136,7 +137,7 @@ def clean():
     running = daemons()
     stale_running = [v for v in running if v not in used]
     if stale_running:
-        print(f"Сначала стоит остановить демоны версий {', '.join(stale_running)}: mnrh killdaemons")
+        print(f"Сначала стоит остановить демоны версий {', '.join(stale_running)}: mnrh killdaemons stop")
     if not confirm("Удалить?", assume_yes):
         print("Отменено.")
         return

@@ -13,8 +13,9 @@ from mnrhlib import (BAD, CONFIG, HOME, OK, WARN, confirm, du_bytes, has_flag, h
 
 args = sys.argv[1:]
 FLAGS = ("-a", "--all", "-n", "--dry-run", "-y", "--yes")
-if has_flag(args, "-h", "--help") or [a for a in args if a not in FLAGS + ("clean",)]:
-    print("mnrh path            мусор в PATH и лишние копии git, java, python, node, ruby, go…")
+if has_flag(args, "-h", "--help") or [a for a in args if a not in FLAGS + ("status", "clean")]:
+    print("mnrh path            меню с действиями (без терминала — то же, что status)")
+    print("mnrh path status     мусор в PATH и лишние копии git, java, python, node, ruby, go…")
     print("                     ничего не меняет, только показывает, что и где убрать")
     print("mnrh path -a         весь PATH по порядку и все копии, включая системные")
     print("mnrh path clean      убрать безопасное: мёртвые строки в файлах оболочки, битые ярлыки,")
@@ -703,7 +704,7 @@ def clean(path):
             failed += 1
             print(f"{BAD} не вышло: {text.splitlines()[0]}")
     print(f"\n{OK} Готово." if not failed else f"\n{WARN} Готово, кроме {failed}.")
-    print(paint("Открой новую вкладку Терминала, чтобы PATH обновился. Проверить: mnrh path", "2"))
+    print(paint("Открой новую вкладку Терминала, чтобы PATH обновился. Проверить: mnrh path status", "2"))
 
 
 def brew_uninstall(name):

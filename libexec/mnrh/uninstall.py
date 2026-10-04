@@ -13,6 +13,7 @@ from mnrhlib import APP_DIRS, HOME, OK, BAD, WARN, bundle_info, confirm, du_byte
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or not args:
+    print("mnrh uninstall                меню с действиями (без терминала — эта справка)")
     print("mnrh uninstall <Приложение>   удалить приложение вместе с его данными в ~/Library (в Корзину)")
     print("mnrh uninstall --orphans      остатки приложений, которых уже нет: кеши, контейнеры, данные")
     print("   -y                         не спрашивать; без терминала обязателен")

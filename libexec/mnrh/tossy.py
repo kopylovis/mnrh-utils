@@ -4,7 +4,6 @@ import json
 import os
 import re
 import secrets
-import shlex
 import shutil
 import subprocess
 import sys
@@ -45,11 +44,9 @@ if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
     print("вставляешь на остальных. Всё шифруется на устройствах, пароли из менеджеров паролей не передаются.")
     print("Прежнее имя команды, mnrh clip, тоже работает.")
     sys.exit(0 if has_flag(args, "-h", "--help") else 2)
-cmd = args[0] if args else ("menu" if sys.stdin.isatty() and sys.stdout.isatty() else "status")
+cmd = args[0] if args else "status"
 
 LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
-REGISTRY = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "share", "mnrh",
-                        "commands.tsv")
 CONFIG = os.path.join(HOME, ".config", "mnrh", "clip.json")
 NOTIFY_APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "mnrh Notify.app")
 QR = os.path.join(HOME, ".cache", "mnrh", "clip-pair.png")
@@ -365,7 +362,7 @@ def refresh_helper():
     У каждой сборки свой идентификатор службы, поэтому старую службу надо снять отдельно: после
     пересборки она уже не совпадает с той, что записана в новом приложении.
     """
-    if cmd in ("off", "remove", "setup", "on", "menu") or not configured():
+    if cmd in ("off", "remove", "setup", "on") or not configured():
         return
     s = agent.state()
     if not s and not agent.installed():
@@ -599,19 +596,6 @@ def rename():
         rename_other(others[i - 1], name)
 
 
-def menu():
-    launcher = os.path.join(LIB, "launcher.py")
-    while True:
-        r = subprocess.run([sys.executable, launcher, "actions", REGISTRY, "tossy"], stdout=subprocess.PIPE, text=True)
-        if r.returncode != 0 or not r.stdout.strip():
-            return
-        picked = shlex.split(r.stdout)
-        print(paint(f"$ mnrh tossy {' '.join(picked)}", "2"))
-        rc = subprocess.run([sys.executable, os.path.abspath(__file__), *picked]).returncode
-        if subprocess.run([sys.executable, launcher, "after", str(rc)]).returncode != 0:
-            return
-
-
 refresh_helper()
-{"menu": menu, "status": status, "files": files, "rename": rename, "setup": setup, "pair": pair, "invite": invite, "join": join, "on": on, "off": off, "pause": pause, "resume": resume,
+{"status": status, "files": files, "rename": rename, "setup": setup, "pair": pair, "invite": invite, "join": join, "on": on, "off": off, "pause": pause, "resume": resume,
  "send": send, "images": images, "log": show_log, "remove": remove}[cmd]()

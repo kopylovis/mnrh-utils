@@ -11,9 +11,10 @@ from mnrhlib import HOME, OK, WARN, BAD, has_flag, paint, process_commands, run,
 from swiftagent import SwiftAgent
 
 args = sys.argv[1:]
-ACTIONS = ("on", "off", "pause", "resume", "log", "remove")
+ACTIONS = ("status", "on", "off", "pause", "resume", "log", "remove")
 if has_flag(args, "-h", "--help") or (args and args[0] not in ACTIONS):
-    print("mnrh nomusic                 состояние: работает ли, сколько раз закрыл Music")
+    print("mnrh nomusic                 меню с действиями (без терминала — то же, что status)")
+    print("mnrh nomusic status          состояние: работает ли, сколько раз закрыл Music")
     print("mnrh nomusic on              Apple Music не открывается сам (наушники, Play), вручную — можно")
     print("   --always                  закрывать и ручной запуск, как noTunes")
     print("   --auto                    снова закрывать только автозапуск (по умолчанию)")

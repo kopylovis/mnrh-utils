@@ -11,8 +11,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib
 from mnrhlib import BAD, HOME, OK, WARN, has_flag, paint, run, settings_path, tilde
 
 args = sys.argv[1:]
-if has_flag(args, "-h", "--help") or (args and args[0] != "off"):
-    print("mnrh login              что запускается при входе и работает в фоне: чьё, подписано ли, запущено ли")
+if has_flag(args, "-h", "--help") or (args and args[0] not in ("status", "off")):
+    print("mnrh login              меню с действиями (без терминала — то же, что status)")
+    print("mnrh login status       что запускается при входе и работает в фоне: чьё, подписано ли, запущено ли")
     print("mnrh login off <имя>    убрать из автозапуска (пункт входа или служба launchd; файл — в Корзину)")
     sys.exit(0 if has_flag(args, "-h", "--help") else 2)
 
@@ -163,7 +164,7 @@ def off():
             shutil.move(path, dest)
             print(f"{OK} {label} остановлен и убран из автозапуска (файл в Корзине).")
             return
-    sys.exit(f"Не нашёл «{target}» ни среди объектов входа, ни среди служб: mnrh login")
+    sys.exit(f"Не нашёл «{target}» ни среди объектов входа, ни среди служб: mnrh login status")
 
 
-off() if args else status()
+off() if args[:1] == ["off"] else status()

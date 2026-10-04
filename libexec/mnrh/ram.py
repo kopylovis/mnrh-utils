@@ -11,8 +11,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib
 from mnrhlib import adb_path, confirm, has_flag
 
 args = sys.argv[1:]
-if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] != "clean"):
-    print("mnrh ram                 кто ест оперативную память, сгруппировано по приложениям")
+if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not in ("clean", "status")):
+    print("mnrh ram                 меню с действиями (без терминала — то же, что status)")
+    print("mnrh ram status          кто ест оперативную память, сгруппировано по приложениям")
     print("mnrh ram -p              то же по отдельным процессам")
     print("mnrh ram -n 30           показать больше строк (по умолчанию 15)")
     print("mnrh ram clean           остановить демоны Gradle и Kotlin и iOS-симуляторы, показать, сколько вернулось")

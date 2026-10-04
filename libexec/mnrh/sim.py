@@ -8,8 +8,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib
 from mnrhlib import confirm, du_bytes, has_flag, human, paint, run, simulator_memory, version_key
 
 args = sys.argv[1:]
-if has_flag(args, "-h", "--help") or (args and args[0] not in ("stop", "clean")):
-    print("mnrh sim                     запущенные симуляторы, устройства, runtime")
+if has_flag(args, "-h", "--help") or (args and args[0] not in ("status", "stop", "clean")):
+    print("mnrh sim                     меню с действиями (без терминала — то же, что status)")
+    print("mnrh sim status              запущенные симуляторы, устройства, runtime")
     print("mnrh sim stop                остановить все симуляторы и показать, сколько памяти вернулось")
     print("mnrh sim clean               удалить устройства без runtime")
     print("mnrh sim clean --runtimes    ещё runtime, которые не запускались 60 дней (кроме новейшего)")
