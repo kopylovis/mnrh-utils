@@ -903,12 +903,9 @@ func sendNow() {
     }
     if types.contains(.fileURL) {
         let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        let files = urls.filter { url in
-            var isDir: ObjCBool = false
-            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && !isDir.boolValue
-        }
+        let files = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
         guard !files.isEmpty else {
-            notify("Не отправил: папки не передаю")
+            notify("Не отправил: файлов уже нет")
             return
         }
         sendQueue(files.map { url in { next in sendItem(url, extra: [:], announce: true, done: { _ in next() }) } })
@@ -922,7 +919,43 @@ func sendQueue(_ jobs: [(@escaping () -> Void) -> Void]) {
     first { sendQueue(Array(jobs.dropFirst())) }
 }
 
+func sendFolder(_ url: URL, extra: [String: Any], announce: Bool, done: @escaping (Bool) -> Void) {
+    let name = url.lastPathComponent
+    let dir = scratchFile("zip")
+    let zip = dir.appendingPathComponent(name + ".zip")
+    if announce { notify("Упаковываю папку «\(name)»…") }
+    DispatchQueue.global(qos: .userInitiated).async {
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        p.arguments = ["-c", "-k", "--sequesterRsrc", "--keepParent", url.path, zip.path]
+        let ok = (try? p.run()) != nil && { p.waitUntilExit(); return p.terminationStatus == 0 }()
+        DispatchQueue.main.async {
+            let cleanup = { try? FileManager.default.removeItem(at: dir) }
+            guard ok else {
+                cleanup()
+                log("не упаковал папку \(name)")
+                if announce { notify("Не упаковал папку «\(name)»") }
+                done(false)
+                return
+            }
+            sendItem(zip, extra: extra, announce: announce) { sent in
+                cleanup()
+                done(sent)
+            }
+        }
+    }
+}
+
+func isFolder(_ url: URL) -> Bool {
+    var isDir: ObjCBool = false
+    return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+}
+
 func sendItem(_ url: URL, extra: [String: Any], announce: Bool, done: @escaping (Bool) -> Void) {
+    if isFolder(url) {
+        return sendFolder(url, extra: extra, announce: announce, done: done)
+    }
     let name = url.lastPathComponent
     let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
     let type = UTType(filenameExtension: url.pathExtension)
@@ -1374,12 +1407,6 @@ if !sendItems.isEmpty || !sendTexts.isEmpty {
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
             jobs.append(textJob(item))
-            continue
-        }
-        guard !isDir.boolValue else {
-            print("папки не передаю: \(url.lastPathComponent)")
-            if sendNotify { notify("Папки не передаю: \(url.lastPathComponent)") }
-            failed = true
             continue
         }
         jobs.append { next in

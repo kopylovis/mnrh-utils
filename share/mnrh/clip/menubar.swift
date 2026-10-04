@@ -272,8 +272,8 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         let open = NSOpenPanel()
         open.allowsMultipleSelection = true
-        open.canChooseDirectories = false
-        open.message = "Файлы уйдут на все устройства комнаты"
+        open.canChooseDirectories = true
+        open.message = "Файлы уйдут на все устройства комнаты, папки — zip-архивом"
         open.prompt = "Отправить"
         guard open.runModal() == .OK, !open.urls.isEmpty else { return }
         sendQueue(open.urls.map { url in { next in sendItem(url, extra: [:], announce: true, done: { _ in next() }) } })
