@@ -307,7 +307,7 @@ def join():
     conf = {"server": normalize_server(invite["s"]), "token": invite["t"], "room": invite["r"], "key": invite["k"],
             "device_id": old.get("device_id") or secrets.token_hex(8), "images": old.get("images", True),
             "notify_app": ensure_notify_app()}
-    conf.update({k: old[k] for k in ("name", "aliases") if old.get(k)})
+    conf.update({k: old[k] for k in ("name", "aliases", "identity") if old.get(k)})
     save_conf(conf)
     start()
     print(f"{OK} этот Mac в одной комнате с {r.stdout.strip()}: скопированное здесь появится там и на телефоне.")

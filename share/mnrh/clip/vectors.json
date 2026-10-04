@@ -1,0 +1,14 @@
+{
+  "rekey" : [
+    {
+      "box" : "AAECAwQFBgcICQoLAhMF/kauVZN0i07f9W6wMDj3RWbWCvMm0zOeTN5nM16YsCwC9ipoqVZGZKRdN7QYEaiexdm8csvFp1FuaLj5g3Y9LZN8SJ31xH5+AObVGCF4mAfPIQtr3A8Hb34zPwQRwBFVwVFjBqnhPwU=",
+      "ephemeral" : "hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=",
+      "ephemeral_private" : "dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo=",
+      "id" : "a1b2c3d4e5f60718",
+      "key" : "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA=",
+      "nonce" : "AAECAwQFBgcICQoL",
+      "recipient_private" : "XasIfmJKikt54X+Lg4AO5m87sSkmGLb9HC+LJ/+I4Os=",
+      "room" : "tossy-0123456789abcdef01234567"
+    }
+  ]
+}

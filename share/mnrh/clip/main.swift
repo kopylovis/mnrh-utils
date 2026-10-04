@@ -66,6 +66,70 @@ if let command = CommandLine.arguments.dropFirst().first(where: serviceCommands.
     exit(0)
 }
 
+let rekeyInfo = Data("tossy-rekey-v1".utf8)
+
+func roomKeyKEK(_ shared: SharedSecret, ephemeral: Data, recipient: Data) -> SymmetricKey {
+    shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: ephemeral + recipient, sharedInfo: rekeyInfo, outputByteCount: 32)
+}
+
+func sealRoomKey(room: String, key: String, for recipients: [String: String],
+                 ephemeral: Curve25519.KeyAgreement.PrivateKey = .init(), nonce: AES.GCM.Nonce = .init()) -> (ephemeral: String, keys: [String: String]) {
+    let ephemeralData = ephemeral.publicKey.rawRepresentation
+    let plain = (try? JSONSerialization.data(withJSONObject: ["r": room, "key": key], options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()
+    var keys = [String: String]()
+    for (id, text) in recipients {
+        guard let data = Data(base64Encoded: text), let recipient = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: data),
+              let shared = try? ephemeral.sharedSecretFromKeyAgreement(with: recipient),
+              let box = try? AES.GCM.seal(plain, using: roomKeyKEK(shared, ephemeral: ephemeralData, recipient: data),
+                                          nonce: nonce, authenticating: Data(id.utf8)).combined else { continue }
+        keys[id] = box.base64EncodedString()
+    }
+    return (ephemeralData.base64EncodedString(), keys)
+}
+
+func openRoomKey(identity: Curve25519.KeyAgreement.PrivateKey, id: String, ephemeral: String, box: String) -> (room: String, key: String)? {
+    guard let ephemeralData = Data(base64Encoded: ephemeral), let sealed = Data(base64Encoded: box),
+          let ephemeralKey = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: ephemeralData),
+          let shared = try? identity.sharedSecretFromKeyAgreement(with: ephemeralKey),
+          let sealedBox = try? AES.GCM.SealedBox(combined: sealed),
+          let plain = try? AES.GCM.open(sealedBox, using: roomKeyKEK(shared, ephemeral: ephemeralData,
+                                                                     recipient: identity.publicKey.rawRepresentation),
+                                        authenticating: Data(id.utf8)),
+          let json = (try? JSONSerialization.jsonObject(with: plain)) as? [String: Any],
+          let room = json["r"] as? String, let key = json["key"] as? String else { return nil }
+    return (room, key)
+}
+
+if let at = CommandLine.arguments.firstIndex(of: "--selftest"), at + 1 < CommandLine.arguments.count {
+    guard let data = FileManager.default.contents(atPath: CommandLine.arguments[at + 1]),
+          let vectors = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+        print("нет векторов")
+        exit(1)
+    }
+    var failed = 0
+    let check: (String, Bool) -> Void = { name, ok in
+        print("\(ok ? "ok" : "FAIL") \(name)")
+        if !ok { failed += 1 }
+    }
+    for v in vectors["rekey"] as? [[String: String]] ?? [] {
+        let name = "rekey \(v["id"] ?? "")"
+        guard let ephemeral = Data(base64Encoded: v["ephemeral_private"] ?? "").flatMap({ try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: $0) }),
+              let recipient = Data(base64Encoded: v["recipient_private"] ?? "").flatMap({ try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: $0) }),
+              let nonce = Data(base64Encoded: v["nonce"] ?? "").flatMap({ try? AES.GCM.Nonce(data: $0) }),
+              let id = v["id"], let room = v["room"], let key = v["key"] else {
+            check(name, false)
+            continue
+        }
+        let sealed = sealRoomKey(room: room, key: key, for: [id: recipient.publicKey.rawRepresentation.base64EncodedString()],
+                                 ephemeral: ephemeral, nonce: nonce)
+        check(name + " seal", sealed.ephemeral == v["ephemeral"] && sealed.keys[id] == v["box"])
+        let opened = openRoomKey(identity: recipient, id: id, ephemeral: v["ephemeral"] ?? "", box: v["box"] ?? "")
+        check(name + " open", opened?.room == room && opened?.key == key)
+        check(name + " wrong id", openRoomKey(identity: recipient, id: id + "x", ephemeral: v["ephemeral"] ?? "", box: v["box"] ?? "") == nil)
+    }
+    exit(failed == 0 ? 0 : 1)
+}
+
 if CommandLine.arguments.contains("--check") {
     print("помощник собран")
     exit(0)
@@ -158,6 +222,9 @@ struct Config {
     var notifyApp = ""
     var name = ""
     var aliases = [String: String]()
+    var identity: Curve25519.KeyAgreement.PrivateKey?
+
+    var publicKey: String { identity?.publicKey.rawRepresentation.base64EncodedString() ?? "" }
 
     var deviceName: String { name.isEmpty ? computerName : name }
 }
@@ -192,6 +259,9 @@ func loadConfig() -> Config? {
     c.notifyApp = raw["notify_app"] as? String ?? ""
     c.name = (raw["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
     c.aliases = raw["aliases"] as? [String: String] ?? [:]
+    if let text = raw["identity"] as? String, let data = Data(base64Encoded: text) {
+        c.identity = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data)
+    }
     return c
 }
 
@@ -203,6 +273,12 @@ if let loaded = loadConfig() {
     print("нет настроек: mnrh tossy setup")
     exit(2)
 }
+
+if conf.identity == nil {
+    let identity = Curve25519.KeyAgreement.PrivateKey()
+    if rewriteConfig({ $0["identity"] = identity.rawRepresentation.base64EncodedString() }) { conf.identity = identity }
+}
+
 
 if !inviteCode.isEmpty {
     guard !conf.room.isEmpty else {
@@ -233,6 +309,7 @@ if !qrOut.isEmpty {
         payload["v"] = 2
         payload["r"] = conf.room
         payload["id"] = conf.deviceID
+        if !conf.publicKey.isEmpty { payload["pk"] = conf.publicKey }
     }
     let json = try! JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
     guard let filter = CIFilter(name: "CIQRCodeGenerator") else { exit(1) }
@@ -405,6 +482,7 @@ func publish(kind: String, mime: String, data: Data, text: String?, topic: Strin
              done: ((Bool) -> Void)? = nil) {
     var meta: [String: Any] = ["k": kind, "m": mime, "src": "mac", "n": conf.deviceName]
     if !conf.deviceID.isEmpty { meta["id"] = conf.deviceID }
+    if !["text", "image", "file"].contains(kind), !conf.publicKey.isEmpty { meta["pk"] = conf.publicKey }
     meta.merge(extra) { _, new in new }
     var body: Data? = nil
     if let text = text, data.count <= inlineLimit {
@@ -759,7 +837,9 @@ func remember(_ meta: [String: Any]) -> Bool {
     let source = meta["src"] as? String ?? "android"
     let id = meta["id"] as? String ?? "legacy-\(source)-\(name)"
     let isNew = members[id] == nil
-    members[id] = ["name": name, "src": source, "seen": Date().timeIntervalSince1970]
+    let known = members[id]?["pk"] as? String ?? ""
+    let offered = (meta["pk"] as? String).flatMap { Data(base64Encoded: $0)?.count == 32 ? $0 : nil } ?? ""
+    members[id] = ["name": name, "src": source, "seen": Date().timeIntervalSince1970, "pk": known.isEmpty ? offered : known]
     if source != "mac" {
         if conf.listenTopics.first == conf.room && meta["id"] != nil { moved = true }
         phone = name
@@ -870,8 +950,15 @@ func control(_ kind: String, _ meta: [String: Any]) -> Bool {
         log("вышел из комнаты: \(from)")
         writeState()
     case "rekey":
-        guard let room = meta["r"] as? String, let key = meta["key"] as? String,
-              let keyData = Data(base64Encoded: key), keyData.count == 32 else { return true }
+        var opened: (room: String, key: String)? = nil
+        if let keys = meta["keys"] as? [String: String], let box = keys[conf.deviceID], let ephemeral = meta["e"] as? String {
+            opened = conf.identity.flatMap { openRoomKey(identity: $0, id: conf.deviceID, ephemeral: ephemeral, box: box) }
+        }
+        guard let room = opened?.room ?? meta["r"] as? String, let key = opened?.key ?? meta["key"] as? String,
+              let keyData = Data(base64Encoded: key), keyData.count == 32 else {
+            log("\(from) сменил ключ комнаты, но новый ключ не для этого Mac")
+            return true
+        }
         let keep = Set((meta["to"] as? [String] ?? []) + [sender])
         members = members.filter { keep.contains($0.key) }
         let saved = rewriteConfig { raw in
