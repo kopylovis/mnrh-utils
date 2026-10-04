@@ -492,6 +492,7 @@ func writeState() {
         try? data.write(to: URL(fileURLWithPath: stateFile), options: .atomic)
     }
     StatusMenu.shared.refresh()
+    shareDevicesWithFinder()
 }
 
 func request(_ path: String, method: String = "GET") -> URLRequest {

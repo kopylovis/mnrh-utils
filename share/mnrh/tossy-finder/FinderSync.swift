@@ -12,12 +12,22 @@ final class FinderSync: FIFinderSync {
         let menu = NSMenu(title: "")
         guard menuKind == .contextualMenuForItems || menuKind == .contextualMenuForContainer else { return menu }
         let russian = Locale.preferredLanguages.first?.hasPrefix("ru") == true
-        let all = NSMenuItem(title: russian ? "Отправить в Tossy" : "Send via Tossy", action: #selector(sendAll(_:)), keyEquivalent: "")
-        all.image = icon()
-        menu.addItem(all)
-        let pick = NSMenuItem(title: russian ? "Отправить в Tossy…" : "Send via Tossy…", action: #selector(sendPick(_:)), keyEquivalent: "")
-        pick.image = icon()
-        menu.addItem(pick)
+        let devices = roomDevices()
+        let send = NSMenuItem(title: russian ? "Отправить в Tossy" : "Send via Tossy", action: devices.isEmpty ? #selector(sendAll(_:)) : nil, keyEquivalent: "")
+        send.image = icon()
+        if !devices.isEmpty {
+            let targets = NSMenu(title: "")
+            targets.addItem(NSMenuItem(title: russian ? "Всем устройствам" : "All devices", action: #selector(sendAll(_:)), keyEquivalent: ""))
+            targets.addItem(.separator())
+            for (index, device) in devices.enumerated() {
+                let item = NSMenuItem(title: device.name, action: #selector(sendOne(_:)), keyEquivalent: "")
+                item.tag = index
+                item.image = NSImage(systemSymbolName: device.isMac ? "laptopcomputer" : "iphone", accessibilityDescription: nil)
+                targets.addItem(item)
+            }
+            send.submenu = targets
+        }
+        menu.addItem(send)
         return menu
     }
 
@@ -42,11 +52,25 @@ final class FinderSync: FIFinderSync {
         send(pick: false)
     }
 
-    @objc func sendPick(_ sender: AnyObject?) {
-        send(pick: true)
+    @objc func sendOne(_ sender: AnyObject?) {
+        guard let item = sender as? NSMenuItem else { return }
+        let devices = roomDevices()
+        guard devices.indices.contains(item.tag) else { return }
+        send(pick: false, to: devices[item.tag].id)
     }
 
-    private func send(pick: Bool) {
+    private func roomDevices() -> [(id: String, name: String, isMac: Bool)] {
+        guard let home = getpwuid(getuid())?.pointee.pw_dir else { return [] }
+        let file = URL(fileURLWithPath: String(cString: home)).appendingPathComponent(".cache/mnrh/tossy-devices.json")
+        guard let data = try? Data(contentsOf: file),
+              let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
+        return list.compactMap { entry in
+            guard let id = entry["id"] as? String, let name = entry["name"] as? String else { return nil }
+            return (id, name, entry["mac"] as? Bool ?? false)
+        }
+    }
+
+    private func send(pick: Bool, to target: String? = nil) {
         let controller = FIFinderSyncController.default()
         let urls = controller.selectedItemURLs() ?? controller.targetedURL().map { [$0] } ?? []
         guard !urls.isEmpty else { return }
@@ -54,6 +78,7 @@ final class FinderSync: FIFinderSync {
         parts.scheme = "mnrh-tossy"
         parts.host = "send"
         parts.queryItems = urls.map { URLQueryItem(name: "f", value: $0.path) } + (pick ? [URLQueryItem(name: "pick", value: "1")] : [])
+            + (target.map { [URLQueryItem(name: "to", value: $0)] } ?? [])
         if let url = parts.url { NSWorkspace.shared.open(url) }
     }
 }

@@ -80,7 +80,9 @@ def build(icon=None):
             f.write(want + "\n")
         entitlements = os.path.join(tmp, "sandbox.plist")
         with open(entitlements, "wb") as f:
-            f.write(plistlib.dumps({"com.apple.security.app-sandbox": True}))
+            f.write(plistlib.dumps({"com.apple.security.app-sandbox": True,
+                                    "com.apple.security.temporary-exception.files.home-relative-path.read-only":
+                                        ["/.cache/mnrh/tossy-devices.json"]}))
         for target, ent in ((appex, entitlements), (app, None)):
             cmd = ["codesign", "--force", "--sign", sign] + (["--entitlements", ent] if ent else []) + [target]
             r = subprocess.run(cmd, capture_output=True, text=True)

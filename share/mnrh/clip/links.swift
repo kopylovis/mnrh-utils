@@ -19,12 +19,26 @@ final class LinkHandler: NSObject {
             return
         }
         log("Finder: отправить \(files.count == 1 ? files[0].lastPathComponent : "\(files.count) объекта")")
-        if items.contains(where: { $0.name == "pick" }) {
+        let targets = items.filter { $0.name == "to" }.compactMap(\.value)
+        if !targets.isEmpty {
+            sendFiles(files, to: targets)
+        } else if items.contains(where: { $0.name == "pick" }) {
             StatusMenu.shared.pickTargets { ids in sendFiles(files, to: ids) }
         } else {
             sendFiles(files, to: nil)
         }
     }
+}
+
+var finderDevicesJSON = Data()
+
+func shareDevicesWithFinder() {
+    let list: [[String: Any]] = members.filter { $0.key != conf.deviceID }
+        .sorted { ($0.value["seen"] as? Double ?? 0) > ($1.value["seen"] as? Double ?? 0) }
+        .map { id, value in ["id": id, "name": conf.aliases[id] ?? value["name"] as? String ?? id, "mac": value["src"] as? String == "mac"] }
+    guard let data = try? JSONSerialization.data(withJSONObject: list), data != finderDevicesJSON else { return }
+    finderDevicesJSON = data
+    try? data.write(to: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/mnrh/tossy-devices.json"), options: .atomic)
 }
 
 func sendFiles(_ files: [URL], to ids: [String]?) {
