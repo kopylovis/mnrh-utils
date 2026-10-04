@@ -8,9 +8,14 @@
 `mnrh help` — список по группам, `mnrh help -a` — с описаниями. Группы, описания и действия
 меню — в `share/mnrh/commands.tsv`.
 
+Команда без аргументов в терминале (`mnrh disk`, `mnrh ram`…) тоже открывает меню — её действий;
+после действия можно вернуться в него же. Без терминала (скрипты, хуки, MCP) или с `MNRH_NO_MENU=1`
+она делает то же, что раньше: показывает состояние (`status`). У каждого действия есть своё имя:
+`mnrh disk status`, `mnrh killdaemons stop`, `mnrh claude open`, `mnrh init setup`.
+
 ```
-mnrh init             первая настройка: папка с проектами, подключение к Claude Code
-mnrh claude           выбрать проект и запустить в нём Claude Code
+mnrh init setup       первая настройка: папка с проектами, подключение к Claude Code
+mnrh claude open      выбрать проект и запустить в нём Claude Code
 mnrh claude root      запустить в домашнем каталоге
 mnrh claude kcalm     сразу в проекте (достаточно начала имени)
 mnrh claude sessions  сохранённые сессии с размером: продолжить, перенести в другую папку, удалить
@@ -23,52 +28,52 @@ mnrh claude forget    изнутри Claude: удалить эту сессию 
 mnrh claude slim      изнутри Claude: сжать эту сессию и открыть её снова (/slim)
 mnrh claude notify    уведомления, когда Claude ждёт тебя: on, off, after <сек>, sound, test, telegram
 mnrh claude guard     защита секретов: вопрос перед чтением и удалением ключей; on, off, test, log
-mnrh deps             устаревшие зависимости Gradle в libs.versions.toml (этот проект или все)
+mnrh deps status      устаревшие зависимости Gradle в libs.versions.toml (этот проект или все)
 mnrh todo             бэклог задач проекта между сессиями Claude (add, done, rm, all)
 mnrh shot [прил.]     снимок окна приложения; без аргументов — список окон
 mnrh claude brief     где мы остановились: git, прошлая сессия, бэклог
 mnrh claude parallel  задача в отдельной ветке и worktree, во втором окне — Claude
 mnrh claude ask       спросить отдельный Claude про другой проект (только чтение)
 mnrh claude release-notes   материал для «Что нового» к релизу
-mnrh doctor           проверка системы, коротким списком с подсказками
+mnrh doctor status    проверка системы, коротким списком с подсказками
 mnrh doctor --full    ещё обновления macOS и целостность Homebrew
-mnrh disk             что можно почистить на диске
+mnrh disk status      что можно почистить на диске
 mnrh disk clean       отметить, что удалить, и удалить (-y — только безопасное, без вопросов)
-mnrh repos            состояние всех git-проектов в папке проектов
+mnrh repos status     состояние всех git-проектов в папке проектов
 mnrh repos --fetch    то же со свежими данными со всех remote
-mnrh sim              запущенные симуляторы, устройства и runtime с размерами
+mnrh sim status       запущенные симуляторы, устройства и runtime с размерами
 mnrh sim stop         остановить все симуляторы
 mnrh sim clean        удалить устройства без runtime (--runtimes: ещё старые runtime)
-mnrh ram              кто ест оперативную память, сгруппировано по приложениям
+mnrh ram status       кто ест оперативную память, сгруппировано по приложениям
 mnrh ram -p           то же по отдельным процессам
 mnrh ram -n 30        больше строк
 mnrh ram clean        остановить демоны сборки и iOS-симуляторы (--emulator: и эмулятор Android)
-mnrh gradle           версии Gradle по проектам, дистрибутивы, кеши, демоны, build/
+mnrh gradle status    версии Gradle по проектам, дистрибутивы, кеши, демоны, build/
 mnrh gradle --check   ещё сверить с последней версией Gradle
 mnrh gradle clean     удалить версии, которые не использует ни один проект (--builds: и build/)
 mnrh scroll on        переворачивать прокрутку мыши, не трогая трекпад (вместо Scroll Reverser)
-mnrh scroll           состояние; off выключить, test проверить, что мышь и трекпад различаются
+mnrh scroll status    состояние; off выключить, test проверить, что мышь и трекпад различаются
 mnrh nomusic on       Apple Music не открывается сам (наушники, Play), вручную — можно (вместо noTunes)
-mnrh nomusic          состояние; pause [мин] не трогать Music, resume, log, off; --always, --open Spotify
+mnrh nomusic status   состояние; pause [мин] не трогать Music, resume, log, off; --always, --open Spotify
 mnrh tossy setup      общий буфер обмена своих Mac и Android (приложение Tossy) через свой ntfy-сервер
-mnrh tossy            меню; status — состояние, rename — имена устройств, pair — QR для телефона, invite/join — второй Mac
-mnrh sleep            что не даёт Mac уснуть, последние засыпания и пробуждения
+mnrh tossy status     состояние; rename — имена устройств, pair — QR для телефона, invite/join — второй Mac
+mnrh sleep status     что не даёт Mac уснуть, последние засыпания и пробуждения
 mnrh sleep fix        снять зависшие caffeinate, чья программа уже закрыта
-mnrh ssh              SSH-ключи: какие есть, загружены ли, кем представляются GitHub
+mnrh ssh status       SSH-ключи: какие есть, загружены ли, кем представляются GitHub
 mnrh ssh github       ключ для аккаунта GitHub: выпустить, в Связку, в GitHub, подпись коммитов, SSH-remote
-mnrh path             мусор в PATH: несуществующие папки, мёртвые строки в .zshrc/.profile,
+mnrh path status      мусор в PATH: несуществующие папки, мёртвые строки в .zshrc/.profile,
                       битые ярлыки, лишние копии git/java/python/node/go, сломанный MacPorts
 mnrh path clean       убрать безопасное (-n план): файлы оболочки с бэкапом, остальное в Корзину
 mnrh ports            кто слушает TCP-порты: процесс, проект, сколько идёт
 mnrh ports kill 8080  освободить порт
 mnrh uninstall Mos    удалить приложение вместе с его данными в ~/Library, в Корзину
 mnrh uninstall --orphans   остатки приложений, которых уже нет
-mnrh login            что запускается при входе и в фоне: чьё, подписано ли, работает ли
+mnrh login status     что запускается при входе и в фоне: чьё, подписано ли, работает ли
 mnrh login off <имя>  убрать из автозапуска
 mnrh outdated         что пора обновить: macOS, Homebrew, Android Studio и SDK, Gradle в проектах
-mnrh fix              быстрые починки без перезагрузки, список с описаниями:
+mnrh fix              быстрые починки без перезагрузки: меню, а без терминала — список с описаниями:
                       scroll, dock, finder, menubar, wifi, sim, adb, dns, bt, audio
-mnrh killdaemons      остановить демоны Gradle и Kotlin любых версий
+mnrh killdaemons stop остановить демоны Gradle и Kotlin любых версий
 mnrh killdaemons -l   только показать
 mnrh killdaemons -f   снять и тех, кто занят сборкой
 ```
@@ -92,10 +97,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kopylovis/homebrew-tap/main/
 
 ```bash
 brew install kopylovis/tap/mnrh
-mnrh init
+mnrh init setup
 ```
 
-`mnrh init` спрашивает, где лежат проекты (по умолчанию `~/Developer`; предлагает найденные
+`mnrh init setup` спрашивает, где лежат проекты (по умолчанию `~/Developer`; предлагает найденные
 `~/Projects`, `~/AndroidStudioProjects` и т. п. с числом git-репозиториев), сохраняет это в
 `~/.config/mnrh/config` и предлагает `mnrh claude setup`. Без настройки и без `~/Developer`
 `mnrh claude` сам спросит папку при первом запуске. `mnrh init ~/Projects` задаёт папку сразу,
@@ -133,7 +138,8 @@ macOS, bash и `/usr/bin/python3` из Xcode Command Line Tools
 
 ## Как работает `mnrh claude`
 
-Показывает каталоги папки проектов (`mnrh init`, по умолчанию `~/Developer`) с текущей веткой и датой последнего коммита.
+`mnrh claude` в терминале открывает меню: проект, домашний каталог или сохранённые сессии.
+`mnrh claude open` показывает каталоги папки проектов (`mnrh init`, по умолчанию `~/Developer`) с текущей веткой и датой последнего коммита.
 Выбор стрелками ↑↓ и Enter. Цифра сразу ставит курсор на пункт (`0` — домашний
 каталог, `1` и `0` подряд — десятый), буквы фильтруют список по имени, Esc
 сбрасывает фильтр или выходит.
@@ -239,7 +245,7 @@ Maven Central и Gradle Plugin Portal и показывает, что обнов
 минорная, патч) и какие библиотеки на этой версии. Ещё — версию Gradle wrapper и что
 обновлять вместе: Kotlin и KSP, AGP и Gradle, Compose Multiplatform и Kotlin. Варианты
 вроде `-jre`/`-android` сравниваются только между собой, alpha/beta/rc — с `--pre`.
-Без аргументов — текущий проект, а если в нём нет каталога, все проекты. Ответы
+`mnrh deps status` (и `mnrh deps` без терминала) — текущий проект, а если в нём нет каталога, все проекты. Ответы
 репозиториев кешируются на 6 часов. Для Claude то же самое — инструмент `deps_outdated`.
 
 ## Команды в Claude Code
@@ -327,8 +333,8 @@ Simulator, Android Studio, Figma, VS Code…), Claude смотрит на нег
 
 ## Состояние Mac для Claude
 
-MCP-инструмент `mac_status` показывает Claude то же, что `mnrh ram`, `gradle`, `sim` и
-`ports` (по запросу ещё `disk`): кто занял память, демоны Gradle и Kotlin, размеры кешей и
+MCP-инструмент `mac_status` показывает Claude то же, что `mnrh ram status`, `gradle status`, `sim status` и
+`ports` (по запросу ещё `disk status`): кто занял память, демоны Gradle и Kotlin, размеры кешей и
 `build/`, запущенные симуляторы, занятые порты. Когда сборка падает по памяти или порт
 занят, Claude может посмотреть сам. `free_memory` — это `mnrh ram clean`: останавливает
 простаивающие демоны сборки и симуляторы (по желанию эмулятор Android). Claude Code
@@ -687,7 +693,7 @@ caffeinate, живые блокировки не трогает.
    аккаунтом и отказывается сохранять). Мастер открывает Sourcetree, ждёт Enter и проверяет это, читая его файл
    аккаунтов (`hostingservices_new.plist`). Сам файл не меняет — это внутренняя база Sourcetree.
    Заодно называет остальные аккаунты GitHub в Sourcetree, если они не нужны.
-`mnrh ssh` без аргументов показывает ключи, загружены ли они и кем представляются GitHub.
+`mnrh ssh status` показывает ключи, загружены ли они и кем представляются GitHub.
 
 ## Как `mnrh uninstall` находит данные приложения
 
@@ -721,7 +727,9 @@ Apple, консольные инструменты без `.app` (SwiftPM, Fireb
 
 Положить файл в `libexec/mnrh/`: `имя.sh` запускается через bash, `имя.py` через
 `/usr/bin/python3`, остальное — как исполняемый файл. Команда сразу доступна как
-`mnrh имя`. Описание для `mnrh help` добавляется в функцию `describe` в `bin/mnrh`.
+`mnrh имя`. Группа, описание и действия для меню и `mnrh help` — строка в `share/mnrh/commands.tsv`.
+Если действий два и больше, у каждого должно быть имя (`status`, `clean`…): `mnrh имя` без аргументов
+в терминале открывает меню этих действий, и пустое действие в главном меню открыло бы его ещё раз.
 
 ## Как работает `mnrh tossy`
 
@@ -769,12 +777,12 @@ Apple, консольные инструменты без `.app` (SwiftPM, Fireb
 - После обновления mnrh любая команда `mnrh tossy` сама перезапускает помощника, если он ещё работает
   на прежней версии.
 - `pause [мин]` — не отправлять буфер этого Mac, `images off` — только текст, `pair --new` — новая комната (все устройства подключать заново), `log` — что
-  передано, `mnrh tossy` — состояние и устройства в комнате.
+  передано, `mnrh tossy status` — состояние и устройства в комнате.
 - Имена, как в Tossy: `mnrh tossy rename <имя>` переименовывает этот Mac, и новое имя видят все в комнате.
   `mnrh tossy rename <кто> <имя>` задаёт, как другое устройство называется на этом Mac: в уведомлениях,
   логе и `status`. На других устройствах его имя не меняется. Без аргументов `rename` предлагает выбрать
   устройство из списка.
-- `mnrh tossy` в терминале открывает меню действий; `mnrh tossy status` — состояние. Прежнее имя
+- `mnrh tossy` в терминале открывает меню действий, как и другие команды; `mnrh tossy status` — состояние. Прежнее имя
   команды, `mnrh clip`, работает как раньше.
 - Настройки и токен: `~/.config/mnrh/clip.json` (права 600). Лог: `~/Library/Logs/mnrh-clip.log`. Помощник
   и файлы называются по-старому (clip): при переименовании macOS заново спросила бы разрешение на запуск

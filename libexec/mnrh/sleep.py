@@ -7,8 +7,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib
 from mnrhlib import OK, WARN, has_flag, paint, run
 
 args = sys.argv[1:]
-if has_flag(args, "-h", "--help") or (args and args[0] not in ("fix", "-a", "--all")):
-    print("mnrh sleep        что сейчас не даёт Mac уснуть и когда он засыпал и просыпался")
+if has_flag(args, "-h", "--help") or (args and args[0] not in ("status", "fix", "-a", "--all")):
+    print("mnrh sleep        меню с действиями (без терминала — то же, что status)")
+    print("mnrh sleep status что сейчас не даёт Mac уснуть и когда он засыпал и просыпался")
     print("mnrh sleep -a     показать и служебные блокировки macOS (дисплей включён, активность ввода)")
     print("mnrh sleep fix    снять зависшие caffeinate: те, чья программа уже закрыта")
     sys.exit(0 if has_flag(args, "-h", "--help") else 2)
@@ -159,7 +160,7 @@ def fix():
     stale = [a["pid"] for a in assertions() if a["proc"] == "caffeinate" and explain(a)[2]]
     stale = sorted(set(stale))
     if not stale:
-        print("Зависших caffeinate нет. Остальные блокировки — у живых программ: mnrh sleep")
+        print("Зависших caffeinate нет. Остальные блокировки — у живых программ: mnrh sleep status")
         return
     for pid in stale:
         try:

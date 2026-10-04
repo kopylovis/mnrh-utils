@@ -3,7 +3,8 @@ set -uo pipefail
 
 help() {
   cat <<'EOF'
-mnrh killdaemons      остановить демоны сборки Gradle и Kotlin любых версий
+mnrh killdaemons      меню с действиями (без терминала — то же, что stop)
+mnrh killdaemons stop остановить демоны сборки Gradle и Kotlin любых версий
 mnrh killdaemons -l   только показать, ничего не трогать
 mnrh killdaemons -f   снять и тех, кто прямо сейчас занят сборкой
 EOF
@@ -23,6 +24,7 @@ main() {
   local pattern='GradleDaemon|KotlinCompileDaemon|kotlin-daemon|GradleWrapperMain|GradleWorkerMain'
   while [ $# -gt 0 ]; do
     case "$1" in
+      stop)       ;;
       -l|--list)  list_only=1 ;;
       -f|--force) force=1 ;;
       -h|--help)  help; return 0 ;;

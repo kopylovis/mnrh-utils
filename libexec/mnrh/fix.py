@@ -61,7 +61,7 @@ def scroll():
     agent = helper.loaded()
     if agent:
         helper.restart()
-        print("mnrh scroll перезапущен. Состояние: mnrh scroll")
+        print("mnrh scroll перезапущен. Состояние: mnrh scroll status")
     running = [(name, found) for name in SCROLL_APPS if (found := app_pids(name))]
     if agent and not running:
         return 0
@@ -190,6 +190,7 @@ FIXES = {
 }
 
 if not args or has_flag(args, "-h", "--help") or args[0] not in FIXES:
+    print("mnrh fix          меню с починками (без терминала — этот список)")
     for name, (desc, _) in FIXES.items():
         print(f"mnrh fix {name:<8} {desc}")
     sys.exit(0 if not args or has_flag(args, "-h", "--help") else 2)

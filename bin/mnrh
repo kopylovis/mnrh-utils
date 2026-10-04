@@ -31,7 +31,7 @@ usage() {
     "$(cat "$ROOT/VERSION" 2>/dev/null)" "${1:-}"
 }
 
-run() {
+launch() {
   local name="$1"; shift
   local f
   for f in "$COMMANDS/$name".*; do
@@ -46,6 +46,29 @@ run() {
   echo >&2
   usage >&2
   exit 2
+}
+
+submenu() {
+  local name="$1" at=0 picked rc choice
+  while true; do
+    picked=$(/usr/bin/python3 "$ROOT/libexec/mnrh/lib/launcher.py" actions "$REGISTRY" "$name" "$at")
+    rc=$?
+    [ "$rc" -eq 3 ] && return
+    [ "$rc" -eq 0 ] && [ -n "$picked" ] || exit 0
+    trap 'true' INT
+    at=${picked%%$'\t'*}
+    choice=${picked#*$'\t'}
+    printf '\033[2m$ mnrh %s %s\033[0m\n' "$name" "$choice"
+    ( eval "set -- $choice"; launch "$name" "$@" )
+    /usr/bin/python3 "$ROOT/libexec/mnrh/lib/launcher.py" after "$?" || exit 0
+  done
+}
+
+run() {
+  if [ $# -eq 1 ] && [ -t 0 ] && [ -t 1 ] && [ -z "${MNRH_NO_MENU:-}" ]; then
+    submenu "$1"
+  fi
+  launch "$@"
 }
 
 if [ $# -eq 0 ] && [ -t 0 ] && [ -t 1 ] && [ -z "${MNRH_NO_MENU:-}" ]; then

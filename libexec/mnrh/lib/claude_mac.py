@@ -2,11 +2,11 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 PARTS = {
-    "ram": ("Память", ["ram", "-n", "12"], 60),
-    "gradle": ("Gradle: версии, кеши, build/ в проектах", ["gradle"], 120),
-    "sim": ("iOS-симуляторы", ["sim"], 60),
+    "ram": ("Память", ["ram", "status", "-n", "12"], 60),
+    "gradle": ("Gradle: версии, кеши, build/ в проектах", ["gradle", "status"], 120),
+    "sim": ("iOS-симуляторы", ["sim", "status"], 60),
     "ports": ("Занятые порты", ["ports"], 60),
-    "disk": ("Что можно почистить на диске", ["disk"], 300),
+    "disk": ("Что можно почистить на диске", ["disk", "status"], 300),
 }
 DEFAULT_PARTS = ["ram", "gradle", "sim", "ports"]
 FREE = {"daemons": "--daemons", "simulators": "--sim", "emulator": "--emulator"}

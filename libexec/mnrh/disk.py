@@ -16,7 +16,8 @@ from mnrhlib import (DEV, HOME, du_bytes, gradle_build_dirs, gradle_versions_in_
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help"):
-    print("mnrh disk              что можно почистить: безопасное и то, что удалять осознанно")
+    print("mnrh disk              меню с действиями (без терминала — то же, что status)")
+    print("mnrh disk status       что можно почистить: безопасное и то, что удалять осознанно")
     print("mnrh disk clean        отметить в списке, что удалить (безопасное уже отмечено), и удалить")
     print("mnrh disk clean -y     удалить только безопасное без вопросов — для скриптов")
     print()
@@ -329,7 +330,7 @@ busy = {id(it): app_running(it.app) for it in items if it.app}
 
 def app_name(it):
     if it.app == "gradle":
-        return "демоны Gradle (mnrh killdaemons)"
+        return "демоны Gradle (mnrh killdaemons stop)"
     if it.app.startswith("avd:"):
         return f"эмулятор {it.app[4:]}"
     return it.app

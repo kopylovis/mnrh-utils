@@ -13,7 +13,8 @@ from mnrhlib import BAD, HOME, OK, WARN, git_versions, human, has_flag, paint, r
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help"):
-    print("mnrh doctor          проверка системы: диск, память, оболочка, ссылки, автозапуск, безопасность")
+    print("mnrh doctor          меню с действиями (без терминала — то же, что status)")
+    print("mnrh doctor status   проверка системы: диск, память, оболочка, ссылки, автозапуск, безопасность")
     print("mnrh doctor --full   ещё обновления macOS и целостность Homebrew (дольше, нужна сеть)")
     sys.exit(0)
 full = has_flag(args, "--full")
@@ -81,7 +82,7 @@ def check_memory():
         mem = top_mem()
         total = sum(mem.get(p, 0) for p in daemons)
         level = "warn" if total > 1073741824 else "ok"
-        item(level, f"демоны сборки: {len(daemons)}, держат {human(total)}", "mnrh killdaemons" if level == "warn" else None)
+        item(level, f"демоны сборки: {len(daemons)}, держат {human(total)}", "mnrh killdaemons stop" if level == "warn" else None)
     else:
         item("ok", "демонов сборки нет")
 
