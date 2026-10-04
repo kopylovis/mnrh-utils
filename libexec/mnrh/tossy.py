@@ -2,6 +2,7 @@ import base64
 import getpass
 import json
 import os
+import plistlib
 import re
 import secrets
 import shutil
@@ -410,7 +411,6 @@ QUICK_ACTIONS = (("Отправить в Tossy", "--notify"), ("Отправит
 
 
 def quick_action_files(title, command):
-    import plistlib
     info = {"NSServices": [{
         "NSBackgroundColorName": "background", "NSIconName": "NSActionTemplate",
         "NSMenuItem": {"default": title}, "NSMessage": "runWorkflowAsService",
@@ -469,8 +469,28 @@ def install_quick_actions():
             with open(path, "wb") as f:
                 f.write(data)
             changed = True
-    if changed:
+    if enable_quick_actions() or changed:
         subprocess.run(["/System/Library/CoreServices/pbs", "-update"], capture_output=True)
+
+
+def enable_quick_actions():
+    r = subprocess.run(["defaults", "export", "pbs", "-"], capture_output=True)
+    try:
+        prefs = plistlib.loads(r.stdout) if r.returncode == 0 and r.stdout else {}
+    except Exception:
+        prefs = {}
+    status = prefs.setdefault("NSServicesStatus", {})
+    want = {"enabled_context_menu": True, "enabled_services_menu": True,
+            "presentation_modes": {"ContextMenu": True, "ServicesMenu": True}}
+    changed = False
+    for title, _ in QUICK_ACTIONS:
+        key = f"(null) - {title} - runWorkflowAsService"
+        if status.get(key) != want:
+            status[key] = want
+            changed = True
+    if changed:
+        subprocess.run(["defaults", "import", "pbs", "-"], input=plistlib.dumps(prefs), capture_output=True)
+    return changed
 
 
 def remove_quick_actions():
