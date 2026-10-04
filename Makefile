@@ -69,7 +69,7 @@ test:
 	@./bin/mnrh tossy status >/dev/null
 	@MNRH_NO_MENU=1 ./bin/mnrh tossy </dev/null >/dev/null
 	@./bin/mnrh clip -h | grep -q "mnrh clip"
-	@./bin/mnrh tossy rename a b c </dev/null 2>&1 | grep -q "Нет устройства\|Сначала"
+	@./bin/mnrh tossy rename a b c </dev/null 2>&1 | grep -q "Нет устройства\|Сначала\|не в комнате"
 	@./bin/mnrh deps -h >/dev/null
 	@./bin/mnrh alert -h | grep -q "alert run"
 	@./bin/mnrh alert status </dev/null >/dev/null || true

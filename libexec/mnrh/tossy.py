@@ -86,6 +86,15 @@ def drop_conf(key):
     save_conf(conf)
 
 
+def not_configured():
+    c = read_conf()
+    if c.get("server") and c.get("token"):
+        return ("Этот Mac не в комнате: его отключили с другого устройства или настройки сброшены.\n"
+                "Вернуться: mnrh tossy setup --new — новая комната и QR для телефона,\n"
+                "или mnrh tossy join <код> — в комнату другого Mac (код даёт mnrh tossy invite на нём).")
+    return "Сначала mnrh tossy setup <сервер>"
+
+
 def configured():
     c = read_conf()
     return all(c.get(k) for k in ("server", "token", "key")) and bool(c.get("room") or c.get("to_mac"))
@@ -167,14 +176,19 @@ def ensure_notify_app():
 
 def setup():
     conf = read_conf()
-    server = normalize_server(args[1] if len(args) > 1 else "")
+    positional = [a for a in args[1:] if not a.startswith("--")]
+    server = normalize_server(positional[0] if positional else "")
     if not server:
         hint = f" [{conf['server']}]" if conf.get("server") else ""
         server = normalize_server(input(f"Адрес ntfy-сервера, например https://ntfy.example.com{hint}: ") or conf.get("server", ""))
     if not server:
         sys.exit("Нужен адрес сервера.")
-    print("Токен: на сервере `ntfy token add <пользователь>`. В файлы mnrh он попадёт только в ~/.config/mnrh/clip.json (права 600).")
-    token = read_token() or (conf.get("token", "") if conf.get("server") == server else "")
+    token = conf.get("token", "") if conf.get("server") == server and "--token" not in args else ""
+    if token:
+        print("Токен: прежний из ~/.config/mnrh/clip.json (новый — mnrh tossy setup --token).")
+    else:
+        print("Токен: на сервере `ntfy token add <пользователь>`. В файлы mnrh он попадёт только в ~/.config/mnrh/clip.json (права 600).")
+        token = read_token()
     if not token:
         sys.exit("Нет токена. Скопируй его (tk_…) и запусти команду ещё раз.")
     code, raw = http("GET", f"{server}/v1/account", token)
@@ -228,7 +242,7 @@ def paired_at():
 
 def pair(fresh=None):
     if not configured():
-        sys.exit("Сначала mnrh tossy setup <сервер>")
+        sys.exit(not_configured())
     if fresh is None and "--new" in args:
         write_conf(**new_channel())
         start()
@@ -263,7 +277,7 @@ def pair(fresh=None):
 
 def invite():
     if not configured():
-        sys.exit("Сначала mnrh tossy setup <сервер>")
+        sys.exit(not_configured())
     migrate()
     agent.build()
     code = new_code()
@@ -330,7 +344,7 @@ def join():
 
 def on():
     if not configured():
-        sys.exit("Сначала mnrh tossy setup <сервер>")
+        sys.exit(not_configured())
     start()
     print(f"{OK} mnrh tossy включён: буфер обмена общий с телефоном.")
 
@@ -502,7 +516,7 @@ def refresh_helper():
 
 def send():
     if not configured():
-        sys.exit("Сначала mnrh tossy setup <сервер>")
+        sys.exit(not_configured())
     rest, targets, flags = [], [], []
     pick = False
     items = iter(args[1:])
@@ -698,7 +712,7 @@ def rename_other(device, name):
 
 def rename():
     if not configured():
-        sys.exit("Сначала mnrh tossy setup <сервер>")
+        sys.exit(not_configured())
     conf = read_conf()
     others = room_devices(conf, agent.state() or {})
     if len(args) == 2:
