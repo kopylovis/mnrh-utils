@@ -56,8 +56,9 @@ NOTIFY_APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "mnrh 
 QR = os.path.join(HOME, ".cache", "mnrh", "clip-pair.png")
 TOKEN_RE = re.compile(r"^tk_[A-Za-z0-9]{20,}$")
 LEGACY_LABELS = ("com.mnrh.clip.",)
-agent = SwiftAgent("clip", "mnrh Clip", "com.kopylovis.tossy.desktop", service_args=["--config", CONFIG], url_schemes=["mnrh-tossy"],
-                   title="Tossy", stable_id=True)
+agent = SwiftAgent("clip", "Tossy", "com.kopylovis.tossy.desktop", service_args=["--config", CONFIG], url_schemes=["mnrh-tossy"],
+                   stable_id=True)
+LEGACY_APPS = (os.path.join(os.path.dirname(agent.app), "mnrh Clip.app"),)
 
 
 def read_conf():
@@ -546,6 +547,8 @@ def refresh_helper():
             pass
     agent.stop()
     agent.build()
+    for old in LEGACY_APPS:
+        shutil.rmtree(old, ignore_errors=True)
     if agent.start() is not True:
         print(f"{WARN} новый помощник не запустился" + paint("   -> mnrh tossy on", "2"))
     install_quick_actions()

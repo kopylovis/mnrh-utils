@@ -11,7 +11,8 @@ from mnrhlib import HOME
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 SRC = os.path.join(ROOT, "share", "mnrh", "tossy-finder")
-APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "mnrh Tossy Finder.app")
+APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "Tossy Finder.app")
+LEGACY_APP = os.path.join(HOME, "Library", "Application Support", "mnrh", "mnrh Tossy Finder.app")
 APPEX = os.path.join(APP, "Contents", "PlugIns", "TossyFinder.appex")
 STAMP = os.path.join(APP, "Contents", "Resources", "source.sha256")
 HOST_ID = "com.kopylovis.tossy.desktop.finder"
@@ -27,7 +28,7 @@ def identity():
 
 
 def source_hash(sign):
-    h = hashlib.sha256((sign + HOST_ID).encode())
+    h = hashlib.sha256((sign + HOST_ID + APP).encode())
     for name in sorted(os.listdir(SRC)):
         with open(os.path.join(SRC, name), "rb") as f:
             h.update(name.encode() + f.read())
@@ -92,6 +93,8 @@ def build(icon=None):
             if r.returncode != 0:
                 raise RuntimeError(r.stderr.strip())
         subprocess.run(["pluginkit", "-r", APPEX], capture_output=True)
+        subprocess.run(["pluginkit", "-r", os.path.join(LEGACY_APP, "Contents", "PlugIns", "TossyFinder.appex")], capture_output=True)
+        shutil.rmtree(LEGACY_APP, ignore_errors=True)
         shutil.rmtree(APP, ignore_errors=True)
         os.makedirs(os.path.dirname(APP), exist_ok=True)
         r = subprocess.run(["ditto", app, APP], capture_output=True, text=True)
