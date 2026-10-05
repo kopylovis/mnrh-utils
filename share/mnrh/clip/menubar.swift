@@ -263,6 +263,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         let flags: [(String, String, Bool)] = [
             ("Отправлять сам после ⌘C", "auto", conf.auto),
             ("Передавать картинки", "images", conf.images),
+            ("Снимки экрана — сразу на устройства", "screenshots", conf.screenshots),
             ("\(hotkeyChoice.title) — отправить вручную", "hotkey", conf.hotkey),
             ("Уведомления", "notifications", conf.notifications),
         ]

@@ -299,6 +299,7 @@ struct Config {
     var keyText = ""
     var pausedUntil = 0.0
     var images = true
+    var screenshots = false
     var auto = true
     var hotkey = true
     var hotkeyKeys = "ctrl-opt-cmd-c"
@@ -341,6 +342,7 @@ func loadConfig() -> Config? {
     c.keyText = keyText
     c.pausedUntil = raw["paused_until"] as? Double ?? 0
     c.images = raw["images"] as? Bool ?? true
+    c.screenshots = raw["screenshots"] as? Bool ?? false
     c.auto = raw["auto"] as? Bool ?? true
     c.hotkey = raw["hotkey"] as? Bool ?? true
     c.hotkeyKeys = raw["hotkey_keys"] as? String ?? "ctrl-opt-cmd-c"
@@ -914,8 +916,15 @@ let imageTypes: [(NSPasteboard.PasteboardType, UTType)] = [(.png, .png), (NSPast
                                                             (NSPasteboard.PasteboardType("public.heic"), .heic), (.tiff, .tiff)]
 
 func capture() {
-    guard conf.auto, Date().timeIntervalSince1970 >= conf.pausedUntil else { return }
+    guard Date().timeIntervalSince1970 >= conf.pausedUntil else { return }
     let types = pasteboard.types ?? []
+    guard conf.auto else {
+        if conf.screenshots && isClipboardScreenshot(types) {
+            log("снимок экрана в буфере: отправляю")
+            copyContent(types: types, explicit: true)
+        }
+        return
+    }
     if types.contains(where: { skipTypes.contains($0.rawValue) }) {
         log("пропустил: пароль или служебное содержимое")
         return
@@ -1588,4 +1597,5 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 StatusMenu.shared.install()
 LinkHandler.shared.install()
+ScreenshotWatcher.shared.refresh()
 app.run()

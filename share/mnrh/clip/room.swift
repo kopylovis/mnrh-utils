@@ -138,6 +138,7 @@ func setHotkeyKeys(_ keys: String) {
 func setFlag(_ key: String, _ value: Bool) {
     changeConfig { $0[key] = value }
     if key == "hotkey" { value ? registerHotKey() : unregisterHotKey() }
+    if key == "screenshots" { ScreenshotWatcher.shared.refresh() }
 }
 
 func helperCommand(_ args: [String], output: ((String) -> Void)? = nil, done: ((Int32) -> Void)? = nil) -> Process? {
