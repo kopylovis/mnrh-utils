@@ -245,7 +245,7 @@ if !joinCode.isEmpty {
     let key = inviteKey(joinCode)
     var plain = Data()
     var invite = [String: Any]()
-    let result = waitForEvent(r, seconds: 45) { event in
+    let result = waitForEvent(r, seconds: 70) { event in
         guard let message = event["message"] as? String, let sealed = Data(base64Encoded: message),
               let box = try? AES.GCM.SealedBox(combined: sealed), let opened = try? AES.GCM.open(box, using: key),
               let parsed = (try? JSONSerialization.jsonObject(with: opened)) as? [String: Any] else { return false }
@@ -402,7 +402,7 @@ if !inviteCode.isEmpty {
     print("ok")
     fflush(stdout)
     let timer = DispatchSource.makeTimerSource(queue: .global())
-    timer.schedule(deadline: .now() + 2, repeating: 2)
+    timer.schedule(deadline: .now() + 15, repeating: 15)
     timer.setEventHandler { _ = offer() }
     timer.resume()
     var room = URLRequest(url: roomURL)
