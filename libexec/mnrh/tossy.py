@@ -457,7 +457,7 @@ def quick_action_files(title, command):
 def install_quick_actions():
     import finder_ext
     icon = os.path.join(agent.app, "Contents", "Resources", "AppIcon.icns")
-    error = finder_ext.install(icon=icon) if finder_ext.identity() != "-" else "нет сертификата Apple Development"
+    error = finder_ext.install(icon=icon)
     if error is None:
         if any(os.path.exists(os.path.join(SERVICES, f"{title}.workflow")) for title, _ in QUICK_ACTIONS):
             remove_services()
