@@ -66,6 +66,9 @@ final class ScreenshotWatcher {
     }
 }
 
+let screenshotTypes: Set<String> = ["public.png", "Apple PNG pasteboard type", "public.tiff", "NeXT TIFF v4.0 pasteboard type"]
+
 func isClipboardScreenshot(_ types: [NSPasteboard.PasteboardType]) -> Bool {
-    (pasteboard.pasteboardItems?.count ?? 0) == 1 && types.map(\.rawValue) == ["public.png"]
+    let names = Set(types.map(\.rawValue))
+    return (pasteboard.pasteboardItems?.count ?? 0) == 1 && names.contains("public.png") && names.isSubset(of: screenshotTypes)
 }

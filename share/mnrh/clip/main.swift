@@ -905,6 +905,18 @@ func isRepeat(_ types: [NSPasteboard.PasteboardType]) -> Bool {
     return false
 }
 
+func isAlreadyOnClipboard(kind: String, meta: [String: Any], data: Data?) -> Bool {
+    if kind == "image", let data = data {
+        let incoming = digest(data)
+        return imageTypes.contains { pasteboard.data(forType: $0.0).map(digest) == incoming }
+    }
+    if kind == "text", let current = pasteboard.string(forType: .string) {
+        let text = meta["v"] as? String ?? data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        return !text.isEmpty && text == current
+    }
+    return false
+}
+
 func imagePayload(_ data: Data, _ type: UTType) -> (Data, String)? {
     if type.conforms(to: .png) || type.conforms(to: .jpeg) || type.conforms(to: .gif) || type.conforms(to: .heic) {
         if data.count <= maxImage { return (data, type.preferredMIMEType ?? "image/png") }
@@ -942,6 +954,10 @@ let imageTypes: [(NSPasteboard.PasteboardType, UTType)] = [(.png, .png), (NSPast
 func capture() {
     guard Date().timeIntervalSince1970 >= conf.pausedUntil else { return }
     let types = pasteboard.types ?? []
+    if types.contains(where: { skipTypes.contains($0.rawValue) }) {
+        log("пропустил: пароль, служебное содержимое или буфер с другого Mac Apple")
+        return
+    }
     guard conf.auto else {
         if conf.screenshots && isClipboardScreenshot(types) {
             if isRepeat(types) {
@@ -951,10 +967,6 @@ func capture() {
             log("снимок экрана в буфере: отправляю")
             copyContent(types: types, explicit: true)
         }
-        return
-    }
-    if types.contains(where: { skipTypes.contains($0.rawValue) }) {
-        log("пропустил: пароль или служебное содержимое")
         return
     }
     let fromFinder = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder"
@@ -1304,6 +1316,11 @@ func apply(_ meta: [String: Any], _ data: Data?, fresh: Bool = true) {
     }
     guard kind == "text" || ((kind == "image" || kind == "file") && data != nil) else {
         log("непонятное сообщение: \(kind)")
+        return
+    }
+    if isAlreadyOnClipboard(kind: kind, meta: meta, data: data) {
+        log("← \(from): \(kind == "image" ? "картинка" : "текст") уже в буфере, пропустил")
+        writeState()
         return
     }
     pasteboard.clearContents()
