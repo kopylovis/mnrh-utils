@@ -134,10 +134,22 @@ final class Alerts: NSObject, URLSessionDataDelegate {
         if recent.count > Alerts.keep { recent.removeLast(recent.count - Alerts.keep) }
         guard Date().timeIntervalSince1970 - time < 300 else { return }
         let project = name(of: topic)
-        let title = entry.title.isEmpty ? project : "\(project): \(entry.title)"
+        let title = headline(entry.title, project: project)
         let priority = event["priority"] as? Int ?? 3
         notify(entry.message.isEmpty ? entry.title : entry.message, link: entry.click.flatMap(URL.init(string:)),
                title: title, id: "tossy-alert-\(id)", sound: priority >= 4)
+    }
+
+    private func headline(_ title: String, project: String) -> String {
+        var kept: [String] = []
+        for part in title.components(separatedBy: " · ").map({ $0.trimmingCharacters(in: .whitespaces) }) where !part.isEmpty {
+            let isProject = part.caseInsensitiveCompare(project) == .orderedSame
+            let isRepeat = kept.contains { $0.caseInsensitiveCompare(part) == .orderedSame }
+            if !isProject && !isRepeat { kept.append(part) }
+        }
+        let rest = kept.joined(separator: " · ")
+        if rest.isEmpty { return project }
+        return rest.lowercased().hasPrefix(project.lowercased()) ? rest : "\(project): \(rest)"
     }
 
     private func plain(_ text: String) -> String {
