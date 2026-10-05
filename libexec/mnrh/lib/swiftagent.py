@@ -21,14 +21,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 
 
 class SwiftAgent:
-    def __init__(self, name, display, label, service_args=None, url_schemes=(), title=None, stable_id=False):
+    def __init__(self, name, display, label, service_args=None, url_schemes=(), title=None, stable_id=False, app_dir=None):
         self.name, self.display, self.base = name, display, label
         self.service_args = service_args
         self.url_schemes = tuple(url_schemes)
         self.title = title or display
         self.stable_id = stable_id
         self.src = os.path.join(ROOT, "share", "mnrh", name, "main.swift")
-        self.app = os.path.join(HOME, "Library", "Application Support", "mnrh", f"{display}.app")
+        self.app = os.path.join(app_dir or os.path.join(HOME, "Library", "Application Support", "mnrh"), f"{display}.app")
         self.bin = os.path.join(self.app, "Contents", "MacOS", f"mnrh-{name}")
         self.stamp = os.path.join(self.app, "Contents", "Resources", "source.sha256")
         self.plist = os.path.join(HOME, "Library", "LaunchAgents", f"{label}.plist")

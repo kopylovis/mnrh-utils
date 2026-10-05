@@ -157,12 +157,22 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         case "text":
             let line = (entry.text ?? "").split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
             let short = line.count > 42 ? String(line.prefix(42)) + "…" : line
-            let item = ActionItem(short.isEmpty ? "(пустой текст)" : short, symbol: "text.alignleft") { copyAgain(entry) }
+            let item = ActionItem(short.isEmpty ? "(пустой текст)" : short, symbol: "text.alignleft") { [weak self] in
+                copyAgain(entry)
+                self?.flash("Текст снова в буфере")
+            }
             item.attributedTitle = styled(item.title, detail)
             item.toolTip = String((entry.text ?? "").prefix(600))
             menu.addItem(item)
         case "image":
-            let item = ActionItem("Картинка, \(sizeText(entry.size))", symbol: "photo") { copyAgain(entry) }
+            let item = ActionItem("Картинка, \(sizeText(entry.size))", symbol: "photo") { [weak self] in
+                guard exists else {
+                    self?.missing(entry)
+                    return
+                }
+                copyAgain(entry)
+                self?.flash("Картинка снова в буфере")
+            }
             item.attributedTitle = styled(item.title, detail)
             if let path = entry.file, let image = NSImage(contentsOfFile: path) {
                 let side = 22.0
@@ -170,21 +180,31 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
                 image.size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
                 item.image = image
             }
-            item.isEnabled = exists
+            if !exists { item.attributedTitle = styled(item.title, "картинки уже нет · \(detail)") }
             menu.addItem(item)
         default:
             let name = entry.name ?? "файл"
             let url = URL(fileURLWithPath: entry.file ?? "")
-            let reveal = ActionItem(name, symbol: "doc") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-            reveal.attributedTitle = styled(name, "\(sizeText(entry.size)) · \(detail)")
-            reveal.toolTip = "Показать в Finder, с ⌥ — открыть"
-            reveal.isEnabled = exists
+            let reveal = ActionItem(name, symbol: "doc") { [weak self] in
+                if exists {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } else {
+                    self?.missing(entry)
+                }
+            }
+            reveal.attributedTitle = styled(name, exists ? "\(sizeText(entry.size)) · \(detail)" : "файла уже нет · \(detail)")
+            reveal.toolTip = exists ? "Показать в Finder, с ⌥ — открыть" : "Файла уже нет на этом Mac"
             menu.addItem(reveal)
-            let open = ActionItem(name, symbol: "arrow.up.forward.app") { NSWorkspace.shared.open(url) }
+            let open = ActionItem(name, symbol: "arrow.up.forward.app") { [weak self] in
+                if exists {
+                    NSWorkspace.shared.open(url)
+                } else {
+                    self?.missing(entry)
+                }
+            }
             open.attributedTitle = styled(name, "открыть")
             open.isAlternate = true
             open.keyEquivalentModifierMask = .option
-            open.isEnabled = exists
             menu.addItem(open)
         }
     }
@@ -283,6 +303,55 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         menu.addItem(.separator())
         menu.addItem(submenu("Сочетание: \(hotkeyChoice.title)", symbol: "keyboard", keys))
         return menu
+    }
+
+    private var hud: NSPanel?
+
+    func flash(_ text: String) {
+        hud?.close()
+        guard let button = item?.button, let window = button.window else { return }
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.sizeToFit()
+        let size = NSSize(width: label.frame.width + 28, height: 30)
+        let effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        effect.material = .hudWindow
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 15
+        label.frame.origin = NSPoint(x: 14, y: (size.height - label.frame.height) / 2)
+        effect.addSubview(label)
+        let anchor = window.convertToScreen(button.convert(button.bounds, to: nil))
+        let panel = NSPanel(contentRect: NSRect(x: anchor.midX - size.width / 2, y: anchor.minY - size.height - 6,
+                                                width: size.width, height: size.height),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = .statusBar
+        panel.hasShadow = true
+        panel.contentView = effect
+        panel.orderFrontRegardless()
+        hud = panel
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self, weak panel] in
+            NSAnimationContext.runAnimationGroup({ $0.duration = 0.25; panel?.animator().alphaValue = 0 }) {
+                panel?.close()
+                if self?.hud === panel { self?.hud = nil }
+            }
+        }
+    }
+
+    private func missing(_ entry: HistoryItem) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = entry.kind == "image" ? "Картинки уже нет" : "Файла «\(entry.name ?? "файл")» уже нет на этом Mac"
+        alert.informativeText = entry.kind == "image" ? "Копия картинки удалена вместе с историей." : "Его удалили или переместили: \(entry.file ?? "")"
+        alert.addButton(withTitle: "Убрать из истории")
+        alert.addButton(withTitle: "ОК")
+        if alert.runModal() == .alertFirstButtonReturn { History.shared.remove(entry) }
+    }
+
+    func openMenu() {
+        item?.button?.performClick(nil)
     }
 
     func pickTargets(_ done: @escaping ([String]?) -> Void) {

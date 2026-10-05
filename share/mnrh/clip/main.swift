@@ -30,6 +30,13 @@ var sendNotify = false
 var joinID = ""
 var joinName = ""
 
+let launchedBare = CommandLine.arguments.count == 1 || CommandLine.arguments.dropFirst().allSatisfy { $0.hasPrefix("-psn") }
+if launchedBare {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    configFile = home + "/.config/mnrh/clip.json"
+    stateFile = home + "/.cache/mnrh/clip.json"
+}
+
 var argv = CommandLine.arguments.dropFirst().makeIterator()
 while let arg = argv.next() {
     switch arg {
@@ -1481,6 +1488,14 @@ if !sendItems.isEmpty || !sendTexts.isEmpty {
     RunLoop.main.run()
 }
 
+let showMenuNotice = Notification.Name("com.kopylovis.tossy.desktop.show-menu")
+let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+    .filter { $0.processIdentifier != getpid() }
+if !others.isEmpty {
+    DistributedNotificationCenter.default().postNotificationName(showMenuNotice, object: nil, userInfo: nil, deliverImmediately: true)
+    exit(0)
+}
+
 isAgent = true
 readSavedID()
 let streams = conf.listenTopics.enumerated().map { Stream(topic: $0.element, primary: $0.offset == 0) }
@@ -1595,6 +1610,19 @@ Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { _ in retireTokens(
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        StatusMenu.shared.openMenu()
+        return false
+    }
+}
+
+let appDelegate = AppDelegate()
+app.delegate = appDelegate
+DistributedNotificationCenter.default().addObserver(forName: showMenuNotice, object: nil, queue: .main) { _ in
+    StatusMenu.shared.openMenu()
+}
+_ = History.shared
 StatusMenu.shared.install()
 LinkHandler.shared.install()
 ScreenshotWatcher.shared.refresh()

@@ -57,8 +57,8 @@ QR = os.path.join(HOME, ".cache", "mnrh", "clip-pair.png")
 TOKEN_RE = re.compile(r"^tk_[A-Za-z0-9]{20,}$")
 LEGACY_LABELS = ("com.mnrh.clip.",)
 agent = SwiftAgent("clip", "Tossy", "com.kopylovis.tossy.desktop", service_args=["--config", CONFIG], url_schemes=["mnrh-tossy"],
-                   stable_id=True)
-LEGACY_APPS = (os.path.join(os.path.dirname(agent.app), "mnrh Clip.app"),)
+                   stable_id=True, app_dir=os.path.join(HOME, "Applications"))
+LEGACY_APPS = tuple(os.path.join(HOME, "Library", "Application Support", "mnrh", name) for name in ("mnrh Clip.app", "Tossy.app"))
 
 
 def read_conf():

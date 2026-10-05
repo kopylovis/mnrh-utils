@@ -13,6 +13,7 @@ struct HistoryItem: Codable {
     var size: Int64
     var device: String
     var time: Double
+    var hash: String?
 }
 
 final class History {
@@ -30,12 +31,13 @@ final class History {
         if let data = try? Data(contentsOf: index), let saved = try? JSONDecoder().decode([HistoryItem].self, from: data) {
             items = saved
         }
+        if items.contains(where: { $0.hash == nil }) { fillHashes() }
     }
 
     func addText(_ text: String, incoming: Bool, device: String) {
         let id = UUID().uuidString
         var item = HistoryItem(id: id, incoming: incoming, kind: "text", size: Int64(text.utf8.count), device: device,
-                               time: Date().timeIntervalSince1970)
+                               time: Date().timeIntervalSince1970, hash: digest(Data(text.utf8)))
         if text.count > History.inlineText {
             let url = dir.appendingPathComponent("\(id).txt")
             if (try? Data(text.utf8).write(to: url)) != nil { item.textFile = url.path }
@@ -52,12 +54,12 @@ final class History {
         let url = dir.appendingPathComponent("\(id).\(ext)")
         guard (try? data.write(to: url)) != nil else { return }
         add(HistoryItem(id: id, incoming: incoming, kind: "image", file: url.path, mime: mime, size: Int64(data.count),
-                        device: device, time: Date().timeIntervalSince1970))
+                        device: device, time: Date().timeIntervalSince1970, hash: digest(data)))
     }
 
     func addFile(_ url: URL, size: Int64, incoming: Bool, device: String) {
         add(HistoryItem(id: UUID().uuidString, incoming: incoming, kind: "file", file: url.path, name: url.lastPathComponent,
-                        size: size, device: device, time: Date().timeIntervalSince1970))
+                        size: size, device: device, time: Date().timeIntervalSince1970, hash: "file:\(url.path):\(size)"))
     }
 
     func fullText(_ item: HistoryItem) -> String? {
@@ -77,7 +79,40 @@ final class History {
         save()
     }
 
+    private func fillHashes() {
+        var seen = Set<String>()
+        var kept = [HistoryItem]()
+        for var item in items {
+            if item.hash == nil {
+                switch item.kind {
+                case "text": item.hash = fullText(item).map { digest(Data($0.utf8)) }
+                case "image": item.hash = item.file.flatMap { FileManager.default.contents(atPath: $0) }.map(digest)
+                default: item.hash = item.file.map { "file:\($0):\(item.size)" }
+                }
+            }
+            if let hash = item.hash, seen.contains(item.kind + hash) {
+                drop(item)
+                continue
+            }
+            item.hash.map { seen.insert(item.kind + $0) }
+            kept.append(item)
+        }
+        items = kept
+        save()
+    }
+
+    func remove(_ item: HistoryItem) {
+        items.removeAll { $0.id == item.id }
+        drop(item)
+        save()
+    }
+
     private func add(_ item: HistoryItem) {
+        if let hash = item.hash {
+            let repeats = items.filter { $0.hash == hash && $0.kind == item.kind }
+            repeats.forEach(drop)
+            items.removeAll { $0.hash == hash && $0.kind == item.kind }
+        }
         items.insert(item, at: 0)
         if items.count > History.limit {
             items[History.limit...].forEach(drop)
