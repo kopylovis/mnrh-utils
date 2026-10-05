@@ -881,6 +881,7 @@ let skipTypes: Set<String> = ["org.nspasteboard.ConcealedType", "org.nspasteboar
 let echoWindow = 60.0
 var lastReceivedHash = ""
 var lastReceivedAt = 0.0
+var lastAutoHash = ""
 
 func digest(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -888,6 +889,20 @@ func digest(_ data: Data) -> String {
 
 func isEcho(_ data: Data) -> Bool {
     Date().timeIntervalSince1970 - lastReceivedAt < echoWindow && digest(data) == lastReceivedHash
+}
+
+func clipboardDigest(_ types: [NSPasteboard.PasteboardType]) -> String? {
+    for (ptype, _) in imageTypes where types.contains(ptype) {
+        if let data = pasteboard.data(forType: ptype) { return digest(data) }
+    }
+    return pasteboard.string(forType: .string).map { digest(Data($0.utf8)) }
+}
+
+func isRepeat(_ types: [NSPasteboard.PasteboardType]) -> Bool {
+    guard let hash = clipboardDigest(types) else { return false }
+    if hash == lastAutoHash { return true }
+    lastAutoHash = hash
+    return false
 }
 
 func imagePayload(_ data: Data, _ type: UTType) -> (Data, String)? {
@@ -929,6 +944,10 @@ func capture() {
     let types = pasteboard.types ?? []
     guard conf.auto else {
         if conf.screenshots && isClipboardScreenshot(types) {
+            if isRepeat(types) {
+                log("пропустил: этот снимок уже отправлял")
+                return
+            }
             log("снимок экрана в буфере: отправляю")
             copyContent(types: types, explicit: true)
         }
@@ -943,12 +962,17 @@ func capture() {
         log("пропустил: файлы отправляю только явно — ⌃⌥⌘C или «Отправить в Tossy» в меню Finder")
         return
     }
+    if isRepeat(types) {
+        log("пропустил: буфер не изменился, это уже отправлял")
+        return
+    }
     copyContent(types: types)
 }
 
 func sendNow() {
     if let fresh = loadConfig() { conf = fresh }
     let types = pasteboard.types ?? []
+    lastAutoHash = clipboardDigest(types) ?? lastAutoHash
     if types.contains(where: { skipTypes.contains($0.rawValue) }) {
         notify("Не отправил: в буфере пароль или служебные данные")
         return
@@ -1312,6 +1336,7 @@ func apply(_ meta: [String: Any], _ data: Data?, fresh: Bool = true) {
     }
     ownCount = pasteboard.changeCount
     seenCount = ownCount
+    lastAutoHash = clipboardDigest(pasteboard.types ?? []) ?? lastAutoHash
     receivedCount += 1
     lastReceived = Date().timeIntervalSince1970
     log("← \(from): \(what)")
