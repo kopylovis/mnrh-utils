@@ -14,9 +14,19 @@ final class ScreenshotWatcher {
         source = nil
         folder = wanted
         guard let wanted = wanted else { return }
-        let fd = open(wanted.path, O_EVTONLY)
+        DispatchQueue.global(qos: .utility).async {
+            let fd = open(wanted.path, O_EVTONLY)
+            DispatchQueue.main.async { self.watch(wanted, fd) }
+        }
+    }
+
+    private func watch(_ wanted: URL, _ fd: Int32) {
         guard fd >= 0 else {
             log("не слежу за снимками экрана: нет доступа к \(wanted.path)")
+            return
+        }
+        guard folder == wanted, source == nil else {
+            close(fd)
             return
         }
         let watch = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
