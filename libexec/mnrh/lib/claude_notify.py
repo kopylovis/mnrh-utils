@@ -369,7 +369,7 @@ def phone(rest):
     value = rest[0] if rest else ""
     if value in ("on", "away", "always", "off"):
         if value != "off" and not ntfy_alert.configured():
-            print("Сначала mnrh tossy setup: уведомления уходят через сервер Tossy")
+            print("Сначала tossy setup: уведомления уходят через сервер Tossy")
             return 1
         write_config(notify_phone="away" if value == "on" else value)
         print({"off": "В Tossy больше не отправляю",

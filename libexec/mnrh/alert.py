@@ -23,7 +23,7 @@ def usage():
     print()
     print(f"Канал по умолчанию — «{ntfy_alert.DEFAULT_TOPIC}». На телефоне: Tossy → Уведомления → + → канал "
           f"{ntfy_alert.DEFAULT_TOPIC}.")
-    print("Сервер и токен берутся из mnrh tossy.")
+    print("Сервер и токен берутся из Tossy (tossy config --json).")
 
 
 def option(name, rest):
@@ -50,7 +50,7 @@ def send(text, title="", priority=3, topic=None, click=None, tags=None, markdown
 def status():
     target = ntfy_alert.endpoint()
     if not target:
-        print(f"{WARN} Tossy не настроен — уведомлениям некуда уходить: mnrh tossy setup")
+        print(f"{WARN} Tossy не настроен — уведомлениям некуда уходить: tossy setup")
         return 1
     print(f"{OK} уведомления уходят на {target[0]}, канал по умолчанию «{ntfy_alert.DEFAULT_TOPIC}»")
     mode = ntfy_alert.phone_mode()

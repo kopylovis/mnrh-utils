@@ -62,16 +62,10 @@ test:
 	@! ./bin/mnrh scroll nothing >/dev/null
 	@swiftc -typecheck -swift-version 5 share/mnrh/scroll/main.swift
 	@swiftc -typecheck -swift-version 5 share/mnrh/notify/main.swift
-	@swiftc -typecheck -swift-version 5 share/mnrh/clip/*.swift
-	@[ ! -x /Library/Developer/CommandLineTools/usr/bin/swiftc ] || DEVELOPER_DIR=/Library/Developer/CommandLineTools swiftc -typecheck -swift-version 5 share/mnrh/clip/*.swift
-	@[ ! -x /Library/Developer/CommandLineTools/usr/bin/swiftc ] || DEVELOPER_DIR=/Library/Developer/CommandLineTools swiftc -typecheck -swift-version 5 -parse-as-library -application-extension -module-name TossyFinder share/mnrh/tossy-finder/FinderSync.swift
-	@swiftc -swift-version 5 share/mnrh/clip/*.swift -o /tmp/mnrh-clip-selftest && /tmp/mnrh-clip-selftest --selftest share/mnrh/clip/vectors.json >/dev/null
 	@./bin/mnrh claude notify -h | grep -q telegram
 	@./bin/mnrh tossy -h | grep -q Tossy
-	@./bin/mnrh tossy status >/dev/null
-	@MNRH_NO_MENU=1 ./bin/mnrh tossy </dev/null >/dev/null
-	@./bin/mnrh clip -h | grep -q "mnrh clip"
-	@./bin/mnrh tossy rename a b c </dev/null 2>&1 | grep -q "Нет устройства\|Сначала\|не в комнате"
+	@./bin/mnrh clip -h | grep -q Tossy
+	@PATH=/usr/bin:/bin HOME=/nonexistent ./bin/mnrh tossy -h | grep -q 'отдельная программа'
 	@./bin/mnrh deps -h >/dev/null
 	@./bin/mnrh alert -h | grep -q "alert run"
 	@./bin/mnrh alert status </dev/null >/dev/null || true

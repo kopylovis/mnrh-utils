@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -86,6 +87,14 @@ def settings_path(*keys):
 
 CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "mnrh", "config")
 DEFAULT_DEV = os.path.join(HOME, "Developer")
+TOSSY_PATHS = ("/opt/homebrew/bin/tossy", "/usr/local/bin/tossy", os.path.join(HOME, ".local", "bin", "tossy"))
+
+
+def tossy_path():
+    found = shutil.which("tossy")
+    if found:
+        return found
+    return next((p for p in TOSSY_PATHS if os.access(p, os.X_OK)), None)
 
 
 def read_config():
