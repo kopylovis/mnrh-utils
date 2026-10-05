@@ -1101,7 +1101,13 @@ func linkIn(_ text: String) -> URL? {
 }
 
 func notify(_ body: String, file: URL? = nil, link: URL? = nil, title: String = "Tossy", id: String? = nil, sound: Bool = false) {
-    guard conf.notifications, !conf.notifyApp.isEmpty, FileManager.default.fileExists(atPath: conf.notifyApp) else { return }
+    guard conf.notifications else { return }
+    if Notifier.shared.isReady {
+        Notifier.shared.post(body, title: title, id: id ?? (file == nil ? "mnrh-clip" : "mnrh-clip-\(file!.path.hashValue)"),
+                             sound: sound, file: file, link: link)
+        return
+    }
+    guard !conf.notifyApp.isEmpty, FileManager.default.fileExists(atPath: conf.notifyApp) else { return }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
     var args = ["-g", "-n", "-a", conf.notifyApp, "--args", "post", "--title", title,
@@ -1649,6 +1655,7 @@ app.delegate = appDelegate
 DistributedNotificationCenter.default().addObserver(forName: showMenuNotice, object: nil, queue: .main) { _ in
     StatusMenu.shared.openMenu()
 }
+Notifier.shared.start()
 _ = History.shared
 Alerts.shared.start()
 StatusMenu.shared.install()
