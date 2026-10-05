@@ -6,6 +6,7 @@ final class PanelModel: ObservableObject {
     @Published var isDone = false
     @Published var isFailed = false
     @Published var command: String?
+    @Published var copied = false
 
     init(status: String) {
         self.status = status
@@ -29,7 +30,6 @@ struct PanelView: View {
     let note: String
     @ObservedObject var model: PanelModel
     let close: () -> Void
-    @State private var copied = false
 
     var body: some View {
         VStack(spacing: 18) {
@@ -56,9 +56,9 @@ struct PanelView: View {
                         pasteboard.setString(command, forType: .string)
                         ownCount = pasteboard.changeCount
                         seenCount = ownCount
-                        copied = true
+                        model.copied = true
                     } label: {
-                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        Image(systemName: model.copied ? "checkmark" : "doc.on.doc")
                     }
                     .help("Скопировать команду")
                     .modifier(GlassButton(prominent: false))

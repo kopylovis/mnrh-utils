@@ -63,6 +63,7 @@ test:
 	@swiftc -typecheck -swift-version 5 share/mnrh/scroll/main.swift
 	@swiftc -typecheck -swift-version 5 share/mnrh/notify/main.swift
 	@swiftc -typecheck -swift-version 5 share/mnrh/clip/*.swift
+	@[ ! -x /Library/Developer/CommandLineTools/usr/bin/swiftc ] || DEVELOPER_DIR=/Library/Developer/CommandLineTools swiftc -typecheck -swift-version 5 share/mnrh/clip/*.swift
 	@swiftc -swift-version 5 share/mnrh/clip/*.swift -o /tmp/mnrh-clip-selftest && /tmp/mnrh-clip-selftest --selftest share/mnrh/clip/vectors.json >/dev/null
 	@./bin/mnrh claude notify -h | grep -q telegram
 	@./bin/mnrh tossy -h | grep -q Tossy
