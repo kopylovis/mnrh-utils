@@ -906,6 +906,7 @@ func isRepeat(_ types: [NSPasteboard.PasteboardType]) -> Bool {
 }
 
 func isAlreadyOnClipboard(kind: String, meta: [String: Any], data: Data?) -> Bool {
+    if (pasteboard.types ?? []).contains(where: { $0.rawValue == "com.apple.is-remote-clipboard" }) { return false }
     if kind == "image", let data = data {
         let incoming = digest(data)
         return imageTypes.contains { pasteboard.data(forType: $0.0).map(digest) == incoming }
@@ -984,11 +985,11 @@ func capture() {
 func sendNow() {
     if let fresh = loadConfig() { conf = fresh }
     let types = pasteboard.types ?? []
-    lastAutoHash = clipboardDigest(types) ?? lastAutoHash
     if types.contains(where: { skipTypes.contains($0.rawValue) }) {
         notify("Не отправил: в буфере пароль или служебные данные")
         return
     }
+    lastAutoHash = clipboardDigest(types) ?? lastAutoHash
     if types.contains(.fileURL) {
         let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
         let files = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
@@ -1185,7 +1186,7 @@ func saveDownload(_ name: String, _ data: Data) -> URL? {
 func deliverFile(_ meta: [String: Any], _ url: URL, size: Int64, hash: String, fresh: Bool) {
     let from = shownName(meta, "устройства")
     if fresh {
-        pasteboard.clearContents()
+        pasteboard.prepareForNewContents(with: .currentHostOnly)
         pasteboard.writeObjects([url as NSURL])
         lastReceivedHash = hash
         lastReceivedAt = Date().timeIntervalSince1970
@@ -1323,7 +1324,7 @@ func apply(_ meta: [String: Any], _ data: Data?, fresh: Bool = true) {
         writeState()
         return
     }
-    pasteboard.clearContents()
+    pasteboard.prepareForNewContents(with: .currentHostOnly)
     var what = ""
     var link: URL? = nil
     if kind == "text" {

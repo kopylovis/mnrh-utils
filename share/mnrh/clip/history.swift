@@ -137,7 +137,7 @@ final class History {
 }
 
 func copyAgain(_ item: HistoryItem) {
-    pasteboard.clearContents()
+    pasteboard.prepareForNewContents(with: .currentHostOnly)
     switch item.kind {
     case "text":
         guard let text = History.shared.fullText(item) else { return }
