@@ -8,6 +8,7 @@ launcher.py actions <реестр> <команда> [позиция]     — м�
 import os
 import shlex
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from menu import pick
@@ -179,7 +180,17 @@ def actions(registry, name, at="0"):
             return 0
 
 
+def restart_pending():
+    try:
+        job = os.path.join(os.path.expanduser("~"), ".cache", "mnrh", "restart", os.path.basename(os.ttyname(0)))
+        return time.time() - os.path.getmtime(job) < 120
+    except OSError:
+        return False
+
+
 def after(rc):
+    if restart_pending():
+        return 1
     from menu import choice
     head = "\x1b[32m✓ Готово\x1b[0m" if rc in ("0", "") else f"\x1b[33m! Завершилось с кодом {rc}\x1b[0m"
     try:
