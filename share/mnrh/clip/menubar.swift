@@ -84,6 +84,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
         menu.addItem(ActionItem("Отправить файл…", symbol: "doc.badge.arrow.up") { [weak self] in self?.pickFiles() })
         menu.addItem(.separator())
         menu.addItem(submenu("Устройства", symbol: "laptopcomputer.and.iphone", devicesMenu()))
+        menu.addItem(submenu("Уведомления проектов", symbol: "bell", alertsMenu()))
         menu.addItem(submenu(isPaused ? "Пауза до \(clock(conf.pausedUntil))" : "Пауза", symbol: "pause", pauseMenu()))
         menu.addItem(submenu("Настройки", symbol: "gearshape", settingsMenu()))
         menu.addItem(.separator())
@@ -256,6 +257,50 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSWindowDelegate {
                           "Комната получит новый ключ, а при поддержке сервера и новый токен. \(name) больше не увидит буфер, пока его не подключат заново.",
                           button: "Отключить") { revokeDevice(id) }
         })
+        return menu
+    }
+
+    private func alertsMenu() -> NSMenu {
+        let menu = NSMenu()
+        let recent = Alerts.shared.recent.prefix(8)
+        if recent.isEmpty {
+            menu.addItem(info("Пока ничего не пришло"))
+        }
+        for entry in recent {
+            let project = Alerts.shared.name(of: entry.topic)
+            let line = entry.title.isEmpty ? entry.message : entry.title
+            let short = line.count > 46 ? String(line.prefix(46)) + "…" : line
+            let item = ActionItem(short.isEmpty ? project : short, symbol: "bell") {
+                if let link = entry.click.flatMap(URL.init(string:)) {
+                    NSWorkspace.shared.open(link)
+                } else {
+                    pasteboard.clearContents()
+                    pasteboard.setString([entry.title, entry.message].filter { !$0.isEmpty }.joined(separator: "\n"), forType: .string)
+                    ownCount = pasteboard.changeCount
+                    seenCount = ownCount
+                    StatusMenu.shared.flash("Текст уведомления в буфере")
+                }
+            }
+            item.attributedTitle = styled(item.title, "\(project) · \(clock(entry.time))")
+            item.toolTip = entry.message
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let channels = NSMenu()
+        if Alerts.shared.channels.isEmpty {
+            channels.addItem(info("Список каналов не загрузился"))
+        }
+        for channel in Alerts.shared.channels {
+            let on = Alerts.shared.isOn(channel.topic)
+            let item = ActionItem(channel.name) { setAlertTopic(channel.topic, !on) }
+            item.attributedTitle = styled(channel.name, channel.topic)
+            item.state = on ? .on : .off
+            channels.addItem(item)
+        }
+        channels.addItem(.separator())
+        channels.addItem(ActionItem("Обновить список") { Alerts.shared.refresh() })
+        channels.addItem(info("Список общий с Tossy на телефоне"))
+        menu.addItem(submenu("Каналы", symbol: "list.bullet", channels))
         return menu
     }
 

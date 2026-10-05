@@ -307,6 +307,7 @@ struct Config {
     var pausedUntil = 0.0
     var images = true
     var screenshots = false
+    var alertTopics = [String: Bool]()
     var auto = true
     var hotkey = true
     var hotkeyKeys = "ctrl-opt-cmd-c"
@@ -350,6 +351,7 @@ func loadConfig() -> Config? {
     c.pausedUntil = raw["paused_until"] as? Double ?? 0
     c.images = raw["images"] as? Bool ?? true
     c.screenshots = raw["screenshots"] as? Bool ?? false
+    c.alertTopics = raw["alert_topics"] as? [String: Bool] ?? [:]
     c.auto = raw["auto"] as? Bool ?? true
     c.hotkey = raw["hotkey"] as? Bool ?? true
     c.hotkeyKeys = raw["hotkey_keys"] as? String ?? "ctrl-opt-cmd-c"
@@ -1074,18 +1076,18 @@ func linkIn(_ text: String) -> URL? {
     return url
 }
 
-func notify(_ body: String, file: URL? = nil, link: URL? = nil) {
+func notify(_ body: String, file: URL? = nil, link: URL? = nil, title: String = "Tossy", id: String? = nil, sound: Bool = false) {
     guard conf.notifications, !conf.notifyApp.isEmpty, FileManager.default.fileExists(atPath: conf.notifyApp) else { return }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    var args = ["-g", "-n", "-a", conf.notifyApp, "--args", "post", "--title", "Tossy",
-                "--body", body, "--id", file == nil ? "mnrh-clip" : "mnrh-clip-\(file!.path.hashValue)", "--sound", "off"]
+    var args = ["-g", "-n", "-a", conf.notifyApp, "--args", "post", "--title", title,
+                "--body", body, "--id", id ?? (file == nil ? "mnrh-clip" : "mnrh-clip-\(file!.path.hashValue)"), "--sound", sound ? "on" : "off"]
     if let file = file {
         let path = shellQuote(file.path)
         args += ["--click", "open \(path)", "--action", "Открыть=open \(path)", "--action", "Показать в Finder=open -R \(path)"]
     } else if let link = link {
         let url = shellQuote(link.absoluteString)
-        args += ["--action", "Открыть ссылку=open \(url)"]
+        args += ["--click", "open \(url)", "--action", "Открыть ссылку=open \(url)"]
     }
     p.arguments = args
     try? p.run()
@@ -1623,6 +1625,7 @@ DistributedNotificationCenter.default().addObserver(forName: showMenuNotice, obj
     StatusMenu.shared.openMenu()
 }
 _ = History.shared
+Alerts.shared.start()
 StatusMenu.shared.install()
 LinkHandler.shared.install()
 ScreenshotWatcher.shared.refresh()
