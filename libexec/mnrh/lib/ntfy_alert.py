@@ -6,7 +6,7 @@ import urllib.request
 
 from mnrhlib import HOME, read_config, tossy_path
 
-LEGACY_CONFIGS = (os.path.join(HOME, ".config", "tossy", "config.json"), os.path.join(HOME, ".config", "mnrh", "clip.json"))
+LEGACY_CONFIGS = (os.path.join(HOME, ".config", "tossling", "config.json"), os.path.join(HOME, ".config", "tossy", "config.json"), os.path.join(HOME, ".config", "mnrh", "clip.json"))
 DEFAULT_TOPIC = "mac"
 CLAUDE_TOPIC = "claude"
 

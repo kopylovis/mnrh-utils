@@ -7,7 +7,7 @@ from mnrhlib import tossy_path
 path = tossy_path()
 if path:
     os.execv(path, [path, *sys.argv[1:]])
-print("Tossy — общий буфер обмена своих Mac и Android-телефона — теперь отдельная программа tossy.")
+print("Tossling (бывший Tossy) — общий буфер обмена своих Mac и Android-телефона — отдельная программа tossling.")
 print("mnrh tossy … передаёт команды ей, но она не установлена.")
-print("Поставить: git clone git@github.com:kopylovis/tossy.git ~/Developer/tossy && make -C ~/Developer/tossy install")
+print("Поставить: brew install --cask tossling/tap/tossling или Tossling.dmg с https://github.com/tossling/tossling-desktop/releases")
 sys.exit(0 if any(a in ("-h", "--help") for a in sys.argv[1:]) else 1)

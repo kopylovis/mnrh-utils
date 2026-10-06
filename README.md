@@ -55,8 +55,8 @@ mnrh scroll on        переворачивать прокрутку мыши, 
 mnrh scroll status    состояние; off выключить, test проверить, что мышь и трекпад различаются
 mnrh nomusic on       Apple Music не открывается сам (наушники, Play), вручную — можно (вместо noTunes)
 mnrh nomusic status   состояние; pause [мин] не трогать Music, resume, log, off; --always, --open Spotify
-mnrh tossy …         то же, что tossy …: общий буфер обмена своих Mac и Android (отдельный проект Tossy)
-mnrh alert <текст>    уведомление на телефон в Tossy; alert run <команда> — итог долгой сборки
+mnrh tossy …         то же, что tossling …: общий буфер обмена своих Mac и Android (отдельный проект Tossling)
+mnrh alert <текст>    уведомление на телефон в Tossling; alert run <команда> — итог долгой сборки
 mnrh sleep status     что не даёт Mac уснуть, последние засыпания и пробуждения
 mnrh sleep fix        снять зависшие caffeinate, чья программа уже закрыта
 mnrh ssh status       SSH-ключи: какие есть, загружены ли, кем представляются GitHub
@@ -485,9 +485,9 @@ Terminal и iTerm2 (по tty, как `/restart`), а в Android Studio, VS Code 
 удалить токен. Если ты смотришь на вкладку Claude, но отошёл, уведомление придёт только в
 Telegram. Ошибки отправки пишутся в `~/.cache/mnrh/notify/errors.log`.
 
-Или в Tossy на телефоне, через свой ntfy: `mnrh claude notify phone away` — когда тебя нет за Mac,
+Или в Tossling на телефоне, через свой ntfy: `mnrh claude notify phone away` — когда тебя нет за Mac,
 `phone always` — всегда, `phone off` — выключить, `phone test` — пробное. Уходят в канал `claude`,
-вопросы и просьбы о разрешении — с высоким приоритетом. На телефоне: Tossy → Уведомления → + → `claude`.
+вопросы и просьбы о разрешении — с высоким приоритетом. На телефоне: Tossling → Уведомления → + → `claude`.
 
 Иконка приложений-помощников (mnrh Notify, mnrh Scroll, mnrh NoMusic) — `share/mnrh/icon.png`, 1024×1024,
 картинка до края без прозрачности: macOS 26 сама скругляет её, а иконку с полями или
@@ -735,16 +735,17 @@ Apple, консольные инструменты без `.app` (SwiftPM, Fireb
 Если действий два и больше, у каждого должно быть имя (`status`, `clean`…): `mnrh имя` без аргументов
 в терминале открывает меню этих действий, и пустое действие в главном меню открыло бы его ещё раз.
 
-## Tossy
+## Tossling
 
-Общий буфер обмена своих Mac и Android-телефона через свой ntfy-сервер — отдельный проект
-[kopylovis/tossy](https://github.com/kopylovis/tossy), команда `tossy`. `mnrh tossy …` (и прежнее `mnrh clip …`)
-передаёт команды ей. `mnrh alert` и уведомления Claude Code берут сервер и токен из `tossy config --json`.
+Общий буфер обмена своих Mac и Android-телефона через свой сервер — отдельный проект
+[Tossling](https://github.com/tossling/tossling-desktop) (бывший Tossy), команда `tossling` (`tossy` — её прежнее имя).
+`mnrh tossy …`, `mnrh tossling …` и прежнее `mnrh clip …` передают команды ей. `mnrh alert` и уведомления
+Claude Code берут сервер и токен из `tossling config --json`.
 
 ## Как работает `mnrh alert`
 
-Уведомления на телефон через тот же ntfy-сервер, что у Tossy (сервер и токен — из `tossy config --json`).
-На телефоне они видны в Tossy → Уведомления, если добавить канал.
+Уведомления на телефон через тот же сервер, что у Tossling (сервер и токен — из `tossling config --json`).
+На телефоне они видны в Tossling → Уведомления, если добавить канал.
 
 - `mnrh alert "текст"` — в канал `mac`; `-t <заголовок>`, `-p <1–5>` (приоритет), `--to <канал>`,
   `--click <ссылка>`. Текст можно подать пайпом: `echo готово | mnrh alert`.

@@ -15,15 +15,15 @@ args = sys.argv[1:]
 def usage():
     print("mnrh alert                       меню с действиями (без терминала — то же, что status)")
     print("mnrh alert status                куда уходят уведомления")
-    print("mnrh alert <текст>               уведомление на телефон, в Tossy → Уведомления")
+    print("mnrh alert <текст>               уведомление на телефон, в Tossling → Уведомления")
     print("   -t <заголовок>  -p <1–5>  --to <канал>  --click <ссылка>")
     print("mnrh alert run <команда…>        запустить команду и прислать итог: успех или ошибка, время, конец вывода")
     print("mnrh alert test                  пробное уведомление")
     print("echo текст | mnrh alert          текст из pipe")
     print()
-    print(f"Канал по умолчанию — «{ntfy_alert.DEFAULT_TOPIC}». На телефоне: Tossy → Уведомления → + → канал "
+    print(f"Канал по умолчанию — «{ntfy_alert.DEFAULT_TOPIC}». На телефоне: Tossling → Уведомления → + → канал "
           f"{ntfy_alert.DEFAULT_TOPIC}.")
-    print("Сервер и токен берутся из Tossy (tossy config --json).")
+    print("Сервер и токен берутся из Tossling (tossling config --json).")
 
 
 def option(name, rest):
@@ -50,7 +50,7 @@ def send(text, title="", priority=3, topic=None, click=None, tags=None, markdown
 def status():
     target = ntfy_alert.endpoint()
     if not target:
-        print(f"{WARN} Tossy не настроен — уведомлениям некуда уходить: tossy setup")
+        print(f"{WARN} Tossling не настроен — уведомлениям некуда уходить: tossling setup")
         return 1
     print(f"{OK} уведомления уходят на {target[0]}, канал по умолчанию «{ntfy_alert.DEFAULT_TOPIC}»")
     mode = ntfy_alert.phone_mode()
@@ -125,7 +125,7 @@ def main():
     if rest == ["test"]:
         code = send("Если это видно на телефоне, mnrh alert работает.", title="Проверка mnrh alert", tags=["wave"])
         if code == 0:
-            print(f"{OK} отправил. Не пришло — добавь в Tossy канал «{ntfy_alert.DEFAULT_TOPIC}».")
+            print(f"{OK} отправил. Не пришло — добавь в Tossling канал «{ntfy_alert.DEFAULT_TOPIC}».")
         return code
     title = option("-t", rest) or option("--title", rest) or ""
     priority = option("-p", rest) or option("--priority", rest) or "3"

@@ -63,8 +63,9 @@ test:
 	@swiftc -typecheck -swift-version 5 share/mnrh/scroll/main.swift
 	@swiftc -typecheck -swift-version 5 share/mnrh/notify/main.swift
 	@./bin/mnrh claude notify -h | grep -q telegram
-	@./bin/mnrh tossy -h | grep -q Tossy
-	@./bin/mnrh clip -h | grep -q Tossy
+	@./bin/mnrh tossy -h | grep -q Tossling
+	@./bin/mnrh clip -h | grep -q Tossling
+	@./bin/mnrh tossling -h | grep -q Tossling
 	@PATH=/usr/bin:/bin HOME=/nonexistent ./bin/mnrh tossy -h | grep -q 'отдельная программа'
 	@./bin/mnrh deps -h >/dev/null
 	@./bin/mnrh alert -h | grep -q "alert run"

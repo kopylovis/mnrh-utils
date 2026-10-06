@@ -71,7 +71,7 @@ def usage():
     print("mnrh claude notify sound on|off звук")
     print("mnrh claude notify test         показать пробное уведомление")
     print("mnrh claude notify telegram     ещё и в Telegram, когда ты не за Mac: подключить бота")
-    print(f"mnrh claude notify phone away   ещё и в Tossy на телефон (канал {ntfy_alert.CLAUDE_TOPIC}), когда ты не за Mac")
+    print(f"mnrh claude notify phone away   ещё и в Tossling на телефон (канал {ntfy_alert.CLAUDE_TOPIC}), когда ты не за Mac")
     print("  … phone always | off | test")
     print("  … telegram test | off | always | away <сек>")
     print()
@@ -338,7 +338,7 @@ def status():
     print("Хуки Claude Code: " + (", ".join(have) if have else "не стоят — mnrh claude setup"))
     print(telegram.describe())
     mode = ntfy_alert.phone_mode()
-    print("Tossy: " + {"off": "выключено — mnrh claude notify phone away",
+    print("Tossling: " + {"off": "выключено — mnrh claude notify phone away",
                        "away": f"когда ты не за Mac, канал «{ntfy_alert.CLAUDE_TOPIC}»",
                        "always": f"всегда, канал «{ntfy_alert.CLAUDE_TOPIC}»"}[mode])
 
@@ -369,13 +369,13 @@ def phone(rest):
     value = rest[0] if rest else ""
     if value in ("on", "away", "always", "off"):
         if value != "off" and not ntfy_alert.configured():
-            print("Сначала tossy setup: уведомления уходят через сервер Tossy")
+            print("Сначала tossling setup: уведомления уходят через сервер Tossling")
             return 1
         write_config(notify_phone="away" if value == "on" else value)
-        print({"off": "В Tossy больше не отправляю",
-               "always": f"Отправляю в Tossy всегда, канал «{ntfy_alert.CLAUDE_TOPIC}»"}.get(
-            value, f"Отправляю в Tossy, когда ты не за Mac, канал «{ntfy_alert.CLAUDE_TOPIC}»"))
-        print(f"На телефоне: Tossy → Уведомления → + → канал {ntfy_alert.CLAUDE_TOPIC}")
+        print({"off": "В Tossling больше не отправляю",
+               "always": f"Отправляю в Tossling всегда, канал «{ntfy_alert.CLAUDE_TOPIC}»"}.get(
+            value, f"Отправляю в Tossling, когда ты не за Mac, канал «{ntfy_alert.CLAUDE_TOPIC}»"))
+        print(f"На телефоне: Tossling → Уведомления → + → канал {ntfy_alert.CLAUDE_TOPIC}")
         return 0
     if value == "test":
         try:
@@ -386,7 +386,7 @@ def phone(rest):
             return 1
         print("Отправил пробное уведомление")
         return 0
-    print(f"В Tossy: {ntfy_alert.phone_mode()}. mnrh claude notify phone away | always | off | test")
+    print(f"В Tossling: {ntfy_alert.phone_mode()}. mnrh claude notify phone away | always | off | test")
     return 0
 
 
