@@ -12,7 +12,7 @@ import time
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mnrhlib import HOME, settings_path, tilde
+from mnrhlib import HOME, PROMPTSILL_HINT, promptsill_path, settings_path, tilde
 import claude_mac
 import claude_open
 import claude_search
@@ -913,14 +913,19 @@ def notice_hook(install):
     if not hooks:
         settings.pop("hooks")
     line = settings.get("statusLine")
-    ours = isinstance(line, dict) and STATUS_CMD in str(line.get("command", ""))
-    if install and (not line or ours):
-        settings["statusLine"] = {"type": "command", "command": f"{shlex.quote(MNRH)} {STATUS_CMD}",
+    command = str(line.get("command", "")) if isinstance(line, dict) else ""
+    ours = STATUS_CMD in command or "promptsill" in command
+    promptsill = promptsill_path()
+    if install and promptsill and (not line or STATUS_CMD in command):
+        settings["statusLine"] = {"type": "command", "command": shlex.quote(promptsill),
                                   "padding": 0, "refreshInterval": 10}
     elif not install and ours:
         settings.pop("statusLine")
-    status_note = ("✓ строка состояния → statusLine" if install and (not line or ours) else
-                   "! строка состояния: у тебя уже своя statusLine, не трогаю" if install else "")
+    status_note = ("! строка состояния: у тебя уже своя statusLine, не трогаю" if line and not ours else
+                   "✓ строка состояния: promptsill уже стоит в statusLine" if "promptsill" in command else
+                   "✓ строка состояния → statusLine (promptsill)" if promptsill else
+                   f"! строка состояния теперь отдельная программа promptsill: {PROMPTSILL_HINT}, "
+                   f"потом снова mnrh claude setup")
     allow_rules = [f"mcp__mnrh__{name}" for name in READ_ONLY]
     perms = settings.setdefault("permissions", {})
     allow = [r for r in perms.get("allow", []) if r not in allow_rules] + (allow_rules if install else [])

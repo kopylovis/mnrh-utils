@@ -99,6 +99,18 @@ def tossy_path():
     return next((p for p in TOSSY_PATHS if os.access(p, os.X_OK)), None)
 
 
+PROMPTSILL_PATHS = tuple(os.path.join(d, "promptsill")
+                         for d in ("/opt/homebrew/bin", "/usr/local/bin", os.path.join(HOME, ".local", "bin")))
+PROMPTSILL_HINT = "brew install kopylovis/tap/promptsill"
+
+
+def promptsill_path():
+    forced = os.environ.get("MNRH_PROMPTSILL")
+    if forced is not None:
+        return forced if os.access(forced, os.X_OK) else None
+    return shutil.which("promptsill") or next((p for p in PROMPTSILL_PATHS if os.access(p, os.X_OK)), None)
+
+
 def read_config():
     conf = {}
     try:
