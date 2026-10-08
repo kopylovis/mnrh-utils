@@ -7,7 +7,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mnrhlib import HOME, read_config, tilde, write_config
+from mnrhlib import HOME, badge, read_config, tilde, write_config
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
 RULES = os.path.join(ROOT, "share", "mnrh", "humanize.md")
@@ -18,8 +18,6 @@ SETTINGS = os.path.join(CLAUDE, "settings.json")
 SLASH_FILE = os.path.join(CLAUDE, "commands", "humanize.md")
 MNRH = shutil.which("mnrh") or os.path.join(ROOT, "bin", "mnrh")
 HOOK_CMD = "claude humanize-hook"
-BADGE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local", "state"),
-                     "promptsill", "badges", "mnrh-humanize.json")
 HOOK_EVENTS = [("SessionStart", False), ("UserPromptSubmit", False), ("Stop", True)]
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -165,16 +163,8 @@ def enabled():
 
 
 def sync_badge(on):
-    """Метка «humanize» во второй строке promptsill, пока режим включён."""
-    try:
-        if not on:
-            os.remove(BADGE)
-        elif not os.path.exists(BADGE):
-            os.makedirs(os.path.dirname(BADGE), exist_ok=True)
-            with open(BADGE, "w") as f:
-                json.dump({"text": "humanize", "color": "green"}, f)
-    except OSError:
-        pass
+    """Метка humanize во второй строке promptsill, пока режим включен."""
+    badge("mnrh-humanize", {"text": "humanize", "color": "green"} if on else None)
 
 
 def rules_text():

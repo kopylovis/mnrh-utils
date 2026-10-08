@@ -9,7 +9,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mnrhlib import HOME, read_config, tilde, write_config
+from mnrhlib import BADGES, HOME, badge, read_config, tilde, write_config
 
 LOG = os.path.join(HOME, "Library", "Logs", "mnrh-guard.log")
 INSIDE_ONLY = [os.path.join(HOME, ".cache")]
@@ -38,6 +38,27 @@ READERS = {"cat", "less", "more", "head", "tail", "bat", "cp", "scp", "rsync", "
 
 def enabled():
     return read_config().get("guard", "on") != "off"
+
+
+def sync_badge(on=None):
+    """Метка guard во второй строке promptsill, пока защита включена."""
+    on = enabled() if on is None else on
+    badge("mnrh-guard", {"text": "guard", "color": "green"} if on else None)
+
+
+def hold_badge(sid, rule):
+    """На две минуты в этой сессии: guard остановил вызов."""
+    if not sid:
+        return
+    try:
+        for name in os.listdir(BADGES):
+            if name.startswith("mnrh-guard_") and time.time() - os.path.getmtime(os.path.join(BADGES, name)) > 600:
+                os.remove(os.path.join(BADGES, name))
+    except OSError:
+        pass
+    what = {"secrets-read": "чтение секрета", "secrets-delete": "удаление секрета"}.get(rule, rule)
+    badge(f"mnrh-guard_{sid[:8]}", {"text": f"остановил {what}", "color": "yellow", "session": sid,
+                                    "expires": int(time.time() + 120)}, refresh=True)
 
 
 def skipped():
@@ -272,6 +293,7 @@ def decide(payload):
     what = str(inp.get("command") or inp.get("file_path") or "")[:200].replace("\n", " ")
     if mode not in ("bypassPermissions", "auto", "dontAsk"):
         log(f"ask   {rule:<14} {what}")
+        hold_badge(payload.get("session_id"), rule)
         return {"permissionDecision": "ask", "permissionDecisionReason": f"mnrh guard: {why}"}
     sid = payload.get("session_id")
     key = call_key(sid, tool, inp)
@@ -285,6 +307,7 @@ def decide(payload):
     pending[key] = time.time()
     save_pending(sid, pending)
     log(f"hold  {rule:<14} {what}")
+    hold_badge(sid, rule)
     return {"permissionDecision": "deny", "permissionDecisionReason": (
         f"mnrh guard: {why}. Это не отказ: спроси пользователя одним коротким вопросом, выполнить ли это, и объясни "
         f"зачем. Если он ответит «да» — повтори ровно этот же вызов, и он пройдёт. Если нет — не делай и не ищи "
@@ -296,7 +319,9 @@ def hook():
         payload = json.load(sys.stdin)
     except ValueError:
         return 0
-    if not isinstance(payload, dict) or not enabled():
+    on = enabled()
+    sync_badge(on)
+    if not isinstance(payload, dict) or not on:
         return 0
     try:
         out = decide(payload)
@@ -341,6 +366,7 @@ def main():
         return 0
     if cmd in ("on", "off"):
         write_config(guard=cmd)
+        sync_badge(cmd == "on")
         print(f"mnrh guard {'включён' if cmd == 'on' else 'выключен'}")
         return 0
     if cmd in ("skip", "unskip") and len(rest) == 2:

@@ -477,6 +477,8 @@ def brief_wanted(payload, n):
 
 
 def notice():
+    import claude_guard
+    claude_guard.sync_badge()
     payload = hook_payload()
     sid = payload.get("session_id")
     if not sid or not UUID_RE.match(sid):

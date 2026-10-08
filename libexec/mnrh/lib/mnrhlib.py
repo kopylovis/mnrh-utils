@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shutil
@@ -109,6 +110,25 @@ def promptsill_path():
     if forced is not None:
         return forced if os.access(forced, os.X_OK) else None
     return shutil.which("promptsill") or next((p for p in PROMPTSILL_PATHS if os.access(p, os.X_OK)), None)
+
+
+BADGES = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local", "state"), "promptsill", "badges")
+
+
+def badge(name, data=None, refresh=False):
+    """Метка во второй строке promptsill (файл в BADGES); data=None убирает ее."""
+    path = os.path.join(BADGES, name + ".json")
+    try:
+        if data is None:
+            os.remove(path)
+        elif refresh or not os.path.exists(path):
+            os.makedirs(BADGES, exist_ok=True)
+            tmp = f"{path}.{os.getpid()}"
+            with open(tmp, "w") as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.replace(tmp, path)
+    except OSError:
+        pass
 
 
 def read_config():
