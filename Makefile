@@ -80,6 +80,9 @@ test:
 	@echo junk | ./bin/mnrh claude humanize-hook | wc -c | grep -q '^ *0$$'
 	@printf '%s\n' '---' '- `X` — пояснение' | ./bin/mnrh claude humanize check - | grep 'разделитель' | grep -q '\-\-\-'
 	@printf '%s\n' '- `X` — пояснение' | ./bin/mnrh claude humanize check - | grep -q 'термин — пояснение'
+	@printf '%s\n' 'Еще «тест» ёж. Итог: да. Причина: нет.' | ./bin/mnrh claude humanize check - | grep 'елочки' | grep -q 'шт'
+	@printf '%s\n' 'Еще «тест» ёж. Итог: да. Причина: нет.' | ./bin/mnrh claude humanize check - | grep 'точками' | grep -q 'шт'
+	@printf '%s\n' 'Итог: да. Причина: нет.' | ./bin/mnrh claude humanize check - | grep -q 'двоеточия'
 	@cd /tmp && $(CURDIR)/bin/mnrh claude guard test 'git push -f origin master' | grep -q пропущу
 	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/Documents/old' | grep -q пропущу
 	@$(CURDIR)/bin/mnrh claude guard test 'bundle exec fastlane beta' | grep -q пропущу
