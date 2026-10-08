@@ -33,7 +33,7 @@ COMMAND_FILE = os.path.join(COMMANDS, "restart.md")
 FORGET_FILE = os.path.join(COMMANDS, "forget.md")
 OLD_FORGET_FILE = os.path.join(COMMANDS, "forget-session.md")
 SLIM_FILE = os.path.join(COMMANDS, "slim.md")
-EXTRA_COMMANDS = ["todo", "where", "release-notes", "parallel", "shot", "ask"]
+EXTRA_COMMANDS = ["todo", "where", "release-notes", "parallel", "shot", "ask", "humanize"]
 SLIM_MIN = 5 << 20
 QUEUE = os.path.join(HOME, ".cache", "mnrh", "restart")
 NOTICES = os.path.join(HOME, ".cache", "mnrh", "notice")
@@ -826,6 +826,15 @@ allowed-tools: mcp__mnrh__ask_project
 Вызови ask_project с этим проектом и вопросом. Если вопрос опирается на контекст этой сессии, допиши в него
 нужные факты, чтобы он был понятен без неё. Ответ перескажи пользователю коротко, сохранив пути и код.
 """,
+    "humanize": """---
+description: mnrh humanization: писать без признаков нейросети; /humanize переключает, on, off, status
+allowed-tools: Bash(mnrh claude humanize:*)
+---
+!`mnrh claude humanize switch $ARGUMENTS`
+
+Если выше написано «включена» и есть свод правил, с этого ответа строго следуй ему во всём, что пишешь людям.
+Если «выключена», правила больше не обязательны. Ответь пользователю одной короткой фразой, в каком состоянии режим.
+""",
 }
 
 
@@ -884,7 +893,9 @@ def write_zshrc(lines):
 HOOKS = [("SessionStart", "claude notice", False, None), ("SessionEnd", "claude session-end", False, None),
          ("UserPromptSubmit", "claude notify-hook", True, None), ("Stop", "claude notify-hook", True, None),
          ("Notification", "claude notify-hook", True, None),
-         ("PreToolUse", "claude guard-hook", False, "Bash|Read|Edit|Write|MultiEdit|NotebookEdit")]
+         ("PreToolUse", "claude guard-hook", False, "Bash|Read|Edit|Write|MultiEdit|NotebookEdit"),
+         ("SessionStart", "claude humanize-hook", False, None), ("UserPromptSubmit", "claude humanize-hook", False, None),
+         ("Stop", "claude humanize-hook", True, None)]
 STATUS_CMD = "claude statusline"
 
 
@@ -947,6 +958,8 @@ def notice_hook(install):
         print("✓ защита секретов: вопрос перед чтением и удалением ключей → хук PreToolUse (mnrh claude guard)")
         print("✓ уведомления, когда Claude ждёт тебя → хуки UserPromptSubmit, Stop и Notification "
               "(mnrh claude notify -h)")
+        print("✓ mnrh humanization: правила письма без признаков нейросети → хуки SessionStart, UserPromptSubmit "
+              "и Stop; включить: /humanize или mnrh claude humanize on")
         print(f"✓ без вопроса о разрешении: {', '.join(READ_ONLY)} (они только читают)")
 
 
@@ -963,7 +976,7 @@ def setup(args):
         kept = [l for l in lines if marker not in l]
         if kept != lines:
             write_zshrc(kept)
-        print(f"Убрал /restart, /forget, /slim, /todo, /where, /release-notes, /parallel, /shot, /ask, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
+        print(f"Убрал /restart, /forget, /slim, /todo, /where, /release-notes, /parallel, /shot, /ask, /humanize, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
         return 0
     os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
     if os.path.exists(OLD_FORGET_FILE):

@@ -28,6 +28,7 @@ mnrh claude forget    изнутри Claude: удалить эту сессию 
 mnrh claude slim      изнутри Claude: сжать эту сессию и открыть её снова (/slim)
 mnrh claude notify    уведомления, когда Claude ждёт тебя: on, off, after <сек>, sound, test, telegram
 mnrh claude guard     защита секретов: вопрос перед чтением и удалением ключей; on, off, test, log
+mnrh claude humanize  писать без признаков нейросети (правила ВП:ПРГЕН): on, off, check <файл>, rules; /humanize
 mnrh deps status      устаревшие зависимости Gradle в libs.versions.toml (этот проект или все)
 mnrh todo             бэклог задач проекта между сессиями Claude (add, done, rm, all)
 mnrh shot [прил.]     снимок окна приложения; без аргументов — список окон

@@ -34,6 +34,7 @@ mnrh claude parallel "<…>"  задача в отдельной ветке и w
 mnrh claude ask <пр> <…>    спросить отдельный Claude про другой проект, только чтение (/ask)
 mnrh claude release-notes   материал для «Что нового» к релизу (/release-notes)
 mnrh claude guard           защита секретов: спросит перед чтением или удалением ключей (on, off, test)
+mnrh claude humanize        писать без признаков нейросети: on, off, check <файл>, rules (/humanize)
 mnrh claude notify          уведомления, когда Claude ждёт тебя (on, off, after <сек>, test, telegram)
 mnrh claude setup           поставить /restart, MCP-сервер mnrh и хук zsh для перезапуска (--remove убрать)
 
@@ -50,6 +51,7 @@ case "${1:-}" in
   ask) exec /usr/bin/python3 "$(dirname "$MENU")/claude_ask.py" "$@" ;;
   release-notes) exec /usr/bin/python3 "$(dirname "$MENU")/release_notes.py" "$@" ;;
   statusline) shift; exec /usr/bin/python3 "$(dirname "$MENU")/claude_status.py" "$@" ;;
+  humanize|humanize-hook) exec /usr/bin/python3 "$(dirname "$MENU")/claude_humanize.py" "$@" ;;
   guard|guard-hook) exec /usr/bin/python3 "$(dirname "$MENU")/claude_guard.py" "$@" ;;
   notify|notify-hook|focus) exec /usr/bin/python3 "$(dirname "$MENU")/claude_notify.py" "$@" ;;
   restart|forget|slim|mcp|setup|notice|session-end) exec /usr/bin/python3 "$(dirname "$MENU")/claude_restart.py" "$@" ;;
