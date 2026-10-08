@@ -191,6 +191,8 @@ def restart_pending():
 def after(rc):
     if restart_pending():
         return 1
+    if rc == "130":
+        return 0
     from menu import choice
     head = "\x1b[32m✓ Готово\x1b[0m" if rc in ("0", "") else f"\x1b[33m! Завершилось с кодом {rc}\x1b[0m"
     try:

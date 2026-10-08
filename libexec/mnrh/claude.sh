@@ -116,12 +116,12 @@ choose() {
         printf '%s\t%-30s %-28s %s\n' "$name" "$name" "${branch:--}" "$last"
       done
     } | /usr/bin/python3 "$MENU" --title "Проекты в ${DEV/#$HOME/~}:" --label "Проект" --start 0 --default 1
-  ) || return 1
+  ) || return $?
   if [ "$idx" -eq 0 ]; then echo "$HOME"; else echo "${dirs[$((idx - 1))]}"; fi
 }
 
 if [ -z "$target" ]; then
-  dir=$(choose) || exit 1
+  dir=$(choose) || exit $?
 elif [ "$target" = "root" ] || [ "$target" = "~" ]; then
   dir="$HOME"
 elif case "$target" in */*) true ;; *) false ;; esac && [ -d "$target" ]; then
@@ -137,13 +137,13 @@ for a in ${passthrough[@]+"${passthrough[@]}"}; do
 done
 
 if [ "$new" -eq 0 ]; then
-  sid=$(/usr/bin/python3 "$LIB/claude_sessions.py" choose "$dir") || exit 1
+  sid=$(/usr/bin/python3 "$LIB/claude_sessions.py" choose "$dir") || exit $?
   [ -n "$sid" ] && [ "$sid" != new ] && passthrough=(--resume "$sid" ${passthrough[@]+"${passthrough[@]}"})
 fi
 
 if [ -z "$mode" ]; then
   idx=$(printf 'caffeinate\tcaffeinate — Mac не уснёт, пока идёт сессия\nобычная\tобычная\n' |
-    /usr/bin/python3 "$MENU" --title "Режим сессии в ${dir/#$HOME/~}:" --label "Режим") || exit 1
+    /usr/bin/python3 "$MENU" --title "Режим сессии в ${dir/#$HOME/~}:" --label "Режим") || exit $?
   [ "$idx" = 1 ] && mode=normal || mode=caffeinate
 fi
 

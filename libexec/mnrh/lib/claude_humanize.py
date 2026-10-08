@@ -331,7 +331,7 @@ def main():
         if want not in ("on", "off"):
             print(f"Не понял «{want}»: on, off или пусто, чтобы переключить.", file=sys.stderr)
             return 2
-        set_state(want, inside=True)
+        set_state(want, inside=bool(os.environ.get("CLAUDECODE")))
         return 0
     if cmd == "rules":
         print(rules_text(), end="")
