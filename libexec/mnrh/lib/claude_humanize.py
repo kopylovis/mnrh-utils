@@ -1,6 +1,8 @@
 import json
 import os
 import re
+import shlex
+import shutil
 import sys
 import time
 
@@ -11,12 +13,22 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.r
 RULES = os.path.join(ROOT, "share", "mnrh", "humanize.md")
 STATE = os.path.join(HOME, ".cache", "mnrh", "humanize")
 LOG = os.path.join(HOME, "Library", "Logs", "mnrh-humanize.log")
+CLAUDE = os.environ.get("MNRH_CLAUDE_HOME", os.path.join(HOME, ".claude"))
+SETTINGS = os.path.join(CLAUDE, "settings.json")
+SLASH_FILE = os.path.join(CLAUDE, "commands", "humanize.md")
+MNRH = shutil.which("mnrh") or os.path.join(ROOT, "bin", "mnrh")
+HOOK_CMD = "claude humanize-hook"
+BADGE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local", "state"),
+                     "promptsill", "badges", "mnrh-humanize.json")
+HOOK_EVENTS = [("SessionStart", False), ("UserPromptSubmit", False), ("Stop", True)]
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 REMINDER = ("mnrh humanization включена: правила письма из начала сессии в силе для всего, что ты пишешь людям. "
             "Сразу суть, без вступлений и итогов-пересказов; конкретные факты вместо значимости и восторгов; "
             "без «не только… но и», троек, «от… до…», хвостов «…, подчёркивая»; длинное тире только где его требует "
-            "грамматика (в английском никогда); без жирного, списков «Заголовок: текст» и эмодзи. "
+            "грамматика (в английском никогда), в пунктах списка «термин — пояснение» нельзя; без жирного, "
+            "нумерованных жирных и курсивных подзаголовков, «---», списков «Заголовок: текст» и эмодзи. "
+            "Текст, который пользователь отправит людям, пиши как сообщение в мессенджере (правило 4.7). "
             "Перед отправкой перечитай по разделу 5.")
 OFF_NOTE = "mnrh humanization выключена: правила письма из этой сессии больше не обязательны, пиши как обычно."
 
@@ -87,7 +99,10 @@ MARKERS = [
                         r"|\bnavigat\w*\s+the\s+complexit|\bthe\s+\w+\s+landscape\b"),
     ("UTM-метка", r"utm_source=(?:openai|chatgpt)"),
     ("заглушка", r"\[(?:имя|название|укажите|опишите|вставьте|ваш|ваше|name|insert|your|describe|placeholder)[^\]\n]{0,60}\]"),
-    ("жирный заголовок пункта", r"(?m)^\s*(?:[-*•]|\d+[.)])\s+\*\*[^*\n]+\*\*\s*[:—–-]|\*\*[^*\n]{1,60}:\*\*"),
+    ("жирный заголовок пункта", r"(?m)^\s*(?:[-*•]|\d+[.)])\s+\*\*[^*\n]+\*\*|^\s*\*\*\d+[.)]|\*\*[^*\n]{1,60}:\*\*"),
+    ("курсивный подзаголовок", r"(?m)^\s*(?:\*(?!\*)[^*\n]{2,60}\*|_[^_\n]{2,60}_)(?=[\s:(]|$)"),
+    ("разделитель ---", r"(?m)^\s*(?:-{3,}|\*{3,}|_{3,})\s*$"),
+    ("термин — пояснение в списке", r"(?m)^\s*(?:[-*•]|\d+[.)])\s+[^\n—]{0,60}\s—\s"),
     ("эмодзи", "[\U0001F300-\U0001FAFF☀-⛿✅✔✨❌⭐➡]"),
     ("пафос", r"!(?:\s|$)|(?:^|\n)\s*(?:и\s+вот\s+главное|самое\s+интересное|вот\s+в\s+ч[её]м\s+фишка)\b"),
 ]
@@ -95,8 +110,70 @@ MERISM = re.compile(r"\bот\s+([^\d.!?,;:\n]{2,40}?)\s+до\s+([^\d.!?,;:\n]{2,
 COMPILED = [(name, re.compile(rx, re.I)) for name, rx in MARKERS]
 
 
+def settings():
+    try:
+        with open(SETTINGS) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+def missing_hooks():
+    try:
+        hooks = settings().get("hooks", {})
+    except ValueError:
+        return [e for e, _ in HOOK_EVENTS]
+    return [event for event, _ in HOOK_EVENTS
+            if not any(HOOK_CMD in h.get("command", "") for e in hooks.get(event, []) for h in e.get("hooks", []))]
+
+
+def install_hooks():
+    """Подключает хуки humanize и /humanize, если их нет; остальное в settings.json не трогает."""
+    missing = missing_hooks()
+    if missing:
+        try:
+            data = settings()
+        except ValueError as e:
+            print(f"✗ {tilde(SETTINGS)} не читается как JSON ({e}), хуки не подключил")
+            return False
+        hooks = data.setdefault("hooks", {})
+        for event, run_async in HOOK_EVENTS:
+            if event in missing:
+                hook = {"type": "command", "command": f"{shlex.quote(MNRH)} {HOOK_CMD}", "timeout": 10}
+                if run_async:
+                    hook["async"] = True
+                hooks.setdefault(event, []).append({"hooks": [hook]})
+        os.makedirs(CLAUDE, exist_ok=True)
+        tmp = SETTINGS + ".mnrh-tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp, SETTINGS)
+        print(f"✓ подключил хуки {', '.join(missing)} в {tilde(SETTINGS)}")
+    if not os.path.exists(SLASH_FILE):
+        import claude_restart
+        os.makedirs(os.path.dirname(SLASH_FILE), exist_ok=True)
+        with open(SLASH_FILE, "w") as f:
+            f.write(claude_restart.EXTRA_SLASH["humanize"])
+        print(f"✓ /humanize → {tilde(SLASH_FILE)}")
+    return True
+
+
 def enabled():
     return read_config().get("humanize", "off") == "on"
+
+
+def sync_badge(on):
+    """Метка «humanize» во второй строке promptsill, пока режим включён."""
+    try:
+        if not on:
+            os.remove(BADGE)
+        elif not os.path.exists(BADGE):
+            os.makedirs(os.path.dirname(BADGE), exist_ok=True)
+            with open(BADGE, "w") as f:
+                json.dump({"text": "humanize", "color": "green"}, f)
+    except OSError:
+        pass
 
 
 def rules_text():
@@ -231,6 +308,7 @@ def hook():
     sid, event = payload.get("session_id"), payload.get("hook_event_name")
     on = enabled()
     if event == "SessionStart":
+        sync_badge(on)
         mark(sid, "primed", False)
         if on and rules_text():
             emit(event, rules_text())
@@ -272,8 +350,10 @@ def current_sid():
 
 def set_state(value, inside):
     write_config(humanize=value)
+    sync_badge(value == "on")
     sid = current_sid() if inside else None
     if value == "on":
+        install_hooks()
         print("mnrh humanization включена.")
         if inside and rules_text():
             print("Правила ниже действуют в этой сессии с этого ответа:\n")
@@ -301,6 +381,10 @@ def usage():
 
 def status():
     print(f"mnrh humanization: {'включена' if enabled() else 'выключена'}. Правила: {tilde(RULES)}")
+    missing = missing_hooks()
+    if missing:
+        print(f"! хуки не подключены ({', '.join(missing)}): Claude правил не получит. "
+              f"Подключит mnrh claude humanize on или mnrh claude setup")
     print(f"Переключить: /humanize в Claude Code или mnrh claude humanize on|off. Лог проверок: {tilde(LOG)}")
 
 

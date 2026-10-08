@@ -78,6 +78,8 @@ test:
 	@printf 'Конечно! Это не только быстро, но и удобно.\n' | ./bin/mnrh claude humanize check - | grep -q 'не только'
 	@printf 'Сборка шла 4 минуты, теперь 50 секунд.\n' | ./bin/mnrh claude humanize check - >/dev/null
 	@echo junk | ./bin/mnrh claude humanize-hook | wc -c | grep -q '^ *0$$'
+	@printf '%s\n' '---' '- `X` — пояснение' | ./bin/mnrh claude humanize check - | grep 'разделитель' | grep -q '\-\-\-'
+	@printf '%s\n' '- `X` — пояснение' | ./bin/mnrh claude humanize check - | grep -q 'термин — пояснение'
 	@cd /tmp && $(CURDIR)/bin/mnrh claude guard test 'git push -f origin master' | grep -q пропущу
 	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/Documents/old' | grep -q пропущу
 	@$(CURDIR)/bin/mnrh claude guard test 'bundle exec fastlane beta' | grep -q пропущу
