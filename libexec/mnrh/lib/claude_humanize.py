@@ -22,13 +22,15 @@ HOOK_EVENTS = [("SessionStart", False), ("UserPromptSubmit", False), ("Stop", Tr
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 REMINDER = ("mnrh humanization включена, правила письма из начала сессии действуют для всего, что ты пишешь людям. "
-            "Сразу суть, без вступлений и итогов-пересказов. Конкретные факты вместо значимости и восторгов. "
+            "Ответ первым, без вступлений и итогов-пересказов, отдавай только то, что просили. Конкретные факты "
+            "вместо значимости, восторгов и штампов. Без канцелярита, \"является\", \"позволяет\", модальной ваты, "
+            "усилителей, \"по сути\" и объявленной честности. Длина предложений разная, без обрывков подряд. "
             "Без \"не только... но и\", троек, \"от... до...\", хвостов \"..., подчеркивая\". Длинное тире только "
             "где его требует грамматика (в английском никогда), пункты списка \"термин — пояснение\" запрещены. "
             "Без жирного, нумерованных жирных и курсивных подзаголовков, \"---\", списков \"Заголовок: текст\" и эмодзи. "
             "Кавычки только прямые \"\", елочки нельзя. Букву е с точками не пиши, только е. Двоеточий избегай. "
             "Текст, который пользователь отправит людям, пиши как сообщение в мессенджере (правило 4.7). "
-            "Перед отправкой перечитай по разделу 5.")
+            "Перед отправкой перечитай по разделу 7.")
 OFF_NOTE = "mnrh humanization выключена, правила письма из этой сессии больше не обязательны, пиши как обычно."
 
 S = r"(?:^|(?<=[.!?…]\s)|(?<=\n))"
@@ -105,8 +107,60 @@ MARKERS = [
     ("эмодзи", "[\U0001F300-\U0001FAFF☀-⛿✅✔✨❌⭐➡]"),
     ("пафос", r"!(?:\s|$)|(?:^|\n)\s*(?:и\s+вот\s+главное|самое\s+интересное|вот\s+в\s+ч[её]м\s+фишка)\b"),
 ]
-MERISM = re.compile(r"\bот\s+([^\d.!?,;:\n]{2,40}?)\s+до\s+([^\d.!?,;:\n]{2,40}?)(?=[,.;!?\n]|$)", re.I)
+MARKERS += [
+    ("вступление-штамп", S + r"\s*(?:в\s+современном\s+мире|в\s+наши\s+дни|в\s+эпоху\s+цифров|не\s+секрет,\s+что|ни\s+для\s+кого\s+не\s+секрет"
+                         r"|как\s+известно|трудно\s+переоценить|представьте\s+(?:себе|мир)|давайте\s+(?:подумаем|рассмотрим)"
+                         r"|разобь[еe]м\s+задачу|для\s+начала\s+рассмотрим|нельзя\s+не\s+отметить|хочется\s+отметить)"),
+    ("вступление-штамп", r"\bin\s+today'?s\s+(?:fast-paced|digital|ever)|\bin\s+an\s+era\s+where|\bimagine\s+a\s+world"
+                         r"|\blet'?s\s+(?:break\s+(?:this|it)\s+down|unpack|explore)|\bstep\s+by\s+step\b|\bever-evolving"),
+    ("штамп", r"\bшироки\w*\s+спектр|\bкомплексн\w*\s+(?:подход|решени)|\bиндивидуальн\w*\s+подход|\bкоманд\w*\s+профессионалов"
+              r"|\bна\s+новый\s+уровень|\bраскры\w*\s+потенциал|\bкраеугольн|\bиз\s+коробки|\bвстречайте\b|\bмощн\w*\s+инструмент"
+              r"|\bнезабываем|\bзаставляет\s+задуматься|\bстал\w*\s+символом|\bстал\w*\s+настоящ\w*\s+открыти|\bзаслуживает\s+внимания"
+              r"|\bчто\s+делает\s+(?:его|ее|их|это)\b|\b(?:важн|значим|смел)\w*\s+шаг"),
+    ("штамп", r"\bit\s+just\s+works|\bzero[- ]config|\bbatteries\s+included|\bout\s+of\s+the\s+box|\bmeet\s+[A-Z]\w+,"
+              r"|\bthought\s+leader|\bactionable|\bimpactful|\blearnings\b|\btreasure\s+trove|\bstate-of-the-art|\bgroundbreaking"),
+    ("пустой прогноз", r"\bвремя\s+покажет|\bбудущее\s+за\b|\bодно\s+можно\s+сказать\s+точно|\bимеет\s+все\s+шансы"
+                       r"|\bonly\s+time\s+will\s+tell|\bthe\s+future\s+looks\s+bright|\bone\s+thing\s+is\s+certain|\bis\s+poised\s+to"),
+    ("показная честность", r"\bбуду\s+чест|\bскажу\s+прямо|\bдавайте\s+начистоту|\bне\s+буду\s+скрывать|\bчестн\w*\s+оговорк"
+                           r"|(?:^|\n)\s*честно\?|\bбез\s+прикрас|\bi'?ll\s+be\s+honest|\bto\s+be\s+(?:fully\s+)?transparent"
+                           r"|\bhonest\s+caveat|\bi\s+want\s+to\s+be\s+upfront"),
+    ("постановка", r"\bно\s+есть\s+нюанс|(?:^|\n)\s*(?:итог|результат)\?|\bспойлер:|\bсюжетный\s+поворот|\bзадумайтесь\s+об\s+этом"
+                   r"|\bоб\s+этом\s+почему-то\s+молчат|\bвот\s+здесь\s+начинается|\bсамое\s+интересное"
+                   r"|\bhere'?s\s+the\s+(?:thing|catch|kicker|twist)|\bthe\s+catch\?|\bplot\s+twist|\blet\s+that\s+sink\s+in"
+                   r"|\bread\s+that\s+again|\bfull\s+stop\b|\bmake\s+no\s+mistake|\bsmoking\s+gun"),
+    ("псевдоглубина", r"\bпо\s+(?:своей\s+)?сути\b|\bсуть\s+в\s+том|\bглавный\s+вопрос\s+в\s+том|\bправда\s+в\s+том|\bесли\s+копнуть"
+                      r"|\bat\s+its\s+core\b|\bthe\s+real\s+question\b|\bwhat\s+really\s+matters"),
+    ("спор с никем", r"\bчтобы\s+было\s+понятно,|\bя\s+не\s+говорю,\s+что|\bне\s+поймите\s+неправильно|\bнаивн\w*\s+подход"
+                     r"|\bto\s+be\s+clear,|\bdon'?t\s+get\s+me\s+wrong|\bone\s+might\s+be\s+tempted"),
+    ("служба поддержки", r"\bприношу\s+извинения|\bблагодар\w*\s+за\s+уделенное|\bуверяю\s+вас|\bпонимаю\s+ваше\s+беспокойство"
+                         r"|\bв\s+дальнейшем\s+я\s+буду|\bбуду\s+признател|\bс\s+радостью\s+помогу|\bконструктивн\w*\s+диалог"
+                         r"|\bapologi[sz]e\s+for\s+any\s+inconvenience|\bthank\s+you\s+for\s+your\s+time|\bi\s+assure\s+you"
+                         r"|\bi\s+understand\s+your\s+concern|\bgoing\s+forward,|\bi'?m\s+happy\s+to\b|\blook\s+forward\s+to\s+collaborating"),
+    ("псевдотерапия", r"\bи\s+это\s+нормально|\bвы\s+не\s+одиноки|\bпозвольте\s+себе|\bэто\s+не\s+слабость|\byou'?re\s+not\s+alone"
+                      r"|\bit'?s\s+completely\s+understandable"),
+    ("обертка ответа", r"(?:^|\n)\s*(?:вот\s+(?:обновленн\w*\s+|новый\s+)?(?:вариант|версия|черновик)\w*|ниже\s+несколько\s+вариантов"
+                       r"|хотите,\s+я\b|могу\s+также\s+подготовить|here'?s\s+the\s+updated|here\s+is\s+a\s+draft|below\s+are)"),
+    ("след чат-инструмента", r"cite(?:turn|\[)|turn\d+(?:search|image|file)\d+|contentReference\[|oaicite|oai_citation|【\d+[:†]"
+                             r"|\[cite:\s*\d+\]|start_span|sandbox:/mnt/data|\[attached_file:|grok_card|</?think>|:::writing\{"
+                             r"|utm_source=(?:claude|perplexity|copilot)|referrer=grok"),
+    ("канцелярит", r"\bпровод\w*\s+работ|\bоказ\w*\s+(?:помощь|влияние|содействие)|\bприн\w*\s+участие|\bпроизв\w*\s+(?:оценк|расч[её]т|настройк)"
+                   r"|\bимеет\s+место|\bпосредством\b|\bв\s+свете\b|\bв\s+плане\s+\w+ени|\bбыло\s+принято\s+решение"
+                   r"|\bпредставляет\s+собой|\bвыступа\w*\s+в\s+(?:качестве|роли)"),
+    ("связка-пышный глагол", r"\b(?:serves|functions|acts)\s+as\b|(?:^|[.!?]\s+)это\s+(?:позволяет|помогает|дает|создает)"),
+    ("модальная вата", r"\bпотенциально\s+может|\bможет\s+привести\s+к|\bспособ\w*\s+обеспечить|\bпризван\w*\s+(?:решить|обеспечить)"
+                       r"|\bcould\s+potentially|\bmay\s+eventually|\bmight\s+arguably|\bremains\s+to\s+be\s+seen"),
+    ("усилитель", r"\bпо-настоящему|\bпоистине|\bневероятн|\b(?:genuinely|truly|remarkably|arguably|fundamentally)\b"),
+    ("слова нейросети", r"\b(?:garner\w*|bolster\w*|interplay|robust|comprehensive|streamlin\w*|harness\w*|paradigm|spearhead\w*"
+                        r"|myriad|plethora|commendable|noteworthy|invaluable|quintessential|burgeoning|nascent|load-bearing"
+                        r"|align(?:s|ed)?\s+with|valuable\s+insights|shed\w*\s+light)\b"),
+    ("переход-шаблон", S + r"\s*(?:кроме\s+того|более\s+того|помимо\s+этого|к\s+тому\s+же|moreover|furthermore|additionally|that\s+being\s+said"
+                       r"|notably|interestingly|importantly)\b"),
+    ("история правки в тексте", r"\b(?:was\s+added\s+to\s+replace|previously\s+used)|\bбыл\w*\s+добавлен\w*,?\s+чтобы\s+заменить"),
+    ("символы вместо слов", r"\s(?:→|->|=>|≈)\s"),
+]
 COMPILED = [(name, re.compile(rx, re.I)) for name, rx in MARKERS]
+INVISIBLE = re.compile("[\u200b-\u200d\u2060\u00ad\u2010\u2011\u200e\u200f\u202a-\u202e\u2066-\u2069]|(?<!^)\ufeff")
+MERISM = re.compile(r"\bот\s+([^\d.!?,;:\n]{2,40}?)\s+до\s+([^\d.!?,;:\n]{2,40}?)(?=[,.;!?\n]|$)", re.I)
 
 
 def settings():
@@ -230,7 +284,8 @@ def check(text):
     clean = prose(text)
     hits = []
     raw = re.sub(r"`[^`\n]*`", "", re.sub(r"(?ms)^\s*(```|~~~).*?^\s*\1[^\n]*$", "", text))
-    for name, rx in (("елочки и лапки", r"[«»„“”]"), ("буква е с точками", r"[ёЁ]")):
+    for name, rx in (("елочки и лапки", r"[«»„“”]"), ("буква е с точками", r"[ёЁ]"), ("типографский апостроф", r"[’‘]"),
+                     ("невидимые символы", INVISIBLE.pattern)):
         found = [m.start() for m in re.finditer(rx, raw)]
         if found:
             hits.append((raw.count("\n", 0, found[0]) + 1, name, f"{len(found)} шт."))
@@ -244,7 +299,8 @@ def check(text):
     for name, rx in COMPILED:
         for m in rx.finditer(clean):
             frag = m.group(0).strip()
-            hits.append((line_of(m.start()), name, frag or m.group(0)))
+            lead = len(m.group(0)) - len(m.group(0).lstrip())
+            hits.append((line_of(m.start() + lead), name, frag or m.group(0)))
     for m in MERISM.finditer(clean):
         hits.append((line_of(m.start()), "от… до…", m.group(0)))
     pos = 0
@@ -260,6 +316,11 @@ def check(text):
             words = re.findall(r"[A-Za-zА-Яа-яЁё][\wЁё'-]*", hm.group(1))
             if len(words) >= 3 and all(w[0].isupper() for w in words) and not hm.group(1).isupper():
                 hits.append((line_of(start + hm.start()), "Заглавные Буквы", hm.group(1).strip()))
+    starts = [m.group(1).lower() for m in re.finditer(r"(?:^|[.!?]\s+)([A-Za-zА-Яа-яЁё]+)", clean)]
+    for i in range(len(starts) - 2):
+        if starts[i] == starts[i + 1] == starts[i + 2] and len(starts[i]) > 1:
+            hits.append((1, "одинаковое начало трех фраз", starts[i]))
+            break
     bold = len(re.findall(r"\*\*[^*\n]+\*\*", clean))
     if bold > 2:
         hits.append((1, "много жирного", f"{bold} выделений"))

@@ -83,6 +83,8 @@ test:
 	@printf '%s\n' 'Еще «тест» ёж. Итог: да. Причина: нет.' | ./bin/mnrh claude humanize check - | grep 'елочки' | grep -q 'шт'
 	@printf '%s\n' 'Еще «тест» ёж. Итог: да. Причина: нет.' | ./bin/mnrh claude humanize check - | grep 'точками' | grep -q 'шт'
 	@printf '%s\n' 'Итог: да. Причина: нет.' | ./bin/mnrh claude humanize check - | grep -q 'двоеточия'
+	@printf '%s\n' 'В современном мире это потенциально может помочь. Буду честен, время покажет. citeturn0search0' | ./bin/mnrh claude humanize check - | grep -c 'вступление-штамп\|модальная вата\|показная честность\|пустой прогноз\|след чат' | grep -q 5
+	@./bin/mnrh claude humanize rules | grep -q '## 7. Проверка перед отправкой'
 	@cd /tmp && $(CURDIR)/bin/mnrh claude guard test 'git push -f origin master' | grep -q пропущу
 	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/Documents/old' | grep -q пропущу
 	@$(CURDIR)/bin/mnrh claude guard test 'bundle exec fastlane beta' | grep -q пропущу
