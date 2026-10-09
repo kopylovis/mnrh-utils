@@ -31,6 +31,7 @@ MNRH = shutil.which("mnrh") or os.path.join(
 COMMANDS = os.path.join(CLAUDE, "commands")
 COMMAND_FILE = os.path.join(COMMANDS, "restart.md")
 FORGET_FILE = os.path.join(COMMANDS, "forget.md")
+FRESH_FILE = os.path.join(COMMANDS, "fresh.md")
 OLD_FORGET_FILE = os.path.join(COMMANDS, "forget-session.md")
 SLIM_FILE = os.path.join(COMMANDS, "slim.md")
 EXTRA_COMMANDS = ["todo", "where", "release-notes", "parallel", "shot", "ask", "humanize"]
@@ -196,7 +197,7 @@ def no_hook_reason(pid, term):
             "и запусти claude там")
 
 
-def plan(update=True, forget=False, slim=False):
+def plan(update=True, forget=False, slim=False, fresh=False):
     pid = find_claude()
     try:
         with open(session_file(pid)) as f:
@@ -223,20 +224,21 @@ def plan(update=True, forget=False, slim=False):
     flags = resume_flags(argv[1:])
     parent = ps("ppid", pid)
     caffeinate = caffeinate_args(pid)
-    if forget:
+    new = forget or fresh
+    if new:
         flags = drop_name(flags)
 
-    new_sid = str(uuid.uuid4()) if forget else sid
+    new_sid = str(uuid.uuid4()) if new else sid
     run = ((["caffeinate"] + caffeinate if caffeinate is not None else []) + [CLAUDE_BIN]
-           + (["--session-id", new_sid] if forget else ["--resume", sid]) + flags)
-    update = update and not forget and not slim
+           + (["--session-id", new_sid] if new else ["--resume", sid]) + flags)
+    update = update and not new and not slim
     line = (f"cd {shlex.quote(cwd)} && "
             + (f"{{ {shlex.quote(CLAUDE_BIN)} update; " if update else "{ ")
-            + ("clear; printf '\\033[3J'; " if forget else "")
+            + ("clear; printf '\\033[3J'; " if new else "")
             + (f"{shlex.quote(MNRH)} claude sessions slim {sid} -y --notice; " if slim else "")
             + shlex.join(run) + "; }")
     return {"pid": pid, "sid": sid, "cwd": cwd, "tty": tty, "term": term, "via": via, "line": line, "forget": forget,
-            "slim": slim,
+            "slim": slim, "fresh": fresh,
             "title": session_title(sid) or info.get("name") or sid, "new_sid": new_sid,
             "version": claude_version()}
 
@@ -323,7 +325,7 @@ def session_title(sid):
 
 def write_notice(p, status):
     os.makedirs(NOTICES, exist_ok=True)
-    kind = "forget" if p["forget"] else "slim" if p.get("slim") else "restart"
+    kind = "forget" if p["forget"] else "slim" if p.get("slim") else "fresh" if p.get("fresh") else "restart"
     data = {"kind": kind, "status": status, "title": p["title"],
             "old_sid": p["sid"], "version": p["version"], "at": time.time()}
     tmp = os.path.join(NOTICES, p["new_sid"] + ".tmp")
@@ -352,6 +354,9 @@ def notice_text(n):
         else:
             ver = f"версия {now or was}" + (", обновлений не было" if was and now else "")
         return f"✓ mnrh: Claude Code перезапущен ({ver}). Сессия «{title}» продолжается."
+    if n["kind"] == "fresh":
+        return (f"✓ mnrh: новая чистая сессия. Прошлая «{title}» сохранена, вернуться к ней: "
+                f"/resume или claude --resume {n.get('old_sid', '')}")
     if n.get("status") == "done":
         return (f"✓ mnrh: прошлая сессия «{title}» удалена — переписка, история запросов и file-history. "
                 "Это новая чистая сессия.")
@@ -465,7 +470,7 @@ def read_notice(sid):
 
 def brief_wanted(payload, n):
     import claude_brief
-    if payload.get("source") != "startup" or (n and n.get("kind") == "forget"):
+    if payload.get("source") != "startup" or (n and n.get("kind") in ("forget", "fresh")):
         return False
     if os.environ.get("MNRH_CHILD") == "1" or not claude_brief.enabled():
         return False
@@ -522,8 +527,8 @@ def detach(p, delay):
     background(watcher, p, delay)
 
 
-def restart(update=True, delay=1.5, dry=False, forget=False, slim=False):
-    p = plan(update, forget, slim)
+def restart(update=True, delay=1.5, dry=False, forget=False, slim=False, fresh=False):
+    p = plan(update, forget, slim, fresh)
     preflight(p)
     if dry:
         return p
@@ -531,10 +536,14 @@ def restart(update=True, delay=1.5, dry=False, forget=False, slim=False):
     return p
 
 
-def cli(args, forget=False):
-    name = "forget" if forget else "restart"
+def cli(args, forget=False, fresh=False):
+    name = "forget" if forget else "fresh" if fresh else "restart"
     if "-h" in args or "--help" in args:
-        if forget:
+        if fresh:
+            print("mnrh claude fresh              изнутри Claude Code: закрыть его и открыть новую сессию без названия")
+            print("                               и с пустым контекстом в той же папке и вкладке; эта остаётся в /resume")
+            print("mnrh claude fresh --dry-run    только показать, что будет сделано")
+        elif forget:
             print("mnrh claude forget             изнутри Claude Code: закрыть его, удалить эту сессию без следа")
             print("                               (переписка, история запросов, file-history) и открыть чистый Claude")
             print("                               в той же папке и вкладке — как /clear, только старое не сохраняется")
@@ -545,12 +554,11 @@ def cli(args, forget=False):
             print("mnrh claude restart --no-update   без обновления")
             print("mnrh claude restart --dry-run     только показать, что будет сделано")
         print()
-        print("Обычно вызывается из Claude: " + ("/forget или инструментом forget"
-              if forget else "/restart или инструментом restart") + " из MCP-сервера mnrh")
+        print(f"Обычно вызывается из Claude: /{name} или инструментом {name} из MCP-сервера mnrh")
         print("(установить: mnrh claude setup). Лог: " + tilde(LOG))
         return 0
     try:
-        p = restart(update="--no-update" not in args, dry="--dry-run" in args, forget=forget)
+        p = restart(update="--no-update" not in args, dry="--dry-run" in args, forget=forget, fresh=fresh)
     except RestartError as e:
         print(f"mnrh claude {name}: {e}", file=sys.stderr)
         return 1
@@ -559,6 +567,8 @@ def cli(args, forget=False):
         print(f"закрою pid {p['pid']}, {extra}в {p['tty']} через {p['via']} выполню:\n  {p['line']}")
     elif forget:
         print(f"Через пару секунд Claude Code закроется, сессия «{p['title']}» будет удалена, и откроется чистая.")
+    elif fresh:
+        print(f"Через пару секунд Claude Code закроется и откроется новая сессия. «{p['title']}» останется в /resume.")
     else:
         print(f"Перезапускаю Claude Code через пару секунд, сессия «{p['title']}» откроется снова в этой вкладке.")
     return 0
@@ -643,6 +653,16 @@ FORGET_TOOL = {
 }
 
 
+FRESH_TOOL = {
+    "name": "fresh",
+    "description": ("Начать новую сессию: Claude Code закроется, и в той же папке и вкладке откроется новый Claude "
+                    "с пустым контекстом и без названия. Текущая сессия остаётся на диске и в /resume, как после "
+                    "/clear, но название в новую не переходит. Вызывай только когда пользователь сам просит начать "
+                    "новую сессию; после вызова ничего больше не делай."),
+    "inputSchema": {"type": "object", "properties": {}},
+}
+
+
 def mnrh_version():
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
     try:
@@ -667,6 +687,10 @@ def call_restart(tool, a):
             p = restart(update=False, delay=2.5, forget=True)
             return (f"Готово: через пару секунд Claude Code закроется, сессия {p['sid']} будет удалена, "
                     f"и в {tilde(p['cwd'])} откроется новая."), False
+        if tool == "fresh":
+            p = restart(update=False, delay=2.5, fresh=True)
+            return (f"Готово: через пару секунд Claude Code закроется, и в {tilde(p['cwd'])} откроется новая сессия. "
+                    f"Сессия {p['sid']} останется в /resume."), False
         p = restart(update=bool(update), delay=2.5)
         return (f"Перезапуск запущен: через пару секунд Claude Code закроется"
                 f"{', обновится' if update else ''} и снова откроет сессию {p['sid']} в {tilde(p['cwd'])}."), False
@@ -697,6 +721,7 @@ def call_slim(a):
 HANDLERS = {
     "restart": lambda a: call_restart("restart", a),
     "forget": lambda a: call_restart("forget", a),
+    "fresh": lambda a: call_restart("fresh", a),
     "slim": call_slim,
     "open_claude": lambda a: claude_open.open_claude(a, MNRH),
     "session_search": lambda a: claude_search.handle("session_search", a, current_sid()),
@@ -722,7 +747,7 @@ READ_ONLY = [t["name"] for t in EXTRA_TOOLS if (t.get("annotations") or {}).get(
 
 
 def tools():
-    return [TOOL, FORGET_TOOL, SLIM_TOOL, claude_open.TOOL] + EXTRA_TOOLS
+    return [TOOL, FORGET_TOOL, FRESH_TOOL, SLIM_TOOL, claude_open.TOOL] + EXTRA_TOOLS
 
 
 def mcp():
@@ -861,6 +886,16 @@ allowed-tools: Bash(mnrh claude forget:*)
 """
 
 
+FRESH_SLASH = """---
+description: Новая сессия без названия и с пустым контекстом; эта остаётся в /resume
+allowed-tools: Bash(mnrh claude fresh:*)
+---
+!`mnrh claude fresh $ARGUMENTS`
+
+Claude Code сейчас закроется и откроется с новой сессией. Ничего не делай и ответь одним словом: «Открываю».
+"""
+
+
 SLASH = """---
 description: Перезапустить Claude Code с этой же сессией (с claude update перед запуском)
 allowed-tools: Bash(mnrh claude restart:*)
@@ -968,7 +1003,7 @@ def notice_hook(install):
 def setup(args):
     marker = "share/mnrh/restart.zsh"
     if "--remove" in args:
-        for f in [COMMAND_FILE, FORGET_FILE, SLIM_FILE, OLD_FORGET_FILE] + \
+        for f in [COMMAND_FILE, FORGET_FILE, FRESH_FILE, SLIM_FILE, OLD_FORGET_FILE] + \
                 [os.path.join(COMMANDS, f"{n}.md") for n in EXTRA_COMMANDS]:
             if os.path.exists(f):
                 os.remove(f)
@@ -978,12 +1013,12 @@ def setup(args):
         kept = [l for l in lines if marker not in l]
         if kept != lines:
             write_zshrc(kept)
-        print(f"Убрал /restart, /forget, /slim, /todo, /where, /release-notes, /parallel, /shot, /ask, /humanize, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
+        print(f"Убрал /restart, /forget, /fresh, /slim, /todo, /where, /release-notes, /parallel, /shot, /ask, /humanize, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
         return 0
     os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
     if os.path.exists(OLD_FORGET_FILE):
         os.remove(OLD_FORGET_FILE)
-    pages = [(COMMAND_FILE, SLASH), (FORGET_FILE, FORGET_SLASH), (SLIM_FILE, SLIM_SLASH)] + \
+    pages = [(COMMAND_FILE, SLASH), (FORGET_FILE, FORGET_SLASH), (FRESH_FILE, FRESH_SLASH), (SLIM_FILE, SLIM_SLASH)] + \
         [(os.path.join(COMMANDS, f"{n}.md"), EXTRA_SLASH[n]) for n in EXTRA_COMMANDS]
     for path, text in pages:
         with open(path, "w") as f:
@@ -1040,4 +1075,4 @@ if __name__ == "__main__":
     elif cmd == "slim":
         sys.exit(cli_slim(rest))
     else:
-        sys.exit(cli(rest, forget=cmd == "forget"))
+        sys.exit(cli(rest, forget=cmd == "forget", fresh=cmd == "fresh"))

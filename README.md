@@ -25,6 +25,7 @@ mnrh claude sessions show <id> [N]            прочитать сессию с
 mnrh claude setup     поставить /restart, /forget, MCP-сервер mnrh, хук zsh и хуки Claude (--remove убрать)
 mnrh claude restart   изнутри Claude: закрыть, claude update, открыть эту же сессию снова
 mnrh claude forget    изнутри Claude: удалить эту сессию без следа и открыть чистую
+mnrh claude fresh     изнутри Claude: открыть новую сессию без названия, эта остаётся в /resume
 mnrh claude slim      изнутри Claude: сжать эту сессию и открыть её снова (/slim)
 mnrh claude notify    уведомления, когда Claude ждёт тебя: on, off, after <сек>, sound, test, telegram
 mnrh claude guard     защита секретов: вопрос перед чтением и удалением ключей; on, off, test, log
@@ -257,6 +258,7 @@ Maven Central и Gradle Plugin Portal и показывает, что обнов
 |---|---|
 | `/restart` | перезапуск с `claude update`, сессия продолжается |
 | `/forget` | удалить эту сессию без следа и открыть чистую |
+| `/fresh` | новая сессия без названия и с пустым контекстом, эта остаётся в `/resume` |
 | `/slim` | сжать эту сессию и открыть её снова; `/slim list` — другие |
 | `/where` | где остановились: git, прошлая сессия в проекте, бэклог, что дальше |
 | `/todo` | бэклог: `/todo` — список, `/todo <текст>` — добавить, `/todo done 2` — сделано |
@@ -345,8 +347,8 @@ MCP-инструмент `mac_status` показывает Claude то же, ч�
 
 ## Как работает перезапуск Claude Code
 
-`mnrh claude setup` кладёт `~/.claude/commands/restart.md`, `forget.md` и `slim.md` и регистрирует
-MCP-сервер `mnrh` с инструментами `restart`, `forget`, `slim`, `open_claude`, `session_search`,
+`mnrh claude setup` кладёт `~/.claude/commands/restart.md`, `forget.md`, `fresh.md` и `slim.md` и регистрирует
+MCP-сервер `mnrh` с инструментами `restart`, `forget`, `fresh`, `slim`, `open_claude`, `session_search`,
 `session_read`, `mac_status` и `free_memory` (scope user, во всех проектах). Дальше в любой сессии:
 
 - `/restart` — сразу, без участия модели; `/restart --no-update` — без обновления;
@@ -357,6 +359,10 @@ MCP-сервер `mnrh` с инструментами `restart`, `forget`, `slim
   открывается чистый Claude. В отличие
   от встроенного `/clear`, старое не остаётся в `/resume`. У самого Claude Code такого
   нет: `--no-session-persistence` работает только с `--print`.
+- `/fresh` (или «начни новую сессию», инструмент `fresh`) делает то же, что `/forget`, но старую
+  сессию не трогает: она остаётся в `/resume`. Встроенный `/clear` переносит в новую сессию
+  название старой, и в `/resume` потом две сессии с одним именем. `/fresh` запускает новый процесс
+  с новым `--session-id` и без `--name`, так что новая сессия начинается без названия.
 - «открой Claude в kcalm» — инструмент `open_claude`: без проекта он возвращает в чат список
   проектов (ветка, последний коммит) и режимов, Claude спрашивает, что выбрать, и открывает
   новое окно того же терминала (Terminal или iTerm2) с `mnrh claude <проект> -k|-n`. Можно
