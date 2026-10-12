@@ -85,12 +85,13 @@ def watch():
     os.makedirs(STATE, exist_ok=True)
     with open(PIDFILE, "w") as f:
         f.write(str(os.getpid()))
-    stop = []
-    signal.signal(signal.SIGTERM, lambda *_: stop.append(1))
+    def stop(*_):
+        raise SystemExit(0)  # прерывает и time.sleep, finally снимет запрет
+    signal.signal(signal.SIGTERM, stop)
     held, low, idle_since = False, False, None
     log("сторож запущен")
     try:
-        while not stop:
+        while True:
             ac, pct = battery()
             if not ac and pct is not None and pct <= LOW_BATTERY:
                 if not low:
