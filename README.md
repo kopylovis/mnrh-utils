@@ -57,7 +57,7 @@ mnrh scroll on        переворачивать прокрутку мыши, 
 mnrh scroll status    состояние; off выключить, test проверить, что мышь и трекпад различаются
 mnrh nomusic on       Apple Music не открывается сам (наушники, Play), вручную — можно (вместо noTunes)
 mnrh nomusic status   состояние; pause [мин] не трогать Music, resume, log, off; --always, --open Spotify
-mnrh tossy …         то же, что tossling …: общий буфер обмена своих Mac и Android (отдельный проект Tossling)
+mnrh tossling …      общий буфер обмена своих Mac и Android (отдельный проект Tossling)
 mnrh alert <текст>    уведомление на телефон в Tossling; alert run <команда> — итог долгой сборки
 mnrh sleep status     что не даёт Mac уснуть, последние засыпания и пробуждения
 mnrh sleep fix        снять зависшие caffeinate, чья программа уже закрыта
@@ -160,8 +160,12 @@ macOS, bash и `/usr/bin/python3` из Xcode Command Line Tools
 - **обычная** — просто `claude`.
 
 `-k` и `-n` выбирают режим без вопроса, всё после `--` передаётся claude:
-`mnrh claude kcalm -k -- --continue`. Закрытая крышка на батарее Mac всё равно
-усыпит — caffeinate это не отменяет.
+`mnrh claude kcalm -k -- --continue`. Закрытую крышку на батарее caffeinate не
+перебивает, это умеет только `pmset disablesleep 1` от root. После `mnrh sleep lid setup`
+(один раз, спросит пароль sudo) каждая caffeinate-сессия запускает сторожа: он держит
+`disablesleep`, пока жива хоть одна такая сессия, и снимает его через 2 минуты после
+последней или когда заряд падает до 15%. Mac с закрытой крышкой при этом работает
+в рюкзаке и греется, так что надолго лучше класть его открытым или подключать к сети.
 
 ## Как работает `mnrh claude sessions`
 
@@ -369,6 +373,11 @@ MCP-сервер `mnrh` с инструментами `restart`, `forget`, `fres
   передать первый запрос и `--continue`. Remote Control (`/rc`) включается сразу
   (`--remote-control <проект>`, выключить — `remote_control: false`). В ответ — окно, tty, pid
   и ссылка claude.ai/code на сессию, чтобы продолжить с телефона или в браузере.
+  Если Claude Code ещё не доверяет папке (нет `hasTrustDialogAccepted` у неё или выше
+  в `~/.claude.json`), окно не открывается: вопрос «Do you trust the files in this folder?»
+  через Remote Control не ответить, и сессия так и ждала бы. Claude спрашивает об этом
+  в чате и с согласия повторяет вызов с `trust: true`, тогда флаг ставится до запуска.
+  Worktree от `/parallel` получают доверие от своего проекта сами.
 
 Что происходит: по дереву процессов находится свой `claude` и его запись в
 `~/.claude/sessions/<pid>.json` (id сессии, папка, терминал). Отдельный отвязанный
@@ -638,7 +647,12 @@ HID-событие с id устройства, а по id в IORegistry видн
 закрыта или он остался без родителя и срока. Звук, который держит Mac, показывается
 с процессом-источником, в том числе из симулятора. Ниже — последние засыпания и
 пробуждения с причиной из `pmset -g log`. `mnrh sleep fix` снимает только зависшие
-caffeinate, живые блокировки не трогает.
+caffeinate, живые блокировки не трогает, и возвращает сон с закрытой крышкой, если
+сторож `mnrh sleep lid` упал и оставил `disablesleep` включённым.
+
+`mnrh sleep lid setup` ставит `/etc/sudoers.d/mnrh-pmset` с правом без пароля ровно
+на `pmset -a disablesleep 1` и `pmset -a disablesleep 0`, `remove` его убирает, `off`
+отпускает крышку сразу. Журнал сторожа лежит в `~/.local/state/mnrh/lid.log`.
 
 ## Как работает `mnrh ssh github`
 
@@ -727,8 +741,8 @@ Apple, консольные инструменты без `.app` (SwiftPM, Fireb
 ## Tossling
 
 Общий буфер обмена своих Mac и Android-телефона через свой сервер — отдельный проект
-[Tossling](https://github.com/tossling/tossling-desktop) (бывший Tossy), команда `tossling` (`tossy` — её прежнее имя).
-`mnrh tossy …`, `mnrh tossling …` и прежнее `mnrh clip …` передают команды ей. `mnrh alert` и уведомления
+[Tossling](https://github.com/tossling/tossling-desktop) (бывший Tossy), команда `tossling`.
+`mnrh tossling …` передаёт команды ей, прежние имена `mnrh tossy …` и `mnrh clip …` тоже работают. `mnrh alert` и уведомления
 Claude Code берут сервер и токен из `tossling config --json`.
 
 ## Как работает `mnrh alert`

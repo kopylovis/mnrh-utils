@@ -41,6 +41,7 @@ mnrh claude setup           поставить /restart, MCP-сервер mnrh �
 
 caffeinate (по умолчанию) не даёт Mac уснуть, пока идёт сессия:
 удобно для долгих задач и Remote Control с телефона. Экран при этом гаснуть может.
+С закрытой крышкой на батарее Mac всё равно уснёт, пока не сделан mnrh sleep lid setup.
 EOF
 }
 
@@ -151,6 +152,7 @@ fi
 cd "$dir" || exit 1
 echo "-> ${dir/#$HOME/~} · $mode"
 if [ "$mode" = caffeinate ]; then
+  /usr/bin/python3 "$LIB/lid.py" keep >/dev/null 2>&1 || true
   exec caffeinate -is "$CLAUDE_BIN" "${passthrough[@]+"${passthrough[@]}"}"
 else
   exec "$CLAUDE_BIN" "${passthrough[@]+"${passthrough[@]}"}"

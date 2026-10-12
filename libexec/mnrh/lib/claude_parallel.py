@@ -83,7 +83,7 @@ def start(task, project=None, branch=None, mode="caffeinate", cwd=None, mnrh=Non
     import claude_open
     flags = ["--permission-mode", permission] if permission in PERMISSION_MODES and permission != "default" else []
     text, bad = claude_open.open_claude({"path": path, "mode": mode, "prompt": prompt, "flags": flags,
-                                         "remote_control": rc}, mnrh or "mnrh")
+                                         "trust": claude_open.trusted(root), "remote_control": rc}, mnrh or "mnrh")
     lines = [f"Ветка {name} от {base}, worktree {tilde(path)}."]
     if copied:
         lines.append("Скопировал неотслеживаемые настройки: " + ", ".join(copied) + ".")

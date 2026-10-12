@@ -284,9 +284,9 @@ def hook():
     bundle = os.environ.get("__CFBundleIdentifier", "")
     to_phone = telegram.wanted()
     phone_mode = ntfy_alert.phone_mode()
-    to_tossy = ntfy_alert.configured() and (phone_mode == "always" or (phone_mode == "away" and telegram.away()))
+    to_tossling = ntfy_alert.configured() and (phone_mode == "always" or (phone_mode == "away" and telegram.away()))
     on_mac = not watching(bundle, tty)
-    if not on_mac and not to_phone and not to_tossy:
+    if not on_mac and not to_phone and not to_tossling:
         return 0
     head, body = what
     cwd = payload.get("cwd") or ""
@@ -301,12 +301,12 @@ def hook():
             telegram.send(f"{project}: {head}", title, body)
         except telegram.TelegramError as e:
             log_error(f"telegram: {e}")
-    if to_tossy:
+    if to_tossling:
         try:
             ntfy_alert.publish(ntfy_alert.CLAUDE_TOPIC, "\n\n".join(p for p in (title, body) if p),
                                title=f"{project}: {head}", priority=3 if head.startswith("Готово") else 4)
         except ntfy_alert.AlertError as e:
-            log_error(f"tossy: {e}")
+            log_error(f"tossling: {e}")
     st["notified"] = True
     save_state(sid, st)
     return 0

@@ -3,6 +3,7 @@
 Без проекта возвращает список, из которого выбирать (его показывает Claude в чате),
 с проектом — открывает окно Terminal или iTerm2, запускает mnrh claude и ждёт, пока Claude поднимется.
 """
+import json
 import os
 import re
 import shlex
@@ -60,6 +61,7 @@ on run argv
 end run''',
 }
 MODES = {"caffeinate": "-k", "normal": "-n"}
+CLAUDE_JSON = os.path.join(HOME, ".claude.json")
 RC_URL = re.compile(r"https://claude\.ai/code/session_\w+")
 
 TOOL = {
@@ -79,6 +81,9 @@ TOOL = {
                      "description": "caffeinate — Mac не уснёт, пока идёт сессия (по умолчанию); normal — обычная"},
             "prompt": {"type": "string", "description": "первый запрос для нового Claude (необязательно)"},
             "continue": {"type": "boolean", "description": "продолжить последнюю сессию в этом проекте (claude --continue)"},
+            "trust": {"type": "boolean",
+                      "description": "отметить папку доверенной, если Claude Code ещё не доверяет ей. Ставь только "
+                                     "после явного согласия пользователя на вопрос о доверии этой папке"},
             "remote_control": {"type": "boolean", "default": True,
                                "description": "включить Remote Control (/rc): сессию можно вести с телефона и в браузере; "
                                               "по умолчанию да"},
@@ -122,6 +127,35 @@ def match(query, dirs):
     return exact or [d for d in dirs if os.path.basename(d).lower().startswith(q)]
 
 
+def trusted(path):
+    """Доверяет ли Claude Code папке: сам Claude смотрит её и все папки выше."""
+    try:
+        with open(CLAUDE_JSON) as f:
+            projects = json.load(f).get("projects") or {}
+    except (OSError, ValueError):
+        return False
+    d = os.path.abspath(path)
+    while True:
+        if (projects.get(d) or {}).get("hasTrustDialogAccepted"):
+            return True
+        parent = os.path.dirname(d)
+        if parent == d:
+            return False
+        d = parent
+
+
+def trust(path):
+    """То же, что ответ «Yes, I trust this folder» в окне Claude Code."""
+    with open(CLAUDE_JSON) as f:
+        data = json.load(f)
+    data.setdefault("projects", {}).setdefault(os.path.abspath(path), {})["hasTrustDialogAccepted"] = True
+    tmp = CLAUDE_JSON + ".mnrh"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.chmod(tmp, os.stat(CLAUDE_JSON).st_mode & 0o777)
+    os.replace(tmp, CLAUDE_JSON)
+
+
 def terminal():
     term = os.environ.get("TERM_PROGRAM", "")
     return term if term in OPEN else "Apple_Terminal"
@@ -158,6 +192,17 @@ def open_claude(args, mnrh):
     mode = args.get("mode") or "caffeinate"
     if mode not in MODES:
         return f"Режим бывает caffeinate или normal, а не «{mode}».", True
+
+    if not trusted(target):
+        if args.get("trust") is not True:
+            return (f"Claude Code ещё не доверяет папке {tilde(target)}. При запуске он спросит «Do you trust "
+                    "the files in this folder?», ответить через Remote Control нельзя, и сессия так и будет ждать. "
+                    "Спроси пользователя, доверяет ли он этой папке, и если да, вызови open_claude ещё раз "
+                    "с теми же параметрами и trust: true."), True
+        try:
+            trust(target)
+        except (OSError, ValueError) as e:
+            return f"Не отметил {tilde(target)} доверенной в {tilde(CLAUDE_JSON)}: {e}", True
 
     name = "~" if target == HOME else os.path.basename(target)
     cmd = [mnrh, "claude", "open", target if direct else name, MODES[mode], "--new"]

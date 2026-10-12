@@ -4,7 +4,7 @@ import subprocess
 import urllib.error
 import urllib.request
 
-from mnrhlib import HOME, read_config, tossy_path
+from mnrhlib import HOME, read_config, tossling_path
 
 LEGACY_CONFIGS = (os.path.join(HOME, ".config", "tossling", "config.json"), os.path.join(HOME, ".config", "tossy", "config.json"), os.path.join(HOME, ".config", "mnrh", "clip.json"))
 DEFAULT_TOPIC = "mac"
@@ -15,8 +15,8 @@ class AlertError(Exception):
     pass
 
 
-def tossy_config():
-    path = tossy_path()
+def tossling_config():
+    path = tossling_path()
     if path:
         try:
             r = subprocess.run([path, "config", "--json"], capture_output=True, text=True, timeout=15)
@@ -33,7 +33,7 @@ def tossy_config():
 
 
 def endpoint():
-    conf = tossy_config()
+    conf = tossling_config()
     server, token = conf.get("server", "").rstrip("/"), conf.get("token", "")
     return (server, token) if server and token else None
 
@@ -50,7 +50,7 @@ def phone_mode():
 def publish(topic, message, title="", priority=3, tags=None, click=None, markdown=False):
     target = endpoint()
     if not target:
-        raise AlertError("Tossy не настроен: tossy setup")
+        raise AlertError("Tossling не настроен: tossling setup")
     server, token = target
     payload = {"topic": topic, "message": message or title or "—", "priority": int(priority)}
     if title:

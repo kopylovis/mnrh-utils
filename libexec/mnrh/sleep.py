@@ -5,13 +5,17 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 from mnrhlib import OK, WARN, has_flag, paint, run
+import lid
 
 args = sys.argv[1:]
+if args and args[0] == "lid":
+    sys.exit(lid.main(args[1:]))
 if has_flag(args, "-h", "--help") or (args and args[0] not in ("status", "fix", "-a", "--all")):
     print("mnrh sleep        меню с действиями (без терминала — то же, что status)")
     print("mnrh sleep status что сейчас не даёт Mac уснуть и когда он засыпал и просыпался")
     print("mnrh sleep -a     показать и служебные блокировки macOS (дисплей включён, активность ввода)")
     print("mnrh sleep fix    снять зависшие caffeinate: те, чья программа уже закрыта")
+    print("mnrh sleep lid    сон с закрытой крышкой в caffeinate-сессиях Claude (setup, remove, off)")
     sys.exit(0 if has_flag(args, "-h", "--help") else 2)
 show_all = has_flag(args, "-a", "--all")
 
@@ -143,6 +147,7 @@ def status():
                 stale.append(a["pid"])
     if stale:
         print(f"\nЗависших caffeinate: {len(stale)}." + paint("   -> mnrh sleep fix", "2"))
+    print("\n" + "\n".join(lid.status_lines()))
     events = recent_events()
     if events:
         print(f"\n{paint('Последние засыпания и пробуждения:', '1')}")
@@ -157,6 +162,9 @@ def status():
 
 
 def fix():
+    if lid.disabled() and not lid.watcher_pid() and not lid.sessions() and lid.ready():
+        lid.set_disabled(False)
+        print("Крышка снова усыпляет Mac: сторожа не было, а pmset disablesleep остался включён.")
     stale = [a["pid"] for a in assertions() if a["proc"] == "caffeinate" and explain(a)[2]]
     stale = sorted(set(stale))
     if not stale:

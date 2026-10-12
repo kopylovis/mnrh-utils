@@ -232,7 +232,9 @@ def plan(update=True, forget=False, slim=False, fresh=False):
     run = ((["caffeinate"] + caffeinate if caffeinate is not None else []) + [CLAUDE_BIN]
            + (["--session-id", new_sid] if new else ["--resume", sid]) + flags)
     update = update and not new and not slim
-    line = (f"cd {shlex.quote(cwd)} && "
+    keep = (f"/usr/bin/python3 {shlex.quote(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lid.py'))} "
+            "keep >/dev/null 2>&1; " if caffeinate is not None else "")
+    line = (f"cd {shlex.quote(cwd)} && " + keep
             + (f"{{ {shlex.quote(CLAUDE_BIN)} update; " if update else "{ ")
             + ("clear; printf '\\033[3J'; " if new else "")
             + (f"{shlex.quote(MNRH)} claude sessions slim {sid} -y --notice; " if slim else "")

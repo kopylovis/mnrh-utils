@@ -88,16 +88,16 @@ def settings_path(*keys):
 
 CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "mnrh", "config")
 DEFAULT_DEV = os.path.join(HOME, "Developer")
-TOSSY_PATHS = tuple(os.path.join(d, name) for name in ("tossling", "tossy")
+TOSSLING_PATHS = tuple(os.path.join(d, name) for name in ("tossling", "tossy")
                     for d in ("/opt/homebrew/bin", "/usr/local/bin", os.path.join(HOME, ".local", "bin")))
 
 
-def tossy_path():
+def tossling_path():
     for name in ("tossling", "tossy"):
         found = shutil.which(name)
         if found:
             return found
-    return next((p for p in TOSSY_PATHS if os.access(p, os.X_OK)), None)
+    return next((p for p in TOSSLING_PATHS if os.access(p, os.X_OK)), None)
 
 
 PROMPTSILL_PATHS = tuple(os.path.join(d, "promptsill")

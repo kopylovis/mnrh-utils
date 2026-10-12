@@ -90,6 +90,6 @@ case "${1:-help}" in
   --version|-v)   cat "$ROOT/VERSION" ;;
   mem)            shift; run ram "$@" ;;
   kd)             shift; run killdaemons "$@" ;;
-  clip|tossling)  shift; run tossy "$@" ;;
+  clip|tossy)     shift; run tossling "$@" ;;
   *)              cmd="$1"; shift; run "$cmd" "$@" ;;
 esac
