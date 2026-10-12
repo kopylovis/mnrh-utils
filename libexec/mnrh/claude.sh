@@ -151,6 +151,8 @@ fi
 
 cd "$dir" || exit 1
 echo "-> ${dir/#$HOME/~} · $mode"
+[ "$mode" = caffeinate ] && [ ! -f /etc/sudoers.d/mnrh-pmset ] &&
+  printf '\033[2m   закрытая крышка на батарее всё равно усыпит Mac: mnrh sleep lid setup\033[0m\n'
 if [ "$mode" = caffeinate ]; then
   /usr/bin/python3 "$LIB/lid.py" keep >/dev/null 2>&1 || true
   exec caffeinate -is "$CLAUDE_BIN" "${passthrough[@]+"${passthrough[@]}"}"
