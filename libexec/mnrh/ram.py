@@ -16,9 +16,11 @@ if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not
     print("mnrh ram status          кто ест оперативную память, сгруппировано по приложениям")
     print("mnrh ram -p              то же по отдельным процессам")
     print("mnrh ram -n 30           показать больше строк (по умолчанию 15)")
-    print("mnrh ram clean           остановить демоны Gradle и Kotlin и iOS-симуляторы, показать, сколько вернулось")
-    print("mnrh ram clean --daemons только демоны; --sim только симуляторы; --emulator ещё эмулятор Android")
-    print("                         -f снять и занятые сборкой демоны, -y без вопроса (без терминала обязателен)")
+    print("mnrh ram clean           отметить галочками, что остановить: демоны Gradle и Kotlin, iOS-симуляторы,")
+    print("                         эмуляторы Android; потом показать, сколько вернулось")
+    print("mnrh ram clean -y        без меню: демоны и симуляторы (без терминала -y обязателен)")
+    print("  --daemons, --gradle, --kotlin, --sim  только это; --emulator ещё эмулятор Android")
+    print("  -f                     снять и занятые сборкой демоны")
     print("Приложения clean не закрывает: у них могут быть несохранённые данные. Подскажет, какие закрыть вручную.")
     sys.exit(0)
 limit = 15
@@ -121,10 +123,8 @@ def memory_state():
 
 
 def mark(kind, sims_booted):
-    if kind == "daemon" or (kind == "sim" and sims_booted):
+    if kind in ("daemon", "emulator") or (kind == "sim" and sims_booted):
         return f"   <- {CLEAN_HINT}"
-    if kind == "emulator":
-        return f"   <- {CLEAN_HINT} --emulator"
     return ""
 
 
@@ -207,64 +207,140 @@ def stop_daemons(pids):
             pass
 
 
-def clean():
-    picked = [k for k, flag in (("daemon", "--daemons"), ("sim", "--sim"), ("emulator", "--emulator"))
-              if flag in args]
-    wanted = set(picked) if picked and picked != ["emulator"] else {"daemon", "sim"} | set(picked)
-    force = has_flag(args, "-f", "--force")
-    rows = collect()
-    by_kind = defaultdict(float)
-    for r in rows:
-        by_kind[r["kind"]] += r["mem"]
+def avd_name(adb, serial):
+    lines = run([adb, "-s", serial, "emu", "avd", "name"], timeout=10).splitlines()
+    return lines[0].strip() if lines and lines[0].strip() else serial
 
-    plan = []
+
+def find_targets(rows):
+    """Что можно остановить, по строке на пункт меню."""
     daemons = [r for r in rows if r["kind"] == "daemon" and r["cmd"].split(" ")[0].rsplit("/", 1)[-1] == "java"]
-    busy = [r for r in daemons if r["cpu"] > BUSY_CPU and not force] if "daemon" in wanted else []
-    idle = [r for r in daemons if r not in busy]
-    if "daemon" in wanted and idle:
-        plan.append(f"демоны сборки: {len(idle)}, {fmt(sum(r['mem'] for r in idle)).strip()}")
-    sims = booted_simulators() if "sim" in wanted else []
+    targets = []
+    for key, title in (("gradle", "Gradle-демоны"), ("kotlin", "Kotlin-демоны")):
+        own = [r for r in daemons if (r["label"].startswith("Kotlin")) == (key == "kotlin")]
+        idle = [r for r in own if r["cpu"] <= BUSY_CPU]
+        busy = [r for r in own if r["cpu"] > BUSY_CPU]
+        for part, group, note in ((key, idle, ""), (key + "-busy", busy, "заняты сборкой, она упадёт")):
+            if group:
+                targets.append({"key": part, "label": f"{title}: {len(group)}", "note": note,
+                                "mb": sum(r["mem"] for r in group), "pids": [r["pid"] for r in group]})
+    mb = defaultdict(float)
+    for r in rows:
+        mb[r["kind"]] += r["mem"]
+    sims = booted_simulators()
     if sims:
-        plan.append(f"iOS-симуляторы: {', '.join(sims)}, {fmt(by_kind['sim']).strip()}"
-                    " (данные и входы в аккаунты сохранятся)")
+        targets.append({"key": "sim", "label": f"iOS-симуляторы: {', '.join(sims)}", "mb": mb["sim"],
+                        "note": "данные и входы в аккаунты сохранятся"})
     adb = adb_path()
-    emus = running_emulators(adb) if "emulator" in wanted else []
+    emus = running_emulators(adb)
     if emus:
-        plan.append(f"Android-эмуляторы: {', '.join(emus)}, {fmt(by_kind['emulator']).strip()}"
-                    " (состояние сохранится в Quick Boot)")
+        targets.append({"key": "emulator", "label": "Android-эмуляторы: " + ", ".join(avd_name(adb, e) for e in emus),
+                        "mb": mb["emulator"], "note": "состояние сохранится в Quick Boot", "adb": adb, "serials": emus})
+    return targets
 
-    if not plan:
-        print("Останавливать нечего" + (": демоны заняты сборкой, снять их: mnrh ram clean -f." if busy else "."))
+
+def wanted_keys():
+    picked = set()
+    for flag, keys in (("--daemons", ("gradle", "kotlin")), ("--gradle", ("gradle",)), ("--kotlin", ("kotlin",)),
+                       ("--sim", ("sim",)), ("--emulator", ("emulator",))):
+        if flag in args:
+            picked.update(keys)
+    if not picked or picked == {"emulator"}:
+        picked |= {"gradle", "kotlin", "sim"}
+    if has_flag(args, "-f", "--force"):
+        picked |= {k + "-busy" for k in ("gradle", "kotlin") if k in picked}
+    return picked
+
+
+def choose(targets, marked):
+    from menu import pick_many
+    rows = [(t["key"], f"{fmt(t['mb']):>9}  {t['label']}" + (f"  \x1b[2m{t['note']}\x1b[0m" if t["note"] else ""))
+            for t in targets]
+
+    def summary(marks):
+        return f"отмечено {len(marks)} · {fmt(sum(targets[i]['mb'] for i in marks)).strip()}"
+
+    picked = pick_many(rows, title="\x1b[1;35mmnrh ram\x1b[0m  \x1b[2mчто остановить?\x1b[0m",
+                       marked={i for i, t in enumerate(targets) if t["key"] in marked}, summary=summary)
+    return None if picked is None else [targets[i] for i in sorted(picked)]
+
+
+def show_plan(chosen):
+    for t in chosen:
+        note = f"  ({t['note']})" if t["note"] else ""
+        print(f"  {fmt(t['mb'])}  {t['label']}{note}")
+
+
+def stop(chosen):
+    before = memory_state()
+    pids = [p for t in chosen for p in t.get("pids", [])]
+    if pids:
+        stop_daemons(pids)
+    if any(t["key"] == "sim" for t in chosen):
+        run(["xcrun", "simctl", "shutdown", "all"], timeout=120)
+    emu = next((t for t in chosen if t["key"] == "emulator"), None)
+    if emu:
+        for serial in emu["serials"]:
+            run([emu["adb"], "-s", serial, "emu", "kill"], timeout=60)
+        for _ in range(15):
+            if not any(r["kind"] == "emulator" for r in collect()):
+                break
+            time.sleep(1)
+    time.sleep(3)
+    after = memory_state()
+    print(f"Свободно: {max(before['total'] - before['used'], 0):.1f} -> "
+          f"{max(after['total'] - after['used'], 0):.1f} ГБ   |   swap: {before['swap']:.1f} -> {after['swap']:.1f} ГБ")
+    if after["swap"] > 0.5 and after["swap"] >= before["swap"] - 0.1:
+        print("Swap сам уменьшается не сразу: macOS подтягивает страницы обратно по мере обращения к ним.")
+
+
+def clean():
+    rows = collect()
+    targets = find_targets(rows)
+    marked = wanted_keys()
+    interactive = sys.stdin.isatty() and sys.stdout.isatty() and not has_flag(args, "-y", "--yes")
+    chosen = []
+    if not targets:
+        print("Останавливать нечего.")
+    elif interactive:
+        from menu import choice
+        while True:
+            chosen = choose(targets, marked)
+            if not chosen:
+                print("Ничего не остановлено.")
+                chosen = []
+                break
+            print("Будет остановлено:")
+            show_plan(chosen)
+            print()
+            answer = choice("Остановить?", [("go", "Остановить", "yд"), ("back", "← К списку", "nн"),
+                                            ("quit", "Выйти", "qй")], default=0, back="back")
+            if answer == "go":
+                break
+            if answer == "quit":
+                print("Ничего не остановлено.")
+                chosen = []
+                break
+            marked = {t["key"] for t in chosen}
     else:
-        print("Будет остановлено:")
-        for line in plan:
-            print(f"  {line}")
-        if busy:
-            print(f"  пропускаю занятые сборкой демоны: {len(busy)} (снять и их: -f)")
-        if not confirm("Остановить?", has_flag(args, "-y", "--yes")):
-            print("Отменено.")
-            return
-        before = memory_state()
-        if "daemon" in wanted and idle:
-            stop_daemons([r["pid"] for r in idle])
-        if sims:
-            run(["xcrun", "simctl", "shutdown", "all"], timeout=120)
-        for serial in emus:
-            run([adb, "-s", serial, "emu", "kill"], timeout=60)
-        if emus:
-            for _ in range(15):
-                if not any(r["kind"] == "emulator" for r in collect()):
-                    break
-                time.sleep(1)
-        time.sleep(3)
-        after = memory_state()
-        print(f"Свободно: {max(before['total'] - before['used'], 0):.1f} -> "
-              f"{max(after['total'] - after['used'], 0):.1f} ГБ   |   swap: {before['swap']:.1f} -> {after['swap']:.1f} ГБ")
-        if after["swap"] > 0.5 and after["swap"] >= before["swap"] - 0.1:
-            print("Swap сам уменьшается не сразу: macOS подтягивает страницы обратно по мере обращения к ним.")
+        chosen = [t for t in targets if t["key"] in marked]
+        skipped = [t for t in targets if t["key"].endswith("-busy") and t not in chosen]
+        if not chosen:
+            print("Останавливать нечего" + (": демоны заняты сборкой, снять их: mnrh ram clean -f." if skipped else "."))
+        else:
+            print("Будет остановлено:")
+            show_plan(chosen)
+            if skipped:
+                print(f"  пропускаю занятые сборкой демоны: {sum(len(t['pids']) for t in skipped)} (снять и их: -f)")
+            if not confirm("Остановить?", has_flag(args, "-y", "--yes")):
+                print("Отменено.")
+                return
+        emu = next((t for t in targets if t["key"] == "emulator" and t not in chosen), None)
+        if emu and emu["mb"] >= 512:
+            print(f"Android-эмулятор держит {fmt(emu['mb']).strip()}, его не трогал: {CLEAN_HINT} --emulator")
+    if chosen:
+        stop(chosen)
 
-    if "emulator" not in wanted and by_kind["emulator"] >= 512:
-        print(f"Android-эмулятор держит {fmt(by_kind['emulator']).strip()}, его не трогал: {CLEAN_HINT} --emulator")
     apps = defaultdict(float)
     for r in rows:
         if r["kind"] == "app":
