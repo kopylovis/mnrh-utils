@@ -43,6 +43,15 @@ def tilde(path):
     return path.replace(HOME, "~", 1) if path.startswith(HOME) else path
 
 
+# Entries macOS itself puts into PATH even when the folder does not exist yet:
+# cryptex mounts and /etc/paths.d/10-pmk-global (/pkg/env/global/bin), which comes with the OS.
+MACOS_PATH_ENTRIES = ("/pkg/env/global/bin",)
+
+
+def macos_path_entry(path):
+    return path in MACOS_PATH_ENTRIES or "cryptexd" in path or path.startswith("/var/run/com.apple.")
+
+
 def has_flag(args, *names):
     return any(a in args for a in names)
 

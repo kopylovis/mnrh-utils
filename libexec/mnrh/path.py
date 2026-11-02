@@ -8,8 +8,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import (BAD, CONFIG, HOME, OK, WARN, confirm, du_bytes, has_flag, human, login_path, paint, projects,
-                     projects_dir, run, tilde, version_key)
+from mnrhlib import (BAD, CONFIG, HOME, OK, WARN, confirm, du_bytes, has_flag, human, login_path, macos_path_entry, paint,
+                     projects, projects_dir, run, tilde, version_key)
 
 args = sys.argv[1:]
 FLAGS = ("-a", "--all", "-n", "--dry-run", "-y", "--yes")
@@ -98,8 +98,8 @@ def check_path(path):
     for i, d in enumerate(path, 1):
         dup = seen[os.path.realpath(d)]
         if not os.path.isdir(d):
-            if d.startswith("/var/run/com.apple."):
-                continue  # служебные папки cryptex: появляются только при необходимости
+            if macos_path_entry(d):
+                continue  # пути самой macOS (cryptex, 10-pmk-global): папки появляются только при необходимости
             hint = "zsh кладёт её в PATH по умолчанию; уходит, если не менять PATH в ~/.zshenv" \
                 if d == "/usr/ucb" and zshenv_path else f"убрать строку: {where_added(d) or 'не нашёл где'}"
             say(BAD, f"{i:>2}. {tilde(d)} — такой папки нет", hint)
@@ -136,7 +136,7 @@ def check_rc():
                 found = True
     for f in sorted(glob.glob("/etc/paths.d/*")):
         for d in open(f).read().split():
-            if not os.path.exists(d) and not d.startswith("/var/run/com.apple."):
+            if not os.path.exists(d) and not macos_path_entry(d):
                 say(WARN, f"{f}: {d} — папки нет", f"sudo rm {f}")
                 found = True
     if not found:
