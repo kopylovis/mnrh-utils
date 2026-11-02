@@ -28,6 +28,7 @@ PIDFILE = os.path.join(STATE, "mihomo.pid")
 LOCK = os.path.join(STATE, "lock")
 LOG = os.path.join(STATE, "mihomo.log")
 LAST = os.path.join(STATE, "last")
+EXIT = os.path.join(STATE, "exit.json")
 SUB_URL = os.path.join(CONF_DIR, "subscription.url")
 SUB_FILE = os.path.join(CONF_DIR, "subscription.txt")
 DEFAULT_PORT = 17890
@@ -238,9 +239,14 @@ def start():
         time.sleep(0.5)
     else:
         print(f"mnrh claude proxy: VPS пока не отвечает, запускаю всё равно (лог {tilde(LOG)})", file=sys.stderr)
+    got = trace(proxy_env(p))
+    try:
+        with open(EXIT, "w") as f:
+            json.dump({"ip": got[0], "loc": got[1]} if got else {}, f)
+    except OSError:
+        pass
     want = setting("country").upper()
     if want:
-        got = trace(proxy_env(p))
         if not got or (got[1] or "").upper() != want:
             stop()
             raise ProxyError(f"выход через {fmt(got)}, а нужен {want}. Сессию через прокси не запускаю, "
@@ -258,10 +264,11 @@ def stop():
             if not alive(pid):
                 break
             time.sleep(0.1)
-    try:
-        os.remove(PIDFILE)
-    except OSError:
-        pass
+    for path in (PIDFILE, EXIT):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
     return pid is not None
 
 
@@ -273,6 +280,14 @@ def proxy_env(p):
     env["ALL_PROXY"] = env["all_proxy"] = f"socks5h://127.0.0.1:{p}"
     env["NO_PROXY"] = env["no_proxy"] = NO_PROXY
     env["MNRH_PROXY"] = str(p)
+    # промптсилл (строка состояния) покажет «proxy KZ»: страна выхода, которую проверили при старте mihomo
+    try:
+        with open(EXIT) as f:
+            loc = json.load(f).get("loc")
+    except (OSError, ValueError):
+        loc = None
+    if isinstance(loc, str) and re.match(r"^[A-Za-z]{2}$", loc):
+        env["PROMPTSILL_PROXY_LABEL"] = loc.upper()
     return env
 
 
@@ -374,9 +389,24 @@ def free_port():
     return p
 
 
+def install_mihomo():
+    brew = shutil.which("brew") or next((b for b in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew")
+                                         if os.access(b, os.X_OK)), None)
+    if not brew:
+        print(f"{BAD} нет mihomo и нет Homebrew. Поставь mihomo: https://wiki.metacubex.one")
+        return False
+    if sys.stdin.isatty():
+        answer = input("Нужен mihomo. Поставить через brew install mihomo? [Y/n] ").strip().lower()
+        if answer not in ("", "y", "yes", "д", "да"):
+            return False
+    print("brew install mihomo …")
+    subprocess.run([brew, "install", "mihomo"])
+    return bool(mihomo_bin())
+
+
 def setup(args):
-    if not mihomo_bin():
-        print(f"{BAD} нет mihomo. Поставь: brew install mihomo")
+    if not mihomo_bin() and not install_mihomo():
+        print(f"{BAD} без mihomo прокси не заработает: brew install mihomo")
         return 1
     opts, rest, it = {}, [], iter(args)
     for a in it:
