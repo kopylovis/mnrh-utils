@@ -193,6 +193,9 @@ def check_launchd():
     for d in dirs:
         for plist in glob.glob(os.path.join(d, "*.plist")):
             total += 1
+            if os.path.islink(plist) and not os.path.exists(plist):
+                orphans.append((plist, os.readlink(plist)))
+                continue
             prog = program_of(plist)
             if prog and prog.startswith("/") and not os.path.exists(prog):
                 orphans.append((plist, prog))
