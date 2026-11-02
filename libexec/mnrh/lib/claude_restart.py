@@ -229,7 +229,9 @@ def plan(update=True, forget=False, slim=False, fresh=False):
         flags = drop_name(flags)
 
     new_sid = str(uuid.uuid4()) if new else sid
-    run = ((["caffeinate"] + caffeinate if caffeinate is not None else []) + [CLAUDE_BIN]
+    # сессия через VPS (mnrh claude -x): её окружение досталось и нам, перезапускаем тоже через VPS
+    proxy = [MNRH, "claude", "proxy", "run", "--"] if os.environ.get("MNRH_PROXY") else []
+    run = (proxy + (["caffeinate"] + caffeinate if caffeinate is not None else []) + [CLAUDE_BIN]
            + (["--session-id", new_sid] if new else ["--resume", sid]) + flags)
     update = update and not new and not slim
     keep = (f"/usr/bin/python3 {shlex.quote(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lid.py'))} "

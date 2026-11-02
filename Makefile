@@ -71,6 +71,12 @@ test:
 	@./bin/mnrh alert -h | grep -q "alert run"
 	@./bin/mnrh alert status </dev/null >/dev/null || true
 	@./bin/mnrh claude notify -h | grep -q "notify phone"
+	@./bin/mnrh claude proxy -h | grep -q mihomo
+	@./bin/mnrh claude -h | grep -q -- '-x  '
+	@XDG_CONFIG_HOME=/nonexistent-mnrh ./bin/mnrh claude proxy run -- true 2>/dev/null; test $$? -eq 2
+	@XDG_CONFIG_HOME=/nonexistent-mnrh ./bin/mnrh claude proxy >/dev/null; test $$? -eq 1
+	@! XDG_CONFIG_HOME=/nonexistent-mnrh ./bin/mnrh claude proxy configured
+	@./bin/mnrh claude proxy setup not-a-url </dev/null >/dev/null; test $$? -ne 0
 	@./bin/mnrh claude guard >/dev/null
 	@./bin/mnrh claude guard -h >/dev/null
 	@./bin/mnrh claude humanize -h | grep -q ПРГЕН
