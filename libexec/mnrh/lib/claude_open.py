@@ -205,7 +205,9 @@ def open_claude(args, mnrh):
             return f"Не отметил {tilde(target)} доверенной в {tilde(CLAUDE_JSON)}: {e}", True
 
     name = "~" if target == HOME else os.path.basename(target)
-    cmd = [mnrh, "claude", "open", target if direct else name, MODES[mode], "--new"]
+    # из сессии через VPS новое окно тоже идёт через VPS, иначе напрямую, без вопроса в меню
+    net = "-x" if os.environ.get("MNRH_PROXY") else "-d"
+    cmd = [mnrh, "claude", "open", target if direct else name, MODES[mode], net, "--new"]
     rc = args.get("remote_control", True) is not False
     # имя у --remote-control необязательное: без него первый запрос принялся бы за имя
     extra = (["--remote-control", "home" if name == "~" else name] if rc else []) + \
@@ -231,7 +233,7 @@ def open_claude(args, mnrh):
         if pid:
             break
         time.sleep(0.5)
-    where = f"{tilde(target)}, режим {mode}"
+    where = f"{tilde(target)}, режим {mode}" + (", через VPS" if net == "-x" else "")
     url = remote_url(term, tty) if pid and rc else ""
     if pid:
         text = f"Открыл новое окно {app} ({tty}): Claude Code запущен в {where}, pid {pid}."

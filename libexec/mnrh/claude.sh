@@ -22,6 +22,8 @@ mnrh claude root            запустить в домашнем катало�
 mnrh claude <имя>           сразу в проекте (достаточно начала имени) или в папке по пути
 mnrh claude ... -n          обычная сессия без вопроса
 mnrh claude ... -k          caffeinate без вопроса
+mnrh claude ... -x          через свой VPS: только эта сессия, остальные программы напрямую (mnrh claude proxy)
+mnrh claude ... -d          напрямую, без вопроса про VPS
 mnrh claude ... --new       новая сессия, не предлагать продолжить сохранённые
 mnrh claude ... -- <аргументы claude>   например: mnrh claude kcalm -- --continue
 mnrh claude sessions        сохранённые сессии: размер, продолжить, перенести в другую папку, удалить
@@ -34,6 +36,7 @@ mnrh claude brief           где мы остановились: git, прош�
 mnrh claude parallel "<…>"  задача в отдельной ветке и worktree, во втором окне Claude (/parallel)
 mnrh claude ask <пр> <…>    спросить отдельный Claude про другой проект, только чтение (/ask)
 mnrh claude release-notes   материал для «Что нового» к релизу (/release-notes)
+mnrh claude proxy           прокси через VPS для отдельных сессий: setup, test, remove (подробнее: proxy -h)
 mnrh claude guard           защита секретов: спросит перед чтением или удалением ключей (on, off, test)
 mnrh claude humanize        писать без признаков нейросети: on, off, check <файл>, rules (/humanize)
 mnrh claude notify          уведомления, когда Claude ждёт тебя (on, off, after <сек>, test, telegram)
@@ -47,6 +50,7 @@ EOF
 
 case "${1:-}" in
   open) shift ;;
+  proxy) shift; exec /usr/bin/python3 "$(dirname "$MENU")/claude_proxy.py" "$@" ;;
   sessions) shift; exec /usr/bin/python3 "$(dirname "$MENU")/claude_sessions.py" "$@" ;;
   brief) exec /usr/bin/python3 "$(dirname "$MENU")/claude_brief.py" "$@" ;;
   parallel) exec /usr/bin/python3 "$(dirname "$MENU")/claude_parallel.py" "$@" ;;
@@ -59,12 +63,14 @@ case "${1:-}" in
   restart|forget|fresh|slim|mcp|setup|notice|session-end) exec /usr/bin/python3 "$(dirname "$MENU")/claude_restart.py" "$@" ;;
 esac
 
-target="" mode="" new=0 passthrough=()
+target="" mode="" net="" new=0 passthrough=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) help; exit 0 ;;
     -n|--normal) mode=normal ;;
     -k|--caffeinate) mode=caffeinate ;;
+    -x|--proxy) net=vps ;;
+    -d|--direct) net=direct ;;
     --new) new=1 ;;
     --) shift; passthrough=("$@"); break ;;
     -*) echo "mnrh claude: неизвестный флаг $1" >&2; exit 2 ;;
@@ -149,13 +155,30 @@ if [ -z "$mode" ]; then
   [ "$idx" = 1 ] && mode=normal || mode=caffeinate
 fi
 
+PROXY="$LIB/claude_proxy.py"
+if [ -z "$net" ]; then
+  net=direct
+  if /usr/bin/python3 "$PROXY" configured; then
+    [ "$(/usr/bin/python3 "$PROXY" last)" = vps ] && def=1 || def=0
+    idx=$(printf 'напрямую\tнапрямую\nvps\tчерез VPS — только эта сессия, остальное напрямую\n' |
+      /usr/bin/python3 "$MENU" --title "Сеть:" --label "Сеть" --default "$def") || exit $?
+    [ "$idx" = 1 ] && net=vps
+    /usr/bin/python3 "$PROXY" remember "$net"
+  fi
+fi
+pre=()
+if [ "$net" = vps ]; then
+  /usr/bin/python3 "$PROXY" configured || { echo "mnrh claude: прокси не настроен или нет mihomo: mnrh claude proxy setup" >&2; exit 1; }
+  pre=(/usr/bin/python3 "$PROXY" run --)
+fi
+
 cd "$dir" || exit 1
-echo "-> ${dir/#$HOME/~} · $mode"
+echo "-> ${dir/#$HOME/~} · $mode$([ "$net" = vps ] && echo ' · через VPS')"
 [ "$mode" = caffeinate ] && [ ! -f /etc/sudoers.d/mnrh-pmset ] &&
   printf '\033[2m   закрытая крышка на батарее всё равно усыпит Mac: mnrh sleep lid setup\033[0m\n'
 if [ "$mode" = caffeinate ]; then
   /usr/bin/python3 "$LIB/lid.py" keep >/dev/null 2>&1 || true
-  exec caffeinate -is "$CLAUDE_BIN" "${passthrough[@]+"${passthrough[@]}"}"
+  exec ${pre[@]+"${pre[@]}"} caffeinate -is "$CLAUDE_BIN" "${passthrough[@]+"${passthrough[@]}"}"
 else
-  exec "$CLAUDE_BIN" "${passthrough[@]+"${passthrough[@]}"}"
+  exec ${pre[@]+"${pre[@]}"} "$CLAUDE_BIN" "${passthrough[@]+"${passthrough[@]}"}"
 fi
