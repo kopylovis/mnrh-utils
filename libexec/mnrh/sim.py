@@ -33,6 +33,14 @@ def load():
     return devices, runtimes
 
 
+PLATFORMS = {"iphonesimulator": "iOS", "watchsimulator": "watchOS", "appletvsimulator": "tvOS", "xrsimulator": "visionOS"}
+
+
+def runtime_name(r):
+    platform = r.get("platformIdentifier", "").rsplit(".", 1)[-1]
+    return f"{PLATFORMS.get(platform, platform or '?')} {r.get('version', '?')}"
+
+
 def old_runtimes(runtimes):
     by_platform = {}
     for rid, r in runtimes.items():
@@ -78,7 +86,7 @@ def status():
             when, _ = ago(r.get("lastUsedAt"))
             used_by = by_rt.get(r.get("runtimeIdentifier", ""), 0)
             mark = paint("   -> mnrh sim clean --runtimes", "2") if rid in old_ids else ""
-            print(f"  {human(r.get('sizeBytes', 0)):>9}  iOS {r.get('version', '?'):<10} запуск: {when:<13} устройств: {used_by}{mark}")
+            print(f"  {human(r.get('sizeBytes', 0)):>9}  {runtime_name(r):<14} запуск: {when:<13} устройств: {used_by}{mark}")
 
 
 def stop():
@@ -106,13 +114,13 @@ def clean():
     total = sum(r.get("sizeBytes", 0) for _, r in old)
     for _, r in old:
         when, _ = ago(r.get("lastUsedAt"))
-        print(f"  {human(r.get('sizeBytes', 0)):>9}  iOS {r.get('version')}  запуск: {when}")
+        print(f"  {human(r.get('sizeBytes', 0)):>9}  {runtime_name(r)}  запуск: {when}")
     if not confirm(f"Удалить эти runtime, {human(total)}?", assume_yes):
         print("Отменено.")
         return
     for rid, r in old:
         run(["xcrun", "simctl", "runtime", "delete", rid], timeout=300)
-        print(f"  удалён iOS {r.get('version')}")
+        print(f"  удалён {runtime_name(r)}")
     print("macOS освобождает место в фоне, свободное пространство вырастет через минуту-две.")
 
 
