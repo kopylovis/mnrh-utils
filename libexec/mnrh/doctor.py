@@ -8,8 +8,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import BAD, HOME, OK, WARN, git_versions, human, has_flag, paint, run, settings_path, tilde, \
-    version_key
+from mnrhlib import BAD, HOME, OK, WARN, git_versions, human, has_flag, macos_path_entry, paint, run, settings_path, \
+    tilde, version_key
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help"):
@@ -111,7 +111,7 @@ def check_shell():
     env = {"HOME": HOME, "TERM": "xterm", "SHELL": "/bin/zsh"}
     path = run(["/bin/zsh", "-l", "-i", "-c", "echo $PATH"], timeout=20, env=env).strip().splitlines()
     entries = path[-1].split(":") if path else []
-    dead = [p for p in entries if p and not os.path.isdir(p) and "cryptexd" not in p]
+    dead = [p for p in entries if p and not os.path.isdir(p) and not macos_path_entry(p)]
     dups = sorted({p for p in entries if entries.count(p) > 1})
     if dead:
         item("warn", f"в PATH несуществующие каталоги: {', '.join(tilde(p) for p in dead)}")
