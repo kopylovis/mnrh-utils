@@ -40,7 +40,8 @@ mnrh claude proxy           прокси через VPS для отдельны�
 mnrh claude guard           защита секретов: спросит перед чтением или удалением ключей (on, off, test)
 mnrh claude humanize        писать без признаков нейросети: on, off, check <файл>, rules (/humanize)
 mnrh claude notify          уведомления, когда Claude ждёт тебя (on, off, after <сек>, test, telegram)
-mnrh claude setup           поставить /restart, MCP-сервер mnrh и хук zsh для перезапуска (--remove убрать)
+mnrh claude setup           поставить /restart, хуки, MCP-сервер mnrh, хук zsh и прокси через VPS
+                            (--country KZ для прокси, --remove убрать; подробнее: setup -h)
 
 caffeinate (по умолчанию) не даёт Mac уснуть, пока идёт сессия:
 удобно для долгих задач и Remote Control с телефона. Экран при этом гаснуть может.
@@ -83,6 +84,9 @@ if [ ! -t 0 ] || [ ! -t 1 ]; then
   echo "mnrh claude: нужен терминал — Claude Code интерактивный." >&2
   exit 2
 fi
+
+# setup на этом Mac не делали или после обновления в нем появился новый шаг: предложить настроить
+/usr/bin/python3 "$LIB/claude_setup.py" check
 
 DEV=$(projects_dir)
 if [ ! -f "$CONF" ] && [ -z "${MNRH_PROJECTS:-}" ] && [ ! -d "$DEV" ]; then

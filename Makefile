@@ -77,6 +77,11 @@ test:
 	@XDG_CONFIG_HOME=/nonexistent-mnrh ./bin/mnrh claude proxy >/dev/null; test $$? -eq 1
 	@! XDG_CONFIG_HOME=/nonexistent-mnrh ./bin/mnrh claude proxy configured
 	@./bin/mnrh claude proxy setup not-a-url </dev/null >/dev/null; test $$? -ne 0
+	@./bin/mnrh claude setup --country KZ --bogus 2>&1 >/dev/null | grep -q 'не знаю --bogus'
+	@./bin/mnrh claude setup --country KAZ 2>/dev/null; test $$? -eq 2
+	@./bin/mnrh claude setup -h | grep -q -- '--country'
+	@HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent-mnrh /usr/bin/python3 libexec/mnrh/lib/claude_setup.py pending | grep -q '^fresh commands .*proxy$$'
+	@HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent-mnrh /usr/bin/python3 libexec/mnrh/lib/claude_setup.py check </dev/null | wc -c | grep -q '^ *0$$'
 	@./bin/mnrh claude guard >/dev/null
 	@./bin/mnrh claude guard -h >/dev/null
 	@./bin/mnrh claude humanize -h | grep -q ПРГЕН
