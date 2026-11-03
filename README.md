@@ -22,7 +22,7 @@ mnrh claude sessions  сохранённые сессии с размером: �
 mnrh claude sessions clean   битые ссылки, пустые сессии, папки удалённых проектов
 mnrh claude sessions search fastlane подпис   поиск по всем прошлым сессиям (-p проект, -d дней)
 mnrh claude sessions show <id> [N]            прочитать сессию с сообщения N
-mnrh claude setup     поставить /restart, /forget, MCP-сервер mnrh, хук zsh и хуки Claude (--remove убрать)
+mnrh claude setup     поставить /restart, /forget, MCP-сервер mnrh, хук zsh, хуки Claude и прокси (--remove убрать)
 mnrh claude restart   изнутри Claude: закрыть, claude update, открыть эту же сессию снова
 mnrh claude forget    изнутри Claude: удалить эту сессию без следа и открыть чистую
 mnrh claude fresh     изнутри Claude: открыть новую сессию без названия, эта остаётся в /resume
@@ -110,6 +110,11 @@ mnrh init setup
 `MNRH_PROJECTS=<папка>` переопределяет её на время.
 
 `mnrh claude setup` кладёт команды `/restart` и `/forget`, хук zsh и регистрирует MCP-сервер `mnrh` в Claude Code.
+Если прокси через VPS еще не настроен, setup спрашивает, настроить ли его сейчас, и просит ссылку на подписку
+(`mnrh claude setup --country KZ` сразу задает страну выхода). Какие шаги сделаны, setup записывает
+в `~/.config/mnrh/claude-setup.json`. Если `mnrh claude` запустить до setup или после обновления, в котором
+в setup появился новый шаг, он перечислит ненастроенное и предложит настроить. "Не предлагать" больше
+не спрашивает про эти шаги, `mnrh claude setup` все равно настроит их.
 Обновление: `brew upgrade mnrh`. Удаление: `brew uninstall mnrh`.
 
 ### Из исходников, для разработки

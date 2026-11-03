@@ -1004,9 +1004,43 @@ def notice_hook(install):
         print(f"✓ без вопроса о разрешении: {', '.join(READ_ONLY)} (они только читают)")
 
 
+SETUP_USAGE = """mnrh claude setup [--country KZ] [--only <имя>]
+    поставить команды /restart, /forget и другие, хуки Claude Code, хук zsh, MCP-сервер mnrh
+    и настроить прокси через VPS, если он еще не настроен. --country и --only уходят в mnrh claude proxy setup
+mnrh claude setup --remove    убрать все это (прокси остается, его убирает mnrh claude proxy remove)"""
+
+
+def setup_args(args):
+    """{'remove': bool, 'country': str, 'only': str} или None с ошибкой в stderr."""
+    opts, it = {"remove": False, "country": "", "only": ""}, iter(args)
+    for a in it:
+        if a == "--remove":
+            opts["remove"] = True
+        elif a in ("--country", "--only"):
+            value = next(it, "").strip()
+            if not value or value.startswith("-"):
+                print(f"mnrh claude setup: после {a} нужно значение\n\n{SETUP_USAGE}", file=sys.stderr)
+                return None
+            opts[a[2:]] = value
+        else:
+            print(f"mnrh claude setup: не знаю {a}\n\n{SETUP_USAGE}", file=sys.stderr)
+            return None
+    if opts["country"] and not re.match(r"^[A-Za-z]{2}$", opts["country"]):
+        print("mnrh claude setup: --country ждет код страны из двух букв, например KZ", file=sys.stderr)
+        return None
+    return opts
+
+
 def setup(args):
+    import claude_setup
     marker = "share/mnrh/restart.zsh"
-    if "--remove" in args:
+    if any(a in ("-h", "--help", "help") for a in args):
+        print(SETUP_USAGE)
+        return 0
+    opts = setup_args(args)
+    if opts is None:
+        return 2
+    if opts["remove"]:
         for f in [COMMAND_FILE, FORGET_FILE, FRESH_FILE, SLIM_FILE, OLD_FORGET_FILE] + \
                 [os.path.join(COMMANDS, f"{n}.md") for n in EXTRA_COMMANDS]:
             if os.path.exists(f):
@@ -1018,6 +1052,8 @@ def setup(args):
         if kept != lines:
             write_zshrc(kept)
         print(f"Убрал /restart, /forget, /fresh, /slim, /todo, /where, /release-notes, /parallel, /shot, /ask, /humanize, MCP-сервер mnrh и хук из {tilde(ZSHRC)}.")
+        # mnrh claude больше не предлагает setup при запуске; вернуть все: mnrh claude setup
+        claude_setup.write(set(), set(claude_setup.IDS))
         return 0
     os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
     if os.path.exists(OLD_FORGET_FILE):
@@ -1062,6 +1098,10 @@ def setup(args):
         print(f"✓ приложение уведомлений → {tilde(claude_notify.AGENT.app)}; проверить: mnrh claude notify test")
     else:
         print("✗ не собрал приложение уведомлений: нужен swiftc (xcode-select --install)")
+    done = set(claude_setup.AUTO)
+    proxy = claude_setup.proxy_step(opts["country"], opts["only"])
+    claude_setup.record(done | ({"proxy"} if proxy == "done" else set()),
+                        {"proxy"} if proxy == "skipped" else set())
     print("Подхватится в новых вкладках и сессиях Claude Code; в уже открытых — после перезапуска.")
     return 0
 
