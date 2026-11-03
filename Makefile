@@ -77,6 +77,7 @@ test:
 	@XDG_CONFIG_HOME=/nonexistent-mnrh ./bin/mnrh claude proxy >/dev/null; test $$? -eq 1
 	@! XDG_CONFIG_HOME=/nonexistent-mnrh ./bin/mnrh claude proxy configured
 	@./bin/mnrh claude proxy setup not-a-url </dev/null >/dev/null; test $$? -ne 0
+	@XDG_CONFIG_HOME=$$(mktemp -d) /usr/bin/python3 -c 'import sys, os, base64; sys.path.insert(0, "libexec/mnrh/lib"); import claude_proxy as c; os.makedirs(c.CONF_DIR); open(c.SUB_FILE, "w").write(base64.b64encode(b"vless://u@vps.example.com:443#a\nhysteria2://p@203.0.113.7:1#b\n").decode()); assert c.subscription_servers() == ["vps.example.com"]'
 	@./bin/mnrh claude setup --country KZ --bogus 2>&1 >/dev/null | grep -q 'не знаю --bogus'
 	@./bin/mnrh claude setup --country KAZ 2>/dev/null; test $$? -eq 2
 	@./bin/mnrh claude setup -h | grep -q -- '--country'

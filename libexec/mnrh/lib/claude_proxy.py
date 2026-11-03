@@ -5,8 +5,10 @@ mihomo слушает HTTP/SOCKS на 127.0.0.1 и отправляет всё �
 Системный прокси и TUN не трогаем: через VPS идёт только процесс, которому дали HTTPS_PROXY, и его потомки.
 mihomo запускается с первой такой сессией и останавливается после последней.
 """
+import base64
 import fcntl
 import getpass
+import ipaddress
 import json
 import os
 import re
@@ -193,6 +195,65 @@ def pin_config():
         os.replace(CONFIG + ".tmp", CONFIG)
 
 
+def subscription_servers():
+    """Имена серверов из скачанной подписки: YAML mihomo (server: ...) или base64 со ссылками vless://, hysteria2://."""
+    try:
+        with open(SUB_FILE, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return []
+    text = raw.decode("utf-8", "replace")
+    if "proxies:" not in text and "://" not in text:
+        packed = re.sub(rb"\s", b"", raw)
+        for decode in (base64.b64decode, base64.urlsafe_b64decode):
+            try:
+                text = decode(packed + b"=" * (-len(packed) % 4)).decode("utf-8", "replace")
+                break
+            except ValueError:
+                pass
+    names = re.findall(r"\bserver:\s*['\"]?([\w.-]+)", text)
+    for word in text.split():
+        if "://" in word:
+            try:
+                names.append(urllib.parse.urlsplit(word).hostname or "")
+            except ValueError:
+                pass
+    found = set()
+    for name in names:
+        try:
+            ipaddress.ip_address(name)
+        except ValueError:
+            if re.match(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$", name):
+                found.add(name.lower())
+    return sorted(found)
+
+
+def pin_hosts():
+    """Адреса серверов подписки в hosts mihomo. mihomo ходит к DNS через Wi-Fi, мимо VPN, и если DNS в системе
+    корпоративный (доступен только через туннель), имя сервера он не узнает. Системный резолвер знает его всегда."""
+    with open(CONFIG) as f:
+        text = f.read()
+    block = re.search(r"(?m)^hosts:\n((?:[ \t]+.*\n?)*)", text)
+    old = dict(re.findall(r"(?m)^[ \t]+['\"]?([\w.-]+)['\"]?:[ \t]*['\"]?([\d.]+)", block.group(1))) if block else {}
+    mapping = {}
+    for name in subscription_servers():
+        try:
+            mapping[name] = socket.getaddrinfo(name, None, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
+        except (OSError, IndexError):
+            if name in old:
+                mapping[name] = old[name]  # сейчас не узнали: остается прошлый адрес
+    new = re.sub(r"(?m)^# mnrh-hosts:.*\n", "", text)
+    new = re.sub(r"(?m)^hosts:\n(?:[ \t]+.*\n?)*", "", new)
+    if mapping:
+        new = new.rstrip("\n") + "\n# mnrh-hosts: адреса серверов подписки, mnrh узнает их через DNS системы при запуске mihomo\n" \
+            + "hosts:\n" + "".join(f"  {json.dumps(k)}: {v}\n" for k, v in sorted(mapping.items()))
+    if new != text:
+        fd = os.open(CONFIG + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(new)
+        os.replace(CONFIG + ".tmp", CONFIG)
+
+
 def mihomo_api(path):
     r = subprocess.run(["curl", "-s", "--noproxy", "*", "--max-time", "2", "--unix-socket", SOCK,
                         "http://mihomo" + path], capture_output=True, text=True)
@@ -283,6 +344,7 @@ def start():
         return
     pin_config()
     refresh_subscription()
+    pin_hosts()
     if listening(p):
         raise ProxyError(f"порт {p} занят другой программой. Поменяй mixed-port в {tilde(CONFIG)}")
     exe = mihomo_bin()
