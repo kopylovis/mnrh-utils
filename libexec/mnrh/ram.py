@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import adb_path, confirm, has_flag
+from mnrhlib import adb_path, confirm, has_flag, parse_env
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not in ("clean", "status")):
@@ -37,7 +37,7 @@ BUSY_CPU = 5.0
 
 def run(cmd, timeout=30):
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=parse_env()).stdout
     except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
         return ""
 

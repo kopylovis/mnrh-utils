@@ -80,6 +80,8 @@ test:
 	@./bin/mnrh claude setup --country KZ --bogus 2>&1 >/dev/null | grep -q 'не знаю --bogus'
 	@./bin/mnrh claude setup --country KAZ 2>/dev/null; test $$? -eq 2
 	@./bin/mnrh claude setup -h | grep -q -- '--country'
+	@LC_ALL=ru_RU.UTF-8 ./bin/mnrh ram </dev/null >/dev/null
+	@LC_ALL=ru_RU.UTF-8 ./bin/mnrh doctor </dev/null >/dev/null
 	@HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent-mnrh /usr/bin/python3 libexec/mnrh/lib/claude_setup.py pending | grep -q '^fresh commands .*proxy$$'
 	@HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent-mnrh /usr/bin/python3 libexec/mnrh/lib/claude_setup.py check </dev/null | wc -c | grep -q '^ *0$$'
 	@./bin/mnrh claude guard >/dev/null
