@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mnrhlib import BAD, HOME, OK, WARN, paint, tilde  # noqa: E402
@@ -29,6 +30,10 @@ LOCK = os.path.join(STATE, "lock")
 LOG = os.path.join(STATE, "mihomo.log")
 LAST = os.path.join(STATE, "last")
 EXIT = os.path.join(STATE, "exit.json")
+# через сокет mnrh спрашивает mihomo, какой сервер из подписки сейчас выбран и по какому протоколу
+SOCK = os.path.join(STATE, "mihomo.sock")
+# страница с подробностями о выходе: на нее ведет метка proxy в promptsill, если терминал умеет ссылки
+PAGE = os.path.join(STATE, "exit.html")
 SUB_URL = os.path.join(CONF_DIR, "subscription.url")
 SUB_FILE = os.path.join(CONF_DIR, "subscription.txt")
 DEFAULT_PORT = 17890
@@ -147,6 +152,7 @@ def holders():
 class locked:
     def __enter__(self):
         os.makedirs(STATE, exist_ok=True)
+        os.chmod(STATE, 0o700)  # тут сокет управления mihomo, другим пользователям Mac он ни к чему
         self.f = open(LOCK, "w")
         fcntl.flock(self.f, fcntl.LOCK_EX)
         return self
@@ -164,18 +170,83 @@ def physical_interface():
     return m.group(1) if m and not m.group(1).startswith("utun") else None
 
 
-def pin_interface():
+def set_line(text, key, line):
+    """Заменить строку key: в конфиге на line (пустая line убирает ее) или добавить после log-level."""
+    if re.search(rf"^{key}:", text, re.M):
+        return re.sub(rf"^{key}:.*$\n?", line + "\n" if line else "", text, flags=re.M)
+    return text.replace("log-level: warning\n", f"log-level: warning\n{line}\n") if line else text
+
+
+def pin_config():
+    """Перед стартом mihomo: интерфейс маршрута по умолчанию и сокет управления (в старых конфигах его нет)."""
     iface = physical_interface()
     with open(CONFIG) as f:
         text = f.read()
-    line = f"interface-name: {iface}" if iface else ""
-    new = re.sub(r"^interface-name:.*$", line, text, flags=re.M) if re.search(r"^interface-name:", text, re.M) \
-        else text.replace("log-level: warning\n", f"log-level: warning\n{line}\n" if line else "log-level: warning\n")
+    new = set_line(text, "interface-name", f"interface-name: {iface}" if iface else "")
+    # путь к unix-сокету в macOS не длиннее 104 байт; длиннее mihomo его не откроет, и протокола просто не будет
+    sock = f"external-controller-unix: {json.dumps(SOCK)}" if len(SOCK.encode()) < 104 else ""
+    new = set_line(new, "external-controller-unix", sock)
     if new != text:
         fd = os.open(CONFIG + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
             f.write(new)
         os.replace(CONFIG + ".tmp", CONFIG)
+
+
+def mihomo_api(path):
+    r = subprocess.run(["curl", "-s", "--noproxy", "*", "--max-time", "2", "--unix-socket", SOCK,
+                        "http://mihomo" + path], capture_output=True, text=True)
+    try:
+        data = json.loads(r.stdout)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def active_node():
+    """(имя сервера, протокол) в группе VPS сейчас; (None, None), если mihomo не ответил или живых нет."""
+    name = mihomo_api("/proxies/VPS").get("now")
+    if not isinstance(name, str) or not name or name == "REJECT":
+        return None, None
+    # серверы из подписки mihomo по /proxies/<имя> не отдает, только списком провайдера
+    nodes = mihomo_api("/providers/proxies/vps").get("proxies")
+    kind = next((n.get("type") for n in nodes if isinstance(n, dict) and n.get("name") == name), None) \
+        if isinstance(nodes, list) else None
+    return name, kind.lower() if isinstance(kind, str) and kind else None
+
+
+def html(text):
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def write_page(info, p):
+    rows = [("Страна", info.get("loc")), ("IP выхода", info.get("ip")), ("Протокол", info.get("proto")),
+            ("Сервер из подписки", info.get("node")), ("Порт на этом Mac", f"127.0.0.1:{p}"),
+            ("mihomo запущен", info.get("since"))]
+    body = "".join(f"<tr><th>{html(k)}</th><td>{html(v)}</td></tr>" for k, v in rows if v)
+    page = f"""<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Прокси mnrh</title>
+<style>
+:root {{ color-scheme: light dark; --bg: #fff; --fg: #1d1d1f; --dim: #6e6e73; --line: #e5e5ea; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg: #1c1c1e; --fg: #f5f5f7; --dim: #98989d; --line: #38383a; }} }}
+body {{ background: var(--bg); color: var(--fg); font: 15px -apple-system, system-ui, sans-serif;
+       max-width: 560px; margin: 40px auto; padding: 0 16px; }}
+h1 {{ font-size: 20px; margin: 0 0 16px; }}
+table {{ border-collapse: collapse; width: 100%; }}
+th, td {{ text-align: left; padding: 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }}
+th {{ font-weight: 400; color: var(--dim); width: 45%; }}
+td {{ font-family: ui-monospace, Menlo, monospace; word-break: break-all; }}
+p {{ color: var(--dim); font-size: 13px; line-height: 1.5; }}
+</style></head><body>
+<h1>Сессия идет через VPS</h1>
+<table>{body}</table>
+<p>Данные на момент запуска mihomo. Если сервер с тех пор сменился, текущий покажет
+<code>mnrh claude proxy</code>, а проверка выхода заново <code>mnrh claude proxy test</code>.</p>
+</body></html>
+"""
+    with open(PAGE, "w") as f:
+        f.write(page)
 
 
 def write_private(path, data):
@@ -210,7 +281,7 @@ def start():
     p = port()
     if read_pid() and listening(p):
         return
-    pin_interface()
+    pin_config()
     refresh_subscription()
     if listening(p):
         raise ProxyError(f"порт {p} занят другой программой. Поменяй mixed-port в {tilde(CONFIG)}")
@@ -240,9 +311,13 @@ def start():
     else:
         print(f"mnrh claude proxy: VPS пока не отвечает, запускаю всё равно (лог {tilde(LOG)})", file=sys.stderr)
     got = trace(proxy_env(p))
+    node, proto = active_node()
+    info = dict({"ip": got[0], "loc": got[1]} if got else {}, node=node, proto=proto,
+                since=time.strftime("%Y-%m-%d %H:%M"))
     try:
         with open(EXIT, "w") as f:
-            json.dump({"ip": got[0], "loc": got[1]} if got else {}, f)
+            json.dump(info, f, ensure_ascii=False)
+        write_page(info, p)
     except OSError:
         pass
     want = setting("country").upper()
@@ -264,7 +339,7 @@ def stop():
             if not alive(pid):
                 break
             time.sleep(0.1)
-    for path in (PIDFILE, EXIT):
+    for path in (PIDFILE, EXIT, PAGE):
         try:
             os.remove(path)
         except OSError:
@@ -280,14 +355,23 @@ def proxy_env(p):
     env["ALL_PROXY"] = env["all_proxy"] = f"socks5h://127.0.0.1:{p}"
     env["NO_PROXY"] = env["no_proxy"] = NO_PROXY
     env["MNRH_PROXY"] = str(p)
-    # промптсилл (строка состояния) покажет «proxy KZ»: страна выхода, которую проверили при старте mihomo
+    # promptsill (строка состояния) покажет "proxy KZ", а рядом "vless 203.0.113.7" или, если терминал
+    # умеет ссылки, сделает метку ссылкой на страницу с подробностями. Все это проверено при старте mihomo.
     try:
         with open(EXIT) as f:
-            loc = json.load(f).get("loc")
+            info = json.load(f)
     except (OSError, ValueError):
-        loc = None
+        info = {}
+    loc, ip, proto = info.get("loc"), info.get("ip"), info.get("proto")
+    for name in ("PROMPTSILL_PROXY_LABEL", "PROMPTSILL_PROXY_DETAIL", "PROMPTSILL_PROXY_URL"):
+        env.pop(name, None)
     if isinstance(loc, str) and re.match(r"^[A-Za-z]{2}$", loc):
         env["PROMPTSILL_PROXY_LABEL"] = loc.upper()
+    detail = [v for v in (proto, ip) if isinstance(v, str) and re.match(r"^[\w.:-]{1,40}$", v)]
+    if detail:
+        env["PROMPTSILL_PROXY_DETAIL"] = " ".join(detail)
+    if os.path.exists(PAGE):
+        env["PROMPTSILL_PROXY_URL"] = "file://" + urllib.parse.quote(PAGE)
     return env
 
 
@@ -476,6 +560,9 @@ def status(test=False):
         print(f"{BAD} нет mihomo: brew install mihomo")
     if pid and listening(p):
         print(f"{OK} mihomo работает (pid {pid}), сессий через VPS {len(live)}")
+        node, proto = active_node()
+        if node:
+            print(f"{OK} сейчас сервер {node}" + (f", протокол {proto}" if proto else ""))
     else:
         print(paint("  mihomo не запущен: он поднимется вместе с первой сессией через VPS", "2"))
     if os.environ.get("MNRH_PROXY"):
