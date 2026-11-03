@@ -208,7 +208,13 @@ localhost. `/restart` и окна, которые открывают `open_claud
 копию. Если живых серверов в подписке нет, соединения отклоняются, а не уходят напрямую.
 Настройка, ссылка и подписка лежат в `~/.config/mnrh/proxy/` с доступом только для тебя.
 Страну выхода mnrh проверяет при каждом запуске mihomo и передает сессии в
-`PROMPTSILL_PROXY_LABEL`, по ней promptsill пишет в строке состояния `proxy KZ`. Если mihomo
+`PROMPTSILL_PROXY_LABEL`, по ней promptsill пишет в строке состояния `proxy KZ`. Еще mnrh
+спрашивает у mihomo через unix-сокет `~/.local/state/mnrh/proxy/mihomo.sock`, какой сервер
+из подписки выбран и по какому протоколу, и передает протокол с IP в `PROMPTSILL_PROXY_DETAIL`.
+В macOS Terminal строка выглядит как `proxy KZ vless 203.0.113.7`. В iTerm2, Ghostty и других
+терминалах со ссылками остается `proxy KZ`, а Cmd-клик открывает страницу с подробностями
+(`exit.html` в той же папке). Все это снято при запуске mihomo. Если fallback потом переключится
+на другой сервер, текущий покажет `mnrh claude proxy`. Если mihomo
 нет, `setup` предложит поставить его через brew; формула mnrh ставит его сама.
 
 ## Как работает `mnrh claude sessions`
