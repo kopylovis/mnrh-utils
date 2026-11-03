@@ -120,35 +120,16 @@ def tossling_path():
     return next((p for p in TOSSLING_PATHS if os.access(p, os.X_OK)), None)
 
 
-PROMPTSILL_PATHS = tuple(os.path.join(d, "promptsill")
-                         for d in ("/opt/homebrew/bin", "/usr/local/bin", os.path.join(HOME, ".local", "bin")))
-PROMPTSILL_HINT = "brew install kopylovis/tap/promptsill"
+CLAUDEMEISTER_PATHS = tuple(os.path.join(d, "claudemeister")
+                            for d in ("/opt/homebrew/bin", "/usr/local/bin", os.path.join(HOME, ".local", "bin")))
 
 
-def promptsill_path():
-    forced = os.environ.get("MNRH_PROMPTSILL")
+def claudemeister_path():
+    """mnrh claude, todo, shot и deps теперь в отдельной программе claudemeister."""
+    forced = os.environ.get("MNRH_CLAUDEMEISTER")
     if forced is not None:
         return forced if os.access(forced, os.X_OK) else None
-    return shutil.which("promptsill") or next((p for p in PROMPTSILL_PATHS if os.access(p, os.X_OK)), None)
-
-
-BADGES = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local", "state"), "promptsill", "badges")
-
-
-def badge(name, data=None, refresh=False):
-    """Метка во второй строке promptsill (файл в BADGES); data=None убирает ее."""
-    path = os.path.join(BADGES, name + ".json")
-    try:
-        if data is None:
-            os.remove(path)
-        elif refresh or not os.path.exists(path):
-            os.makedirs(BADGES, exist_ok=True)
-            tmp = f"{path}.{os.getpid()}"
-            with open(tmp, "w") as f:
-                json.dump(data, f, ensure_ascii=False)
-            os.replace(tmp, path)
-    except OSError:
-        pass
+    return shutil.which("claudemeister") or next((p for p in CLAUDEMEISTER_PATHS if os.access(p, os.X_OK)), None)
 
 
 def read_config():

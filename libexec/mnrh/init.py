@@ -5,7 +5,7 @@ import sys
 
 LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 sys.path.insert(0, LIB)
-from mnrhlib import CONFIG, DEFAULT_DEV, HOME, has_flag, paint, read_config, tilde, write_config
+from mnrhlib import CONFIG, DEFAULT_DEV, HOME, claudemeister_path, has_flag, paint, read_config, tilde, write_config
 from menu import pick
 
 CANDIDATES = ["Developer", "Projects", "AndroidStudioProjects", "StudioProjects", "IdeaProjects",
@@ -20,7 +20,7 @@ def usage():
     print("mnrh init --show          показать текущую настройку")
     print()
     print(f"Настройка хранится в {tilde(CONFIG)}; на время можно переопределить MNRH_PROJECTS=<папка>.")
-    print("Папку используют mnrh claude, repos, gradle, disk и claude sessions.")
+    print("Папку используют mnrh claude (claudemeister), repos, gradle и disk.")
 
 
 def repo_count(path):
@@ -90,12 +90,16 @@ def choose_projects():
 
 def connect_claude():
     if not shutil.which("claude"):
-        print("Claude Code не найден. Когда поставишь его, выполни: mnrh claude setup")
+        print("Claude Code не найден. Когда поставишь его, выполни: claudemeister setup")
         return
-    i = pick([("да", "да — /restart, /forget, MCP-сервер mnrh и хук zsh"), ("нет", "нет, позже: mnrh claude setup")],
-             title="Подключить mnrh к Claude Code?", label="Claude Code")
+    cm = claudemeister_path()
+    if not cm:
+        print("claudemeister не найден: brew install kopylovis/tap/claudemeister, потом claudemeister setup")
+        return
+    i = pick([("да", "да — /restart, /forget, MCP-сервер claudemeister и хук zsh"), ("нет", "нет, позже: claudemeister setup")],
+             title="Подключить claudemeister к Claude Code?", label="Claude Code")
     if i == 0:
-        subprocess.run([sys.executable, os.path.join(LIB, "claude_restart.py"), "setup"])
+        subprocess.run([cm, "setup"])
 
 
 def main():
