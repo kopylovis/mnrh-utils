@@ -20,7 +20,6 @@ test:
 	@./bin/mnrh help -a >/dev/null
 	@MNRH_NO_MENU=1 ./bin/mnrh >/dev/null
 	@./bin/mnrh path clean -n >/dev/null
-	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep -q open_claude
 	@for c in $$(ls libexec/mnrh | sed 's/\..*//' | grep -v '^lib$$'); do grep -q "	$$c	" share/mnrh/commands.tsv || { echo "нет в commands.tsv: $$c"; exit 1; }; done
 	@awk -F'\t' '!/^#/ && $$1 != "-" && $$4 ~ /;;/ { n = split($$4, a, ";;"); for (i = 1; i <= n; i++) if (a[i] ~ /^\|/) { print "в commands.tsv у " $$2 " действие без имени"; bad = 1 } } END { exit bad }' share/mnrh/commands.tsv
 	@/usr/bin/python3 libexec/mnrh/lib/launcher.py actions share/mnrh/commands.tsv outdated </dev/null; test $$? -eq 3
@@ -55,65 +54,19 @@ test:
 	@./bin/mnrh sleep >/dev/null
 	@./bin/mnrh sleep status >/dev/null
 	@./bin/mnrh nomusic status >/dev/null
-	@./bin/mnrh deps status -h >/dev/null
 	@./bin/mnrh scroll -h >/dev/null
 	@./bin/mnrh scroll >/dev/null
 	@./bin/mnrh scroll status >/dev/null
 	@! ./bin/mnrh scroll nothing >/dev/null
 	@swiftc -typecheck -swift-version 5 share/mnrh/scroll/main.swift
-	@swiftc -typecheck -swift-version 5 share/mnrh/notify/main.swift
-	@./bin/mnrh claude notify -h | grep -q telegram
 	@./bin/mnrh tossling -h | grep -q Tossling
 	@./bin/mnrh tossy -h | grep -q Tossling
 	@./bin/mnrh clip -h | grep -q Tossling
 	@PATH=/usr/bin:/bin HOME=/nonexistent ./bin/mnrh tossling -h | grep -q 'отдельная программа'
-	@./bin/mnrh deps -h >/dev/null
 	@./bin/mnrh alert -h | grep -q "alert run"
 	@./bin/mnrh alert status </dev/null >/dev/null || true
-	@./bin/mnrh claude notify -h | grep -q "notify phone"
-	@./bin/mnrh claude proxy -h | grep -q mihomo
-	@./bin/mnrh claude -h | grep -q -- '-x  '
-	@XDG_CONFIG_HOME=/nonexistent-mnrh ./bin/mnrh claude proxy run -- true 2>/dev/null; test $$? -eq 2
-	@XDG_CONFIG_HOME=/nonexistent-mnrh ./bin/mnrh claude proxy >/dev/null; test $$? -eq 1
-	@! XDG_CONFIG_HOME=/nonexistent-mnrh ./bin/mnrh claude proxy configured
-	@./bin/mnrh claude proxy setup not-a-url </dev/null >/dev/null; test $$? -ne 0
-	@XDG_CONFIG_HOME=$$(mktemp -d) /usr/bin/python3 -c 'import sys, os, base64; sys.path.insert(0, "libexec/mnrh/lib"); import claude_proxy as c; os.makedirs(c.CONF_DIR); open(c.SUB_FILE, "w").write(base64.b64encode(b"vless://u@vps.example.com:443#a\nhysteria2://p@203.0.113.7:1#b\n").decode()); assert c.subscription_servers() == ["vps.example.com"]'
-	@./bin/mnrh claude setup --country KZ --bogus 2>&1 >/dev/null | grep -q 'не знаю --bogus'
-	@./bin/mnrh claude setup --country KAZ 2>/dev/null; test $$? -eq 2
-	@./bin/mnrh claude setup -h | grep -q -- '--country'
 	@LC_ALL=ru_RU.UTF-8 ./bin/mnrh ram </dev/null >/dev/null
 	@LC_ALL=ru_RU.UTF-8 ./bin/mnrh doctor </dev/null >/dev/null
-	@HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent-mnrh /usr/bin/python3 libexec/mnrh/lib/claude_setup.py pending | grep -q '^fresh commands .*proxy$$'
-	@HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent-mnrh /usr/bin/python3 libexec/mnrh/lib/claude_setup.py check </dev/null | wc -c | grep -q '^ *0$$'
-	@./bin/mnrh claude guard >/dev/null
-	@./bin/mnrh claude guard -h >/dev/null
-	@./bin/mnrh claude humanize -h | grep -q ПРГЕН
-	@./bin/mnrh claude humanize rules | grep -q 'Проверка перед отправкой'
-	@printf 'Конечно! Это не только быстро, но и удобно.\n' | ./bin/mnrh claude humanize check - | grep -q 'не только'
-	@printf 'Сборка шла 4 минуты, теперь 50 секунд.\n' | ./bin/mnrh claude humanize check - >/dev/null
-	@echo junk | ./bin/mnrh claude humanize-hook | wc -c | grep -q '^ *0$$'
-	@printf '%s\n' '---' '- `X` — пояснение' | ./bin/mnrh claude humanize check - | grep 'разделитель' | grep -q '\-\-\-'
-	@printf '%s\n' '- `X` — пояснение' | ./bin/mnrh claude humanize check - | grep -q 'термин — пояснение'
-	@printf '%s\n' 'Еще «тест» ёж. Итог: да. Причина: нет.' | ./bin/mnrh claude humanize check - | grep 'елочки' | grep -q 'шт'
-	@printf '%s\n' 'Еще «тест» ёж. Итог: да. Причина: нет.' | ./bin/mnrh claude humanize check - | grep 'точками' | grep -q 'шт'
-	@printf '%s\n' 'Итог: да. Причина: нет.' | ./bin/mnrh claude humanize check - | grep -q 'двоеточия'
-	@printf '%s\n' 'В современном мире это потенциально может помочь. Буду честен, время покажет. citeturn0search0' | ./bin/mnrh claude humanize check - | grep -c 'вступление-штамп\|модальная вата\|показная честность\|пустой прогноз\|след чат' | grep -q 5
-	@./bin/mnrh claude humanize rules | grep -q '## 7. Проверка перед отправкой'
-	@cd /tmp && $(CURDIR)/bin/mnrh claude guard test 'git push -f origin master' | grep -q пропущу
-	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/Documents/old' | grep -q пропущу
-	@$(CURDIR)/bin/mnrh claude guard test 'bundle exec fastlane beta' | grep -q пропущу
-	@$(CURDIR)/bin/mnrh claude guard test 'cat fastlane/.env.default' | grep -q secrets-read
-	@$(CURDIR)/bin/mnrh claude guard test 'rm -rf ~/.ssh' | grep -q secrets-delete
-	@$(CURDIR)/bin/mnrh claude guard test 'security delete-generic-password -s x' | grep -q secrets-delete
-	@echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | ./bin/mnrh claude guard-hook | wc -c | grep -q '^ *0$$'
-	@echo '{"tool_name":"Read","permission_mode":"auto","session_id":"x","tool_input":{"file_path":"/x/.env"}}' | ./bin/mnrh claude guard-hook | grep -q '"deny"'
-	@echo '{}' | ./bin/mnrh claude statusline >/dev/null
-	@echo '{}' | MNRH_PROMPTSILL=/nonexistent ./bin/mnrh claude statusline | grep -q promptsill
-	@MNRH_PROMPTSILL=/nonexistent ./bin/mnrh claude statusline -h | grep -q 'brew install kopylovis/tap/promptsill'
-	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep -q '"deps_outdated"'
-	@./bin/mnrh claude notify >/dev/null
-	@echo junk | ./bin/mnrh claude notify-hook | wc -c | grep -q '^ *0$$'
-	@echo '{"session_id":"00000000-0000-0000-0000-000000000000","hook_event_name":"UserPromptSubmit","user_input":"x"}' | ./bin/mnrh claude notify-hook | wc -c | grep -q '^ *0$$'
 	@./bin/mnrh fix scroll -h >/dev/null
 	@! ./bin/mnrh fix nothing >/dev/null
 	@./bin/mnrh killdaemons -h >/dev/null
@@ -121,46 +74,15 @@ test:
 	@./bin/mnrh disk -h >/dev/null
 	@./bin/mnrh repos -h >/dev/null
 	@./bin/mnrh sim -h >/dev/null
-	@./bin/mnrh claude -h >/dev/null
 	@./bin/mnrh init -h >/dev/null
 	@./bin/mnrh init --show >/dev/null
 	@./bin/mnrh init </dev/null >/dev/null 2>&1; test $$? -eq 2
 	@./bin/mnrh init setup </dev/null >/dev/null 2>&1; test $$? -eq 2
-	@./bin/mnrh claude sessions -h >/dev/null
-	@./bin/mnrh claude sessions -l >/dev/null
-	@./bin/mnrh claude sessions search mnrh-no-such-word-zq >/dev/null
-	@./bin/mnrh claude sessions choose /nonexistent-mnrh | grep -qx new
-	@./bin/mnrh claude sessions -h | grep -q slim
-	@./bin/mnrh claude slim -h >/dev/null
-	@./bin/mnrh todo -h >/dev/null
-	@./bin/mnrh shot -h >/dev/null
-	@./bin/mnrh claude brief -h >/dev/null
-	@./bin/mnrh claude parallel -h >/dev/null
-	@./bin/mnrh claude ask -h >/dev/null
-	@./bin/mnrh claude release-notes -h >/dev/null
-	@cd /tmp && $(CURDIR)/bin/mnrh claude brief >/dev/null
-	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep '"todo_add"' | grep '"parallel_task"' | grep '"window_screenshot"' | grep '"ask_project"' | grep -q '"release_notes_write"'
-	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep -q '"slim"'
-	@! ./bin/mnrh claude sessions slim no-such-session >/dev/null 2>&1
-	@! ./bin/mnrh claude sessions show no-such-session >/dev/null
-	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep '"session_search"' | grep '"session_read"' | grep '"mac_status"' | grep -q '"free_memory"'
-	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | ./bin/mnrh claude mcp | grep -q "\"version\": \"$$(cat VERSION)\""
-	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mac_status","arguments":{"parts":["ports"]}}}' | ./bin/mnrh claude mcp | grep -q '"isError": false'
-	@./bin/mnrh claude restart -h >/dev/null
-	@./bin/mnrh claude forget -h >/dev/null
-	@echo junk | ./bin/mnrh claude notice | wc -c | grep -q '^ *0$$'
-	@echo junk | ./bin/mnrh claude session-end | wc -c | grep -q '^ *0$$'
-	@echo '{"session_id":"00000000-0000-0000-0000-000000000000"}' | ./bin/mnrh claude notice | wc -c | grep -q '^ *0$$'
-	@zsh -n share/mnrh/restart.zsh
-	@printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | ./bin/mnrh claude mcp | grep '"restart"' | grep -q '"forget"'
 	@./bin/mnrh gradle -h >/dev/null
 	@./bin/mnrh gradle update </dev/null >/dev/null 2>&1; rc=$$?; test $$rc -eq 2 -o $$rc -eq 1 -o $$rc -eq 0
-	@swiftc -typecheck -swift-version 5 share/mnrh/notify/main.swift
 	@test -f share/mnrh/icon.png
 	@./bin/mnrh gradle >/dev/null
 	@./bin/mnrh gradle status >/dev/null
-	@./bin/mnrh claude </dev/null >/dev/null 2>&1; test $$? -eq 2
-	@./bin/mnrh claude open </dev/null >/dev/null 2>&1; test $$? -eq 2
 	@./bin/mnrh sim >/dev/null
 	@./bin/mnrh sim status >/dev/null
 	@./bin/mnrh repos >/dev/null
@@ -171,5 +93,10 @@ test:
 	@./bin/mnrh doctor >/dev/null; test $$? -le 1
 	@./bin/mnrh doctor status >/dev/null; test $$? -le 1
 	@! ./bin/mnrh no-such-command >/dev/null 2>&1
+	@bash -n libexec/mnrh/lib/claudemeister.sh
+	@zsh -n share/mnrh/restart.zsh
+	@for c in claude todo shot deps; do MNRH_CLAUDEMEISTER=/nonexistent ./bin/mnrh $$c -h 2>&1 >/dev/null | grep -q 'brew install kopylovis/tap/claudemeister' || { echo "mnrh $$c без claudemeister"; exit 1; }; done
+	@MNRH_CLAUDEMEISTER=/bin/echo ./bin/mnrh todo add x | grep -qx 'todo add x'
+	@MNRH_CLAUDEMEISTER=/bin/echo ./bin/mnrh claude setup --country KZ | grep -qx 'setup --country KZ'
 	@find libexec -name __pycache__ -type d -exec rm -rf {} +
 	@echo "все проверки пройдены"
