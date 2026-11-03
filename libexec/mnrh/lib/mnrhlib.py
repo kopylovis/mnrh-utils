@@ -9,9 +9,20 @@ HOME = os.path.expanduser("~")
 TTY = sys.stdout.isatty()
 
 
+def parse_env(env=None):
+    """Окружение для команд, чей вывод разбираем. В ru_RU ps и top пишут 0,1 вместо 0.1, и float() падает.
+    LC_ALL перекрывает LC_NUMERIC, поэтому его значение переносим в LANG: язык сообщений остается тем же."""
+    env = dict(os.environ if env is None else env)
+    if env.get("LC_ALL"):
+        env["LANG"] = env.pop("LC_ALL")
+    env.pop("LC_ALL", None)
+    env["LC_NUMERIC"] = "C"
+    return env
+
+
 def run(cmd, timeout=30, env=None):
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env).stdout
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=parse_env(env)).stdout
     except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
         return ""
 
