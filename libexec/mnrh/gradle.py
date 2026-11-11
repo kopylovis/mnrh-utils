@@ -9,8 +9,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import (BAD, HOME, OK, confirm, du_bytes, gradle_build_dirs, gradle_versions_in_use, has_flag, human,
-                     paint, process_commands, process_memory, projects, remove_under_home, version_key)
+from mnrhlib import (BAD, HOME, OK, agp_of, confirm, du_bytes, gradle_build_dirs, gradle_versions_in_use, has_flag,
+                     human, paint, process_commands, process_memory, projects, remove_under_home, version_key)
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or (args and args[0] not in ("status", "clean", "--check", "update")):
@@ -162,15 +162,6 @@ def wrapper_info(proj):
 def fetch_text(url):
     with urllib.request.urlopen(url, timeout=20) as r:
         return r.read().decode().strip()
-
-
-def agp_of(proj):
-    try:
-        text = open(os.path.join(proj, "gradle", "libs.versions.toml"), encoding="utf-8").read()
-    except OSError:
-        return None
-    m = re.search(r'^\s*agp\s*=\s*"([^"]+)"', text, re.M)
-    return m.group(1) if m else None
 
 
 def update_one(proj, target, kind):

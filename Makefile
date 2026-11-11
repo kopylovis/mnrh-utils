@@ -30,6 +30,10 @@ test:
 	@./bin/mnrh ram status -n 1 >/dev/null
 	@./bin/mnrh mem status -n 1 >/dev/null
 	@./bin/mnrh killdaemons -l >/dev/null
+	@./bin/mnrh kotlin -h | grep -q 'kotlin update'
+	@./bin/mnrh kotlin status >/dev/null
+	@./bin/mnrh kotlin update </dev/null >/dev/null 2>&1; test $$? -eq 2
+	@MNRH_PROJECTS=/var/empty ./bin/mnrh kotlin update --all -y | grep -q 'Все проекты уже'
 	@./bin/mnrh killdaemons stop -h | grep -q 'killdaemons stop'
 	@./bin/mnrh kd -h >/dev/null
 	@./bin/mnrh ram -h >/dev/null

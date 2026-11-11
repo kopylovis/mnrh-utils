@@ -11,8 +11,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import (DEV, HOME, du_bytes, gradle_build_dirs, gradle_versions_in_use, has_flag, human, paint,
-                     projects, remove_under_home, run, tilde, version_key)
+from mnrhlib import (DEV, HOME, du_bytes, gradle_build_dirs, gradle_versions_in_use, has_flag, human,
+                     konan_prebuilts, konan_unused, kotlin_versions_in_use, paint, projects, remove_under_home, run,
+                     tilde, version_key)
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help"):
@@ -133,37 +134,13 @@ def scan_gradle():
         hint="скачаются заново при сборке, нужен интернет")
 
 
-def kotlin_versions():
-    found = set()
-    for proj in projects():
-        try:
-            text = open(os.path.join(proj, "gradle", "libs.versions.toml"), encoding="utf-8").read()
-        except OSError:
-            continue
-        m = re.search(r'^\s*kotlin\s*=\s*"([^"]+)"', text, re.M)
-        if m:
-            found.add(m.group(1))
-    return found
-
-
 def scan_konan():
-    konan = os.path.join(HOME, ".konan")
-    prebuilts = glob.glob(os.path.join(konan, "kotlin-native-prebuilt-*"))
-    if not prebuilts:
+    used = kotlin_versions_in_use()
+    if not used or not konan_prebuilts():
         return
-    used = kotlin_versions()
-    if not used:
-        return
-    old = [p for p in prebuilts if not any(p.endswith("-" + v) for v in used)]
-    keep = [p for p in prebuilts if p not in old]
+    old, deps = konan_unused(used)
     add(SAFE, f"Kotlin/Native старых версий (в проектах: {', '.join(sorted(used))})", old,
         hint="скачается снова, если какой-то проект вернётся на эту версию")
-    props = " ".join(open(os.path.join(p, "konan", "konan.properties"), encoding="utf-8", errors="replace").read()
-                     for p in keep if os.path.exists(os.path.join(p, "konan", "konan.properties")))
-    if not props:
-        return
-    deps = [d for d in glob.glob(os.path.join(konan, "dependencies", "*"))
-            if os.path.isdir(d) and os.path.basename(d) != "cache" and os.path.basename(d) not in props]
     add(SAFE, "Kotlin/Native: LLVM и инструменты от старых версий", deps,
         hint="текущим версиям Kotlin не нужны")
 
