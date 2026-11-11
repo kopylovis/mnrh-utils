@@ -274,12 +274,13 @@ def scan_simple_caches():
 def scan_brew():
     if not shutil.which("brew"):
         return
-    out = run(["brew", "cleanup", "-n"], timeout=120)
+    env = dict(os.environ, HOMEBREW_NO_AUTOREMOVE="1")
+    out = run(["brew", "cleanup", "-n"], timeout=120, env=env)
     m = re.search(r"free approximately ([\d.]+)\s*([KMG]B)", out)
     if m:
         size = float(m.group(1)) * {"KB": 1024, "MB": 1048576, "GB": 1073741824}[m.group(2)]
         add(SAFE, "Homebrew: старые версии и кеш загрузок", size=size,
-            action=lambda: subprocess.run(["brew", "cleanup"], capture_output=True))
+            action=lambda: subprocess.run(["brew", "cleanup"], capture_output=True, env=env))
 
 
 def scan_simulators():
