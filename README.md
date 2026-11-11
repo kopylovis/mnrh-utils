@@ -35,6 +35,7 @@ mnrh gradle --check   ещё сверить с последней версией
 mnrh gradle clean     удалить версии, которые не использует ни один проект (--builds: и build/)
 mnrh kotlin status    версии Kotlin по проектам и скачанные Kotlin/Native (--check: сверить с последней)
 mnrh kotlin update    обновить Kotlin в проектах, clean: удалить Kotlin/Native, который не нужен проектам
+mnrh build-tools      какие Android build-tools стоят и каким проектам нужны (--check, update, clean)
 mnrh scroll on        переворачивать прокрутку мыши, не трогая трекпад (вместо Scroll Reverser)
 mnrh scroll status    состояние; off выключить, test проверить, что мышь и трекпад различаются
 mnrh nomusic on       Apple Music не открывается сам (наушники, Play), вручную — можно (вместо noTunes)
@@ -218,6 +219,24 @@ mnrh kotlin update                     выбрать проекты в спис
 mnrh kotlin update kcalm sightra -y    эти, без вопросов
 mnrh kotlin update --all -y            все отстающие
 mnrh kotlin update --version 2.4.21    до своей версии
+```
+
+## Android build-tools: `mnrh build-tools`
+
+Для каждого проекта с AGP: какие build-tools он просит. Если в модуле прописан
+`buildToolsVersion` (или `buildTools = "..."` в `libs.versions.toml`), берется он. Если нет,
+нужна версия по умолчанию для этого AGP. Ее mnrh читает из `builder-<agp>.jar` в кеше
+Gradle (`ToolsRevisionUtils`), так что таблицу соответствий держать не надо. Если AGP в кеше
+еще нет, проект надо собрать один раз, а до тех пор `clean` ничего не удаляет.
+
+`update` поднимает прописанные версии до последней стабильной из репозитория Google.
+Там, где версия не прописана, она меняется вместе с AGP. Новые build-tools AGP скачает
+при первой сборке. `clean` удаляет из SDK версии, которые не нужны ни одному проекту.
+
+```
+mnrh build-tools                        что стоит и кому нужно (--check: сверить с последней)
+mnrh build-tools update                 выбрать проекты в списке (<проект> -y, --all -y, --version)
+mnrh build-tools clean                  удалить ненужные проектам
 ```
 
 ## Что показывает `mnrh repos`

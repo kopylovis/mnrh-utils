@@ -248,12 +248,26 @@ def konan_unused(used):
 
 
 def agp_of(proj):
-    try:
-        text = open(os.path.join(proj, "gradle", "libs.versions.toml"), encoding="utf-8").read()
-    except OSError:
-        return None
-    m = re.search(r'^\s*agp\s*=\s*"([^"]+)"', text, re.M)
-    return m.group(1) if m else None
+    """Версия AGP: agp = "..." в libs.versions.toml, иначе id("com.android.…") version "..." в корневом скрипте."""
+    for rel, rx in (("gradle/libs.versions.toml", r'^\s*agp\s*=\s*"([^"]+)"'),
+                    ("build.gradle.kts", r'id\("com\.android\.[\w.]+"\)\s+version\s+"([^"$]+)"'),
+                    ("settings.gradle.kts", r'id\("com\.android\.[\w.]+"\)\s+version\s+"([^"$]+)"')):
+        try:
+            text = open(os.path.join(proj, rel), encoding="utf-8").read()
+        except OSError:
+            continue
+        m = re.search(rx, text, re.M)
+        if m:
+            return m.group(1)
+    return None
+
+
+def android_sdk():
+    for sdk in (os.environ.get("ANDROID_HOME"), os.environ.get("ANDROID_SDK_ROOT"),
+                os.path.join(HOME, "Library", "Android", "sdk")):
+        if sdk and os.path.isdir(sdk):
+            return sdk
+    return None
 
 
 def process_memory():

@@ -34,6 +34,10 @@ test:
 	@./bin/mnrh kotlin status >/dev/null
 	@./bin/mnrh kotlin update </dev/null >/dev/null 2>&1; test $$? -eq 2
 	@MNRH_PROJECTS=/var/empty ./bin/mnrh kotlin update --all -y | grep -q 'Все проекты уже'
+	@./bin/mnrh build-tools -h | grep -q 'build-tools update'
+	@./bin/mnrh build-tools status >/dev/null
+	@./bin/mnrh build-tools update </dev/null >/dev/null 2>&1; rc=$$?; test $$rc -eq 2 -o $$rc -eq 0
+	@MNRH_PROJECTS=/var/empty ./bin/mnrh build-tools clean -y | grep -q 'не трогаю'
 	@./bin/mnrh killdaemons stop -h | grep -q 'killdaemons stop'
 	@./bin/mnrh kd -h >/dev/null
 	@./bin/mnrh ram -h >/dev/null
