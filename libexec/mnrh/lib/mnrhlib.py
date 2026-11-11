@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 import re
@@ -185,6 +186,74 @@ def gradle_versions_in_use():
 
 def version_key(name):
     return [int(n) for n in re.findall(r"\d+", name)]
+
+
+KOTLIN_TOML = re.compile(r'^(\s*kotlin(?:[-_]?[vV]ersion)?\s*=\s*")([^"]+)(")', re.M)
+KOTLIN_PLUGIN = re.compile(r'((?:kotlin\("[\w.-]+"\)|id\("org\.jetbrains\.kotlin\.[\w.-]+"\))\s+version\s+")([^"$]+)(")')
+
+
+def kotlin_version_of(proj):
+    """(версия, файл, регулярка с версией во второй группе): libs.versions.toml, иначе plugins {} корневых скриптов."""
+    for rel, rx in (("gradle/libs.versions.toml", KOTLIN_TOML), ("build.gradle.kts", KOTLIN_PLUGIN),
+                    ("settings.gradle.kts", KOTLIN_PLUGIN)):
+        path = os.path.join(proj, rel)
+        try:
+            text = open(path, encoding="utf-8").read()
+        except OSError:
+            continue
+        m = rx.search(text)
+        if m and re.fullmatch(r"\d+\.\d+\.\d+(-[\w.]+)?", m.group(2)):
+            return m.group(2), path, rx
+    return None
+
+
+def kotlin_versions_in_use():
+    used = {}
+    for proj in projects():
+        info = kotlin_version_of(proj)
+        if info:
+            used.setdefault(info[0], []).append(os.path.basename(proj))
+    return used
+
+
+KONAN = os.path.join(HOME, ".konan")
+
+
+def konan_prebuilts():
+    """{версия: [папки]} скачанных Kotlin/Native в ~/.konan."""
+    found = {}
+    for p in glob.glob(os.path.join(KONAN, "kotlin-native-prebuilt-*")):
+        m = re.search(r"-(\d+\.\d+\.\d+(?:-[\w.]+)?)$", os.path.basename(p))
+        if m:
+            found.setdefault(m.group(1), []).append(p)
+    return found
+
+
+def konan_unused(used):
+    """(Kotlin/Native версий не из used, LLVM и инструменты, которые не нужны оставшимся версиям)."""
+    pre = konan_prebuilts()
+    old = [p for v, paths in pre.items() if v not in used for p in paths]
+    keep = [p for v, paths in pre.items() if v in used for p in paths]
+    props = ""
+    for p in keep:
+        try:
+            props += open(os.path.join(p, "konan", "konan.properties"), encoding="utf-8", errors="replace").read()
+        except OSError:
+            pass
+    if not props:
+        return old, []
+    deps = [d for d in glob.glob(os.path.join(KONAN, "dependencies", "*"))
+            if os.path.isdir(d) and os.path.basename(d) != "cache" and os.path.basename(d) not in props]
+    return old, deps
+
+
+def agp_of(proj):
+    try:
+        text = open(os.path.join(proj, "gradle", "libs.versions.toml"), encoding="utf-8").read()
+    except OSError:
+        return None
+    m = re.search(r'^\s*agp\s*=\s*"([^"]+)"', text, re.M)
+    return m.group(1) if m else None
 
 
 def process_memory():

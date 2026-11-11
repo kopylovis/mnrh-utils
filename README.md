@@ -33,6 +33,8 @@ mnrh ram clean        отметить галочками, что останов
 mnrh gradle status    версии Gradle по проектам, дистрибутивы, кеши, демоны, build/
 mnrh gradle --check   ещё сверить с последней версией Gradle
 mnrh gradle clean     удалить версии, которые не использует ни один проект (--builds: и build/)
+mnrh kotlin status    версии Kotlin по проектам и скачанные Kotlin/Native (--check: сверить с последней)
+mnrh kotlin update    обновить Kotlin в проектах, clean: удалить Kotlin/Native, который не нужен проектам
 mnrh scroll on        переворачивать прокрутку мыши, не трогая трекпад (вместо Scroll Reverser)
 mnrh scroll status    состояние; off выключить, test проверить, что мышь и трекпад различаются
 mnrh nomusic on       Apple Music не открывается сам (наушники, Play), вручную — можно (вместо noTunes)
@@ -195,6 +197,27 @@ mnrh gradle update                    выбрать проекты в спис�
 mnrh gradle update kcalm sightra -y   эти, без вопросов
 mnrh gradle update --all -y           все отстающие
 mnrh gradle update --version 9.8.0    до своей версии
+```
+
+## Обновление Kotlin: `mnrh kotlin update`
+
+Список проектов, у которых Kotlin старше последней стабильной версии с Maven Central (все
+отмечены). Версия берется из `kotlin = "..."` в `gradle/libs.versions.toml`, а если ее там
+нет, из `kotlin("jvm") version "..."` или `id("org.jetbrains.kotlin...") version "..."` в
+корневых `build.gradle.kts` и `settings.gradle.kts`. В выбранных проектах меняется эта
+строка, потом запускается `./gradlew help --no-daemon`, чтобы проект настроился на новом
+Kotlin. Если не настроился, файл возвращается как был, и показывается причина.
+
+Пропускаются проекты с незакоммиченными правками в этом файле и проекты на KSP1 (версия
+вида `2.0.21-1.0.28` собрана под один Kotlin, ее надо сначала перевести на KSP2). Коммитить
+самому. Kotlin/Native старой версии после этого убирает `mnrh kotlin clean`, он же убирает
+LLVM и инструменты в `~/.konan/dependencies`, которые остались только от старых версий.
+
+```
+mnrh kotlin update                     выбрать проекты в списке
+mnrh kotlin update kcalm sightra -y    эти, без вопросов
+mnrh kotlin update --all -y            все отстающие
+mnrh kotlin update --version 2.4.21    до своей версии
 ```
 
 ## Что показывает `mnrh repos`
