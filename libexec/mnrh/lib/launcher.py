@@ -12,7 +12,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import menu as menu_lib
-from menu import Quit, Screen, width
+from menu import Quit, Screen, run_framed, show_output, width
 
 menu_lib.BRAND = "mnrh"
 
@@ -156,6 +156,29 @@ def action_info(name, desc, action):
     return lines
 
 
+# эти команды запускают Claude Code: ему нужен настоящий терминал, их запускает bin/mnrh после меню
+OUTSIDE = {"claudemeister", "claude"}
+MNRH = os.path.join(menu_lib.ROOT, "bin", "mnrh")
+
+
+def run_here(screen, name, rest):
+    """Команду в рамке на этом же экране. Ответ: остаться ли в меню. При выходе по q вывод остается в
+    обычном терминале."""
+    title = " ".join(["mnrh", name] + [shlex.quote(a) for a in rest])
+    code, out = run_framed(screen, [MNRH, name] + rest, title, env=dict(os.environ, MNRH_NO_MENU="1"))
+    if restart_pending():
+        return False
+    if show_output(screen, out, title, code):
+        return True
+    screen.close()
+    with open("/dev/tty", "w") as tty:  # stdout занят ответом для bin/mnrh
+        tty.write(f"\x1b[2m$ {title}\x1b[0m\n")
+        text = out.plain()
+        if text:
+            tty.write(text + "\n")
+    return False
+
+
 def pick_action(screen, name, desc, actions, back, at=0):
     """Действия одной команды на экране screen. Ответ: (позиция, аргументы) или None по Esc."""
     wide = max(len(l) for _, l in actions) + 3
@@ -198,8 +221,12 @@ def menu(items, version, at=0):
             else:
                 got = pick_action(screen, name, desc, actions, back="назад")
                 rest = None if got is None else got[1]
-            if rest is not None:
+            if rest is None:
+                continue
+            if name in OUTSIDE:
                 return at, [name] + rest
+            if not run_here(screen, name, rest):
+                return None
     except (Quit, KeyboardInterrupt, EOFError):
         return None
     finally:
@@ -239,13 +266,19 @@ def actions(registry, name, at="0"):
         at = 0
     screen = Screen()
     try:
-        got = pick_action(screen, name, desc, acts, back="выход", at=at)
+        while True:
+            got = pick_action(screen, name, desc, acts, back="выход", at=at)
+            if got is None:
+                return 1
+            at = got[0]
+            if name in OUTSIDE:
+                break
+            if not run_here(screen, name, got[1]):
+                return 1
     except (Quit, KeyboardInterrupt, EOFError):
-        got = None
+        return 1
     finally:
         screen.close()
-    if got is None:
-        return 1
     print(f"{got[0]}\t" + " ".join(shlex.quote(a) for a in got[1]))
     return 0
 
