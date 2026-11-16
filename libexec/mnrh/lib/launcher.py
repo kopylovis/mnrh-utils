@@ -11,7 +11,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from menu import pick
+import menu as menu_lib
+from menu import Quit, Screen, width
+
+menu_lib.BRAND = "mnrh"
 
 TTY = sys.stdout.isatty()
 
@@ -73,11 +76,23 @@ def show_help(items, version, full):
     print("  mnrh <команда> -h    справка по команде")
 
 
-def ask(action):
-    """«kill <порт>» -> спросить порт. Вопрос и ответ идут через терминал: stdout занят выбором."""
+def ask(action, screen=None, title="", note=()):
+    """«kill <порт>» -> спросить порт. На полноэкранном меню строка ввода в той же рамке, без него вопрос идет
+    через терминал: stdout занят выбором. Пустой ответ или Esc: None."""
     if "<" not in action:
         return shlex.split(action)
-    return prompt_tty(action)
+    if screen is None:
+        return prompt_tty(action)
+    out = []
+    for p in shlex.split(action.replace("<", "'<").replace(">", ">'")):
+        if p.startswith("<") and p.endswith(">"):
+            value = screen.ask(p[1:-1], title=title, note=note)
+            if not value or not value.strip():
+                return None
+            out += shlex.split(value)
+        else:
+            out.append(p)
+    return out
 
 
 def prompt_tty(action):
@@ -104,37 +119,91 @@ def dim(text):
     return f"\x1b[2m{text}\x1b[0m"
 
 
-def pick_action(name, actions, esc, at=0):
-    width = max(len(l) for _, l in actions) + 3
-    return pick([(f"{a} {label}", f"{label.ljust(width)}{dim(f'mnrh {name} {a}'.rstrip())}") for a, label in actions],
-                title=f"\x1b[1;35mmnrh {name}\x1b[0m", esc=esc, default=at)
+# значки только шириной в две клетки и без VS16, иначе едут рамки меню
+ICONS = {"claude": "🤖", "repos": "📚", "deps": "📦", "ssh": "🔑", "alert": "📣", "init": "🧰", "ram": "🧠",
+         "disk": "💽", "gradle": "🐘", "kotlin": "🟣", "build-tools": "🔨", "sim": "📱", "killdaemons": "💀",
+         "doctor": "🏥", "fix": "🔧", "path": "🧭", "outdated": "⏰", "login": "🚪", "sleep": "😴", "scroll": "🐭",
+         "nomusic": "🔇", "tossling": "📋", "uninstall": "🧹", "ports": "🔌", "todo": "📝", "shot": "📸"}
+
+
+def icon(name):
+    mark = ICONS.get(name, "")
+    return mark if width(mark) == 2 else "  "
+
+
+def command_info(name, desc, actions):
+    """Правая панель главного меню: что делает команда и какие у нее действия."""
+    lines = [f"\x1b[1mmnrh {name}\x1b[0m", ""]
+    if desc:
+        lines += [desc, ""]
+    if len(actions) > 1:
+        lines.append(dim("ДЕЙСТВИЯ, ENTER ОТКРОЕТ СПИСОК"))
+        for a, label in actions:
+            lines += [label, dim(f"  mnrh {name} {a}".rstrip())]
+    else:
+        lines += [dim("ENTER ЗАПУСТИТ"), dim(f"mnrh {name} {actions[0][0]}".rstrip())]
+    return lines
+
+
+def action_info(name, desc, action):
+    a, label = action
+    lines = [f"\x1b[1m{label}\x1b[0m", "", dim(f"$ mnrh {name} {a}".rstrip())]
+    asks = [p[1:-1] for p in shlex.split(a.replace("<", "'<").replace(">", ">'")) if p.startswith("<")]
+    if asks:
+        lines += ["", "Спросит " + ", ".join(asks) + " перед запуском."]
+    if desc:
+        lines += ["", dim(f"MNRH {name.upper()}"), desc]
+    return lines
+
+
+def pick_action(screen, name, desc, actions, back, at=0):
+    """Действия одной команды на экране screen. Ответ: (позиция, аргументы) или None по Esc."""
+    wide = max(len(l) for _, l in actions) + 3
+    rows = [(f"{a} {label}", f"{label.ljust(wide)}{dim(f'mnrh {name} {a}'.rstrip())}") for a, label in actions]
+    while True:
+        at = screen.pick(rows, title=f"mnrh {name}", default=at, numbers=False, back=back,
+                         describe=lambda i, w: action_info(name, desc, actions[i]))
+        if at is None:
+            return None
+        a, label = actions[at]
+        rest = ask(a, screen, title=f"mnrh {name}", note=[f"\x1b[1m{label}\x1b[0m", dim(f"mnrh {name} {a}")])
+        if rest is not None:
+            return at, rest
 
 
 def menu(items, version, at=0):
-    width = max(len(n) for _, n, *_ in items) + 2
     rows, index, group = [], [], None
     for k, (g, name, desc, _) in enumerate(items):
         if g != group:
             rows.append((None, g))
             index.append(None)
             group = g
-        rows.append((f"{name} {desc} {g}", f"{name.ljust(width)}{dim(desc)}"))
+        rows.append((f"{name} {desc} {g}", f"{icon(name)} {name}"))
         index.append(k)
-    while True:
-        i = pick(rows, title=f"\x1b[1;35mmnrh {version}\x1b[0m  {dim('что сделать?')}", default=at)
-        if i is None:
-            return None
-        at = i
-        _, name, _, actions = items[index[i]]
-        j = 0 if len(actions) == 1 else pick_action(name, actions, esc="назад")
-        if j is None:
-            continue
-        try:
-            rest = ask(actions[j][0])
-        except (KeyboardInterrupt, EOFError):
-            return None
-        if rest is not None:
-            return at, [name] + rest
+
+    def describe(i, w):
+        _, name, desc, actions = items[index[i]]
+        return command_info(name, desc, actions)
+
+    screen = Screen()
+    try:
+        while True:
+            i = screen.pick(rows, title="Команды", default=at, numbers=False, back="выход", describe=describe)
+            if i is None:
+                return None
+            at = i
+            _, name, desc, actions = items[index[i]]
+            if len(actions) == 1:
+                rest = ask(actions[0][0], screen, title=f"mnrh {name}", note=[desc])
+            else:
+                got = pick_action(screen, name, desc, actions, back="назад")
+                rest = None if got is None else got[1]
+            if rest is not None:
+                return at, [name] + rest
+    except (Quit, KeyboardInterrupt, EOFError):
+        return None
+    finally:
+        screen.close()
 
 
 def main():
@@ -160,24 +229,25 @@ def main():
 
 
 def actions(registry, name, at="0"):
-    found = [a for _, n, _, a in load(registry, name) if n == name]
-    if not found or len(found[0]) < 2:
+    found = [(d, a) for _, n, d, a in load(registry, name) if n == name]
+    if not found or len(found[0][1]) < 2:
         return 3
+    desc, acts = found[0]
     try:
         at = int(at)
     except ValueError:
         at = 0
-    while True:
-        at = pick_action(name, found[0], esc="выход", at=at)
-        if at is None:
-            return 1
-        try:
-            rest = ask(found[0][at][0])
-        except (KeyboardInterrupt, EOFError):
-            return 1
-        if rest is not None:
-            print(f"{at}\t" + " ".join(shlex.quote(a) for a in rest))
-            return 0
+    screen = Screen()
+    try:
+        got = pick_action(screen, name, desc, acts, back="выход", at=at)
+    except (Quit, KeyboardInterrupt, EOFError):
+        got = None
+    finally:
+        screen.close()
+    if got is None:
+        return 1
+    print(f"{got[0]}\t" + " ".join(shlex.quote(a) for a in got[1]))
+    return 0
 
 
 def restart_pending():
