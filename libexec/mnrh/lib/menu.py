@@ -288,6 +288,9 @@ class Menu:
             self.draw()
 
 ALT_ON, ALT_OFF = "\x1b[?1049h", "\x1b[?1049l"
+# программа запущена внутри рамки меню (run_framed): ее меню рисуются на том же экране, без переключения
+IN_FRAME = os.environ.get("MNRH_IN_FRAME") == "1"
+REDRAW = "\x1b]7777;mnrh-redraw\x07"
 FRAME, FRAME_DIM, ACCENT, ROW_BG = "38;5;110", "38;5;240", "38;5;110", "48;5;238"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
 # имя над рамками и папка share/<имя>/icons: этот же файл лежит в mnrh, имя берется по bin/ проекта
@@ -543,7 +546,8 @@ class Screen:
         attrs = termios.tcgetattr(self.fd)
         attrs[3] &= ~termios.ISIG
         termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
-        os.write(self.fd, (ALT_ON + HIDE + "\x1b[2J").encode())
+        # внутри рамки родительского меню экран уже полноэкранный: переключать его значит мигнуть
+        os.write(self.fd, ((HIDE if IN_FRAME else ALT_ON + HIDE) + "\x1b[2J").encode())
         return self
 
     def close(self):
@@ -552,7 +556,11 @@ class Screen:
             return
         try:
             termios.tcsetattr(self.fd, termios.TCSADRAIN, self.saved)
-            os.write(self.fd, (ALT_OFF + SHOW).encode())
+            os.write(self.fd, (SHOW if IN_FRAME else ALT_OFF + SHOW).encode())
+            if IN_FRAME:
+                # родитель увидит метку в выводе и нарисует свою рамку поверх этого меню
+                sys.stdout.write(REDRAW)
+                sys.stdout.flush()
         finally:
             os.close(self.fd)
             self.fd = None
@@ -644,6 +652,225 @@ class Screen:
             raise
         except Cancel:
             return None
+
+
+class Output:
+    """Вывод программы для рамки: строки с цветами. Понимает \r (строка пишется заново), \x1b[K и \x1b[2K,
+    табуляцию и Backspace; прочее управление курсором выбрасывается. Метка REDRAW ставит флаг redraw."""
+    TOKEN = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]|\x1b[^\[\]]|\r\n|[\r\n\t\b]|[^\x1b\r\n\t\b]+")
+    LIMIT = 5000
+
+    def __init__(self):
+        self.lines = [""]
+        self.fresh = False  # был \r: следующий текст пишет строку заново
+        self.redraw = False
+        self.rest = ""
+
+    def feed(self, text):
+        text = self.rest + text
+        cut_at = text.rfind("\x1b")
+        # незаконченная управляющая последовательность в конце куска: дождаться остального
+        if cut_at != -1 and not re.match(r"\x1b(\][^\x07]*\x07|\][^\x1b]*\x1b\\|\[[0-9;?]*[A-Za-z]|[^\[\]])", text[cut_at:]):
+            text, self.rest = text[:cut_at], text[cut_at:]
+        else:
+            self.rest = ""
+        for tok in self.TOKEN.findall(text):
+            if tok in ("\n", "\r\n"):
+                self.lines.append("")
+                self.fresh = False
+            elif tok == "\r":
+                self.fresh = True
+            elif tok == "\t":
+                self.put(" " * (8 - width(self.lines[-1]) % 8))
+            elif tok == "\b":
+                self.lines[-1] = self.lines[-1][:-1]
+            elif tok.startswith("\x1b]"):
+                if "mnrh-redraw" in tok:
+                    self.redraw = True
+            elif tok.startswith("\x1b["):
+                if tok.endswith("m"):
+                    self.lines[-1] += tok
+                elif tok in ("\x1b[K", "\x1b[0K") and self.fresh or tok == "\x1b[2K":
+                    self.lines[-1] = ""
+                    self.fresh = False
+            elif not tok.startswith("\x1b"):
+                self.put(tok)
+        del self.lines[:-self.LIMIT]
+
+    def put(self, text):
+        if self.fresh:
+            self.lines[-1] = ""
+            self.fresh = False
+        self.lines[-1] += text
+
+    def plain(self):
+        lines = self.lines[:-1] if self.lines[-1] == "" else self.lines
+        return "\n".join(lines)
+
+
+def run_framed(screen, argv, title, env=None):
+    """Запустить argv в рамке на экране screen: вывод с цветами в рамке, меню программы на том же экране
+    (MNRH_IN_FRAME=1). Ответ: (код выхода, Output). Экран не закрывается, поэтому ничего не мигает."""
+    import fcntl
+    import pty
+    import struct
+    import subprocess
+
+    screen.open()
+    out = Output()
+    rows, cols = screen_size(screen.fd)
+    master, slave = pty.openpty()
+
+    def resize():
+        r, c = screen_size(screen.fd)
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", max(3, r - 5), max(20, c - 8), 0, 0))
+        return r, c
+
+    resize()
+    child_env = dict(os.environ if env is None else env, MNRH_IN_FRAME="1")
+    # программе нужен обычный терминал: ввод строки, вопросы да или нет; свои меню она включит сама
+    termios.tcsetattr(screen.fd, termios.TCSADRAIN, screen.saved)
+    # Ctrl+C прерывает программу, а меню остается: себе SIGINT игнорируем, программе возвращаем обычный
+    import signal
+    old_int = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        proc = subprocess.Popen(argv, stdout=slave, stderr=slave, env=child_env,
+                                preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+    except OSError as e:
+        signal.signal(signal.SIGINT, old_int)
+        os.close(master)
+        os.close(slave)
+        out.feed(f"\x1b[31m{e}\x1b[0m\n")
+        return 127, out
+    shape = (rows, cols)
+    draw_output(screen, out, title, running=True)
+    while True:
+        ready = select.select([master], [], [], 0.2)[0]
+        if ready:
+            try:
+                data = os.read(master, 65536)
+            except OSError:
+                data = b""
+            if not data:
+                break
+            out.feed(data.decode("utf-8", "replace"))
+            out.redraw = False
+            draw_output(screen, out, title, running=True)
+        elif proc.poll() is not None:
+            break
+        elif screen_size(screen.fd) != shape:
+            shape = resize()
+            draw_output(screen, out, title, running=True)
+    code = proc.wait()
+    signal.signal(signal.SIGINT, old_int)
+    while select.select([master], [], [], 0.05)[0]:  # дочитать хвост вывода
+        try:
+            data = os.read(master, 65536)
+        except OSError:
+            break
+        if not data:
+            break
+        out.feed(data.decode("utf-8", "replace"))
+    os.close(master)
+    os.close(slave)
+    tty.setcbreak(screen.fd)
+    attrs = termios.tcgetattr(screen.fd)
+    attrs[3] &= ~termios.ISIG
+    termios.tcsetattr(screen.fd, termios.TCSANOW, attrs)
+    write_all(screen.fd, HIDE)
+    return (128 - code if code < 0 else code), out
+
+
+def screen_size(fd):
+    try:
+        cols, rows = os.get_terminal_size(fd)
+    except OSError:
+        cols, rows = 80, 24
+    return rows, cols
+
+
+def fold(line, size):
+    """Разбить строку с цветами на куски по size клеток; цвет переходит на следующий кусок."""
+    if width(line) <= size:
+        return [line]
+    parts, cur, seen, active, i = [], "", 0, [], 0
+    while i < len(line):
+        m = ANSI.match(line, i)
+        if m:
+            code = m.group(0)
+            active = [] if code in ("\x1b[0m", "\x1b[m") else active + [code]
+            cur += code
+            i = m.end()
+            continue
+        w = cells(line[i])
+        if seen + w > size:
+            parts.append(cur + "\x1b[0m")
+            cur, seen = "".join(active), 0
+        cur += line[i]
+        seen += w
+        i += 1
+    parts.append(cur)
+    return parts
+
+
+def draw_output(screen, out, title, running, code=0, back=0):
+    """Рамка с выводом: последние строки, back строк назад при листании. Курсор в конце вывода, чтобы ввод
+    строки и вопросы программы шли на месте."""
+    rows, cols = screen_size(screen.fd)
+    w, h = max(20, cols - 4), max(5, rows - 3)
+    inner = h - 2
+    raw = out.lines[:-1] if out.lines[-1] == "" and not running else out.lines
+    # широкие строки переносятся, а не обрезаются: таблицы бывают шире окна
+    lines = [part for line in raw for part in fold(line, w - 3)]
+    end = max(0, len(lines) - back)
+    shown = lines[max(0, end - inner):end]
+    body = [" " + line for line in shown]
+    if running:
+        state = tr("выполняется", "running")
+        hint = tr("выполняется · Ctrl+C прервать", "running · Ctrl+C to stop")
+    else:
+        state = (tr("готово", "done") if code == 0 else tr(f"код {code}", f"exit {code}"))
+        hint = tr("Enter в меню · ↑↓ листать · q выход", "Enter menu · ↑↓ scroll · q quit")
+    head = f" › {title}  ·  {state} "
+    frame = (["  " + cut(brand(), cols - 2)] + ["  " + line for line in box(head, body, w, h, True)]
+             + ["  " + f"\x1b[2m{cut(hint, cols - 4)}\x1b[0m"])
+    text = "\x1b[H" + "\x1b[K\r\n".join(frame) + "\x1b[K\x1b[J"
+    if running:
+        # курсор на последней строке вывода: там программа спросит и там будет эхо ввода
+        row = 3 + max(0, len(shown) - 1)
+        col = 4 + min(w - 3, width(shown[-1]) if shown else 0)
+        text += f"\x1b[{row};{col}H" + SHOW
+    write_all(screen.fd, with_icons(text))
+
+
+def show_output(screen, out, title, code):
+    """Вывод после конца программы: листать, Enter или Esc в меню (True), q или Ctrl+C выход (False)."""
+    back = 0
+    while True:
+        draw_output(screen, out, title, running=False, code=code, back=back)
+        rows, _ = screen_size(screen.fd)
+        page = max(1, rows - 6)
+        keys = PENDING[:] if PENDING else split_keys(read_keys(screen.fd))
+        del PENDING[:]
+        _, cols = screen_size(screen.fd)
+        total = sum(len(fold(line, max(20, cols - 4) - 3)) for line in out.lines)
+        for key in keys:
+            if key in ("\r", "\n", "\x1b"):
+                return True
+            if key in ("q", "Q", "й", "Й", "\x03", "\x04"):
+                return False
+            if key in UP:
+                back = min(back + 1, max(0, total - page))
+            elif key in DOWN:
+                back = max(0, back - 1)
+            elif key in ("\x1b[5~", " b"):
+                back = min(back + page, max(0, total - page))
+            elif key in ("\x1b[6~", " "):
+                back = max(0, back - page)
+            elif key in HOME:
+                back = max(0, total - page)
+            elif key in END:
+                back = 0
 
 
 def drive(fd, menu):
