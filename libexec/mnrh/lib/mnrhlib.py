@@ -126,7 +126,7 @@ CLAUDEMEISTER_PATHS = tuple(os.path.join(d, "claudemeister")
 
 
 def claudemeister_path():
-    """mnrh claude, todo, shot и deps теперь в отдельной программе claudemeister."""
+    """mnrh claudemeister, todo, shot и deps теперь в отдельной программе claudemeister."""
     forced = os.environ.get("MNRH_CLAUDEMEISTER")
     if forced is not None:
         return forced if os.access(forced, os.X_OK) else None

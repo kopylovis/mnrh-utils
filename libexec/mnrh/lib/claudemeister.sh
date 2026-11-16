@@ -1,4 +1,4 @@
-# mnrh claude, todo, shot и deps теперь в отдельной программе claudemeister: эти команды передают ей все аргументы.
+# mnrh claudemeister, todo, shot и deps теперь в отдельной программе claudemeister: эти команды передают ей все аргументы.
 # MNRH_CLAUDEMEISTER=<путь> задает программу явно.
 cm_exec() {
   local cm="${MNRH_CLAUDEMEISTER-}" p

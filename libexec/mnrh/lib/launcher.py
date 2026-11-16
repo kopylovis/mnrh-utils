@@ -120,7 +120,7 @@ def dim(text):
 
 
 # значки только шириной в две клетки и без VS16, иначе едут рамки меню
-ICONS = {"claude": "🤖", "repos": "📚", "deps": "📦", "ssh": "🔑", "alert": "📣", "init": "🧰", "ram": "🧠",
+ICONS = {"claudemeister": "🤖", "repos": "📚", "deps": "📦", "ssh": "🔑", "alert": "📣", "init": "🧰", "ram": "🧠",
          "disk": "💽", "gradle": "🐘", "kotlin": "🟣", "build-tools": "🔨", "sim": "📱", "killdaemons": "💀",
          "doctor": "🏥", "fix": "🔧", "path": "🧭", "outdated": "⏰", "login": "🚪", "sleep": "😴", "scroll": "🐭",
          "nomusic": "🔇", "tossling": "📋", "uninstall": "🧹", "ports": "🔌", "todo": "📝", "shot": "📸"}

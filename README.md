@@ -19,7 +19,7 @@
 
 ```
 mnrh init setup       первая настройка: папка с проектами, подключение к Claude Code
-mnrh claude …         Claude Code в проекте, сессии, /restart, прокси, MCP: отдельная программа claudemeister
+mnrh claudemeister …  Claude Code в проекте, сессии, /restart, прокси, MCP: отдельная программа claudemeister
 mnrh todo, shot, deps бэклог проекта, снимок окна, устаревшие зависимости Gradle (тоже claudemeister)
 mnrh doctor status    проверка системы, коротким списком с подсказками
 mnrh doctor --full    ещё обновления macOS и целостность Homebrew
@@ -92,11 +92,11 @@ mnrh init setup
 `mnrh init setup` спрашивает, где лежат проекты (по умолчанию `~/Developer`; предлагает найденные
 `~/Projects`, `~/AndroidStudioProjects` и т. п. с числом git-репозиториев), сохраняет это в
 `~/.config/mnrh/config` и предлагает `claudemeister setup`. Без настройки и без `~/Developer`
-`mnrh claude` сам спросит папку при первом запуске. `mnrh init ~/Projects` задаёт папку сразу,
+`mnrh claudemeister` сам спросит папку при первом запуске. `mnrh init ~/Projects` задаёт папку сразу,
 `MNRH_PROJECTS=<папка>` переопределяет её на время.
 
 Homebrew ставит вместе с mnrh [claudemeister](https://github.com/kopylovis/claudemeister) (Claude Code:
-`mnrh claude`, `/restart`, MCP-сервер, прокси) и строку состояния [promptsill](https://github.com/kopylovis/promptsill).
+`mnrh claudemeister`, `/restart`, MCP-сервер, прокси) и строку состояния [promptsill](https://github.com/kopylovis/promptsill).
 Обновление: `brew upgrade mnrh`. Удаление: `brew uninstall mnrh`.
 
 ### Из исходников, для разработки
@@ -123,14 +123,14 @@ make install
 ## Требования
 
 macOS, bash и `/usr/bin/python3` из Xcode Command Line Tools
-(`xcode-select --install`). От Homebrew утилита не зависит. Для `mnrh claude`, `todo`, `shot` и `deps`
+(`xcode-select --install`). От Homebrew утилита не зависит. Для `mnrh claudemeister`, `todo`, `shot` и `deps`
 нужен [claudemeister](https://github.com/kopylovis/claudemeister).
 
 ## Claude Code: claudemeister
 
-`mnrh claude`, `mnrh todo`, `mnrh shot` и `mnrh deps` теперь в отдельной программе
+`mnrh claudemeister`, `mnrh todo`, `mnrh shot` и `mnrh deps` теперь в отдельной программе
 [claudemeister](https://github.com/kopylovis/claudemeister). Формула mnrh ставит ее как зависимость, а эти
-команды передают ей все аргументы: `mnrh claude kcalm -x` то же, что `claudemeister kcalm -x`. Без mnrh
+команды передают ей все аргументы: `mnrh claudemeister kcalm -x` то же, что `claudemeister kcalm -x`. Старое имя `mnrh claude` тоже работает. Без mnrh
 claudemeister ставится сам по себе: `brew install kopylovis/tap/claudemeister`. Как он работает, описано в его README.
 
 С mnrh у claudemeister есть еще MCP-инструменты `mac_status` и `free_memory` (они запускают `mnrh ram`
@@ -182,7 +182,7 @@ Homebrew, симуляторы без runtime, снимки `mnrh shot`.
   устройство останется) и каждого эмулятора Android (как Wipe Data);
 - индексы текущих Android Studio и JetBrains, кеш Chrome, крупные (от 300 МБ) кеши
   приложений в `~/Library/Caches` и `~/.cache`, node_modules, Корзина, резервные копии
-  `mnrh claude sessions slim`, старые runtime и символы iOS для отладки.
+  `claudemeister sessions slim`, старые runtime и символы iOS для отладки.
 
 Системные кеши `com.apple.*` не трогаются никогда.
 
@@ -329,7 +329,7 @@ HID-событие с id устройства, а по id в IORegistry видн
 
 Разбирает `pmset -g assertions` по-человечески: кто держит Mac, насколько сильно
 (только от простоя или даже с закрытой крышкой от сети — `caffeinate -s`, его ставит
-`mnrh claude -k`) и зачем. caffeinate сопоставляется со своей программой: сессия Claude,
+`claudemeister -k`) и зачем. caffeinate сопоставляется со своей программой: сессия Claude,
 временная блокировка самого Claude Code (`-t 300`) или зависший — его программа уже
 закрыта или он остался без родителя и срока. Звук, который держит Mac, показывается
 с процессом-источником, в том числе из симулятора. Ниже — последние засыпания и

@@ -20,7 +20,7 @@ def usage():
     print("mnrh init --show          показать текущую настройку")
     print()
     print(f"Настройка хранится в {tilde(CONFIG)}; на время можно переопределить MNRH_PROJECTS=<папка>.")
-    print("Папку используют mnrh claude (claudemeister), repos, gradle и disk.")
+    print("Папку используют mnrh claudemeister, repos, gradle и disk.")
 
 
 def repo_count(path):
