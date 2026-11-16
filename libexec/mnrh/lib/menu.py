@@ -60,6 +60,13 @@ def tr(ru, en):
         return ru
 
 
+def write_all(fd, text):
+    """Записать все: кадр с картинками весит десятки килобайт, и os.write может взять только часть."""
+    data = text.encode()
+    while data:
+        data = data[os.write(fd, data):]
+
+
 def cells(ch):
     """Сколько клеток терминала занимает символ: эмодзи и иероглифы две, модификаторы ноль."""
     if unicodedata.combining(ch) or ch in "\u200d\ufe0e\ufe0f":
@@ -115,7 +122,7 @@ class Menu:
         self.drawn = 0
 
     def write(self, s):
-        os.write(self.fd, s.encode())
+        write_all(self.fd, s)
 
     def view(self):
         q = self.query.lower()
@@ -287,6 +294,75 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.r
 BRAND = "claudemeister"
 
 
+_ICONS = None
+
+
+def config_value(key):
+    """Строка key=значение из ~/.config/mnrh/config, общего для claudemeister и mnrh."""
+    path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "mnrh", "config")
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                k, _, v = line.strip().partition("=")
+                if k.strip() == key:
+                    return v.strip().lower()
+    except OSError:
+        pass
+    return ""
+
+
+def images_ok():
+    """Умеет ли терминал картинки в строке по протоколу iTerm2: iTerm2 и WezTerm, в том числе по ssh (LC_TERMINAL).
+    В tmux и screen картинкам нужен проброс, там остаются emoji. Явно задают MNRH_ICONS=emoji или images
+    и строка icons=emoji или icons=images в ~/.config/mnrh/config."""
+    want = os.environ.get("MNRH_ICONS", "").lower() or config_value("icons")
+    if want in ("emoji", "images"):
+        return want == "images"
+    if os.environ.get("TMUX") or os.environ.get("TERM", "").startswith(("screen", "tmux")):
+        return False
+    return (os.environ.get("TERM_PROGRAM") in ("iTerm.app", "WezTerm")
+            or os.environ.get("LC_TERMINAL") in ("iTerm2", "WezTerm"))
+
+
+def icons():
+    """emoji -> готовая вставка картинки. Набор берется из share/<BRAND>/icons (icons.json и PNG); без него и в
+    терминалах без картинок пусто, и меню показывает emoji."""
+    global _ICONS
+    if _ICONS is not None:
+        return _ICONS
+    _ICONS = {}
+    if not images_ok():
+        return _ICONS
+    folder = os.path.join(ROOT, "share", BRAND, "icons")
+    try:
+        import base64
+        import json
+        with open(os.path.join(folder, "icons.json"), encoding="utf-8") as f:
+            mapping = json.load(f)
+        for emoji, name in mapping.items():
+            with open(os.path.join(folder, name + ".png"), "rb") as f:
+                data = f.read()
+            img = (f"\x1b]1337;File=inline=1;width=2;height=1;preserveAspectRatio=1;size={len(data)}:"
+                   f"{base64.b64encode(data).decode()}\x07")
+            # две клетки сначала заливаются пробелами (фон выбранной строки остается), картинка ложится поверх,
+            # курсор возвращается и уходит на две клетки вправо: так не важно, куда его ставит терминал
+            _ICONS[emoji] = f"  \x1b[2D\x1b7{img}\x1b8\x1b[2C"
+    except (OSError, ValueError):
+        _ICONS = {}
+    return _ICONS
+
+
+def with_icons(frame):
+    """Подменить emoji на картинки в готовом кадре. Ширина та же, две клетки, поэтому раскладка не меняется."""
+    table = icons()
+    if not table:
+        return frame
+    for emoji, img in table.items():
+        if emoji in frame:
+            frame = frame.replace(emoji, img)
+    return frame
+
+
 def brand():
     """Строка над рамками: имя и версия из VERSION в корне проекта."""
     try:
@@ -376,15 +452,12 @@ class Panel(Menu):
         view = self.view()
         gap = 2
         h = max(5, rows - 3)
-        side = self.side and cols >= 80
-        if side:
-            # левая рамка по самой длинной строке, но описанию справа остается хотя бы 36 клеток
-            digits = len(str(len(self.pick_able) + self.start - 1)) + 2 if self.numbers else 0
-            need = max([width(text) + digits + 6 for key, text in self.items if key is not None]
-                       + [width(self.heads[0]) + 8])
-            lw = max(34, min(need, cols - gap * 2 - 37))
-        else:
-            lw = cols - gap * 2
+        digits = len(str(len(self.pick_able) + self.start - 1)) + 2 if self.numbers else 0
+        need = max([width(text) + digits + 6 for key, text in self.items if key is not None]
+                   + [width(self.heads[0]) + 8])
+        # описание справа только если рядом со списком целиком ему остается хотя бы 34 клетки; иначе список важнее
+        side = self.side and cols - gap * 2 - 1 - max(34, need) >= 34
+        lw = max(34, need) if side else cols - gap * 2
         rw = cols - gap * 2 - lw - 1
         left = box(f" › {self.heads[0]} ", self.body(view, lw - 2, h - 2), lw, h, True)
         screen = left
@@ -400,7 +473,7 @@ class Panel(Menu):
         pad = " " * gap
         lines = ([pad + cut(self.title, cols - gap)] + [pad + line for line in screen]
                  + [pad + f"\x1b[2m{cut(hint, cols - gap * 2)}\x1b[0m"])
-        self.write("\x1b[H" + "\x1b[K\r\n".join(lines) + "\x1b[K\x1b[J")
+        self.write(with_icons("\x1b[H" + "\x1b[K\r\n".join(lines) + "\x1b[K\x1b[J"))
 
     def handle(self, key):
         if key == "\t":
@@ -514,7 +587,7 @@ class Screen:
             lines = (["  " + cut(brand(), cols - 2)] + ["  " + line for line in box(f" › {heading(title)} ", body,
                                                                                      w, max(5, rows - 3), True)]
                      + ["  " + f"\x1b[2m{hint}\x1b[0m"])
-            os.write(self.fd, ("\x1b[H" + "\x1b[K\r\n".join(lines) + "\x1b[K\x1b[J").encode())
+            write_all(self.fd, with_icons("\x1b[H" + "\x1b[K\r\n".join(lines) + "\x1b[K\x1b[J"))
             keys = PENDING[:] if PENDING else split_keys(read_keys(self.fd))
             del PENDING[:]
             for n, key in enumerate(keys):
