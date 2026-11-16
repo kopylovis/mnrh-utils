@@ -290,8 +290,9 @@ class Menu:
 ALT_ON, ALT_OFF = "\x1b[?1049h", "\x1b[?1049l"
 FRAME, FRAME_DIM, ACCENT, ROW_BG = "38;5;110", "38;5;240", "38;5;110", "48;5;238"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
-# имя над рамками; этот же файл лежит в mnrh, там launcher ставит BRAND = "mnrh"
-BRAND = "claudemeister"
+# имя над рамками и папка share/<имя>/icons: этот же файл лежит в mnrh, имя берется по bin/ проекта
+BRAND = next((name for name in ("claudemeister", "mnrh") if os.path.exists(os.path.join(ROOT, "bin", name))),
+             "claudemeister")
 
 
 _ICONS = None
@@ -432,6 +433,8 @@ class Panel(Menu):
                 continue
             if self.numbers:
                 text = f"\x1b[2m{self.pick_able.index(i) + self.start:>{digits}}\x1b[0m  {text}"
+            if self.marks is not None:
+                text = ("\x1b[32m◉\x1b[0m " if i in self.marks else "\x1b[2m○\x1b[0m ") + text
             if i == self.sel:
                 row = cut(f" › {text}", w)
                 on = f"\x1b[0;{ROW_BG};1m"
@@ -468,6 +471,11 @@ class Panel(Menu):
         if self.query:
             hint = tr(f"поиск: {self.query}▏ · Backspace стереть · Esc сбросить",
                       f"search: {self.query}▏ · Backspace to erase · Esc to clear")
+        elif self.marks is not None:
+            total = self.summary(self.marks) if self.summary else tr(f"отмечено {len(self.marks)}",
+                                                                      f"{len(self.marks)} marked")
+            hint = tr(f"{total} · Пробел отметить · a все · Enter дальше · Esc отмена",
+                      f"{total} · Space mark · a all · Enter go on · Esc cancel")
         else:
             hint = self.hint
         pad = " " * gap
@@ -503,7 +511,7 @@ class Panel(Menu):
                     raise
                 if done:
                     PENDING[:] = keys[n + 1:]
-                    return self.sel
+                    return self.sel if self.marks is None else set(self.marks)
             self.draw()
 
 
@@ -606,8 +614,10 @@ class Screen:
                 elif not key.startswith("\x1b"):
                     text += "".join(ch for ch in key if ch.isprintable())
 
-    def pick(self, items, title="", default=0, describe=None, start=1, numbers=True, back=None, top=None):
-        """Список в рамке на этом экране. Esc: None, Ctrl+C: исключение Quit."""
+    def pick(self, items, title="", default=0, describe=None, start=1, numbers=True, back=None, top=None,
+             marked=None, summary=None):
+        """Список в рамке на этом экране. Esc: None, Ctrl+C: исключение Quit. С marked (набор индексов) это список
+        с отметками: ответ набор отмеченных, summary(отметки) дает строку итога внизу."""
         if not items or all(key is None for key, _ in items):
             return None
         self.open()
@@ -625,6 +635,9 @@ class Screen:
             os.write(self.fd, b"\x1b[H\x1b[2J")
             menu = Menu(self.fd, items, heading(title), "", start, default)
             menu.esc = back
+        if marked is not None:
+            menu.marks = set(marked)
+            menu.summary = summary
         try:
             return menu.run()
         except Quit:
@@ -671,19 +684,19 @@ def heading(title):
 
 def pick(items, title="", label="", start=1, default=0, marked=None, summary=None, esc=None, describe=None):
     """Список с выбором. Если терминал позволяет, на весь экран в рамке, с описанием справа, когда есть describe(i, w).
-    Отметки (marked) пока только в старом виде."""
+    С marked это список с отметками, ответ набор индексов."""
     if not items or all(key is None for key, _ in items):
         return None
     fd = os.open("/dev/tty", os.O_RDWR)
-    big = marked is None and roomy(fd)
-    if big:
+    if roomy(fd):
         os.close(fd)
         with Screen() as screen:
             try:
-                choice = screen.pick(items, title, default, describe, start, back=esc or tr("выход", "quit"))
+                choice = screen.pick(items, title, default, describe, start, back=esc or tr("выход", "quit"),
+                                     marked=marked, summary=summary)
             except Quit:
                 choice = None
-        if choice is not None and label:
+        if choice is not None and label and marked is None:
             fd = os.open("/dev/tty", os.O_WRONLY)
             os.write(fd, f"{label}: \x1b[1m{items[choice][0]}\x1b[0m\r\n".encode())
             os.close(fd)
