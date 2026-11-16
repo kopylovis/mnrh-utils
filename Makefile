@@ -103,8 +103,9 @@ test:
 	@! ./bin/mnrh no-such-command >/dev/null 2>&1
 	@bash -n libexec/mnrh/lib/claudemeister.sh
 	@zsh -n share/mnrh/restart.zsh
-	@for c in claude todo shot deps; do MNRH_CLAUDEMEISTER=/nonexistent ./bin/mnrh $$c -h 2>&1 >/dev/null | grep -q 'brew install kopylovis/tap/claudemeister' || { echo "mnrh $$c без claudemeister"; exit 1; }; done
+	@for c in claudemeister claude todo shot deps; do MNRH_CLAUDEMEISTER=/nonexistent ./bin/mnrh $$c -h 2>&1 >/dev/null | grep -q 'brew install kopylovis/tap/claudemeister' || { echo "mnrh $$c без claudemeister"; exit 1; }; done
 	@MNRH_CLAUDEMEISTER=/bin/echo ./bin/mnrh todo add x | grep -qx 'todo add x'
-	@MNRH_CLAUDEMEISTER=/bin/echo ./bin/mnrh claude setup --country KZ | grep -qx 'setup --country KZ'
+	@MNRH_CLAUDEMEISTER=/bin/echo ./bin/mnrh claudemeister setup --country KZ | grep -qx 'setup --country KZ'
+	@MNRH_CLAUDEMEISTER=/bin/echo ./bin/mnrh claude setup | grep -qx 'setup'
 	@find libexec -name __pycache__ -type d -exec rm -rf {} +
 	@echo "все проверки пройдены"

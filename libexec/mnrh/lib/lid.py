@@ -48,7 +48,7 @@ def set_disabled(on):
 
 
 def sessions():
-    """pid caffeinate, которые держат сессии Claude (mnrh claude -k, open_claude, перезапуск)."""
+    """pid caffeinate, которые держат сессии Claude (claudemeister -k, open_claude, перезапуск)."""
     out = run(["ps", "-axo", "pid=,args="])
     return [int(l.split(None, 1)[0]) for l in out.splitlines()
             if len(l.split(None, 1)) == 2 and SESSION.match(l.split(None, 1)[1])]
