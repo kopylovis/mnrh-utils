@@ -925,7 +925,7 @@ def pick(items, title="", label="", start=1, default=0, marked=None, summary=Non
                 choice = None
         if choice is not None and label and marked is None:
             fd = os.open("/dev/tty", os.O_WRONLY)
-            os.write(fd, f"{label}: \x1b[1m{items[choice][0]}\x1b[0m\r\n".encode())
+            os.write(frame_fd(fd), f"{label}: \x1b[1m{items[choice][0]}\x1b[0m\r\n".encode())
             os.close(fd)
         return choice
     menu = Menu(fd, items, title, label, start, default)
@@ -945,8 +945,29 @@ def pick_many(items, title="", marked=(), summary=None):
     return pick(items, title=title, marked=set(marked), summary=summary)
 
 
+def frame_fd(fd):
+    """Куда писать строчный интерфейс. В рамке (run_framed) это stdout: его читает рамка. Если писать прямо
+    в терминал, рамка закроет написанное следующей перерисовкой, и вопрос не будет виден."""
+    if IN_FRAME and os.isatty(1):
+        sys.stdout.flush()
+        return 1
+    return fd
+
+
+def secret(prompt):
+    """getpass для рамки: подсказка идет через stdout, ввод не виден. Сам getpass пишет подсказку прямо
+    в терминал, и в рамке ее стирает перерисовка."""
+    import getpass
+    if frame_fd(None) == 1:
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+        return getpass.getpass("")
+    return getpass.getpass(prompt)
+
+
 def choice(question, options, default=0, back=None, esc=None):
     fd = os.open("/dev/tty", os.O_RDWR)
+    out = frame_fd(fd)
     saved = termios.tcgetattr(fd)
     sel = min(max(default, 0), len(options) - 1)
     keys = {}
@@ -960,7 +981,7 @@ def choice(question, options, default=0, back=None, esc=None):
             label = f" {opt[1]} "
             parts.append(f"\x1b[1;30;46m{label}\x1b[0m" if i == sel else f"\x1b[2m{label}\x1b[0m")
         hint = f"\x1b[2m  ←→ · Enter · Esc — {esc or tr('назад', 'back')}\x1b[0m"
-        os.write(fd, f"\r\x1b[K\x1b[1;34m{question}\x1b[0m  {'  '.join(parts)}{hint}".encode())
+        os.write(out, f"\r\x1b[K\x1b[1;34m{question}\x1b[0m  {'  '.join(parts)}{hint}".encode())
 
     result = back
     try:
@@ -968,7 +989,7 @@ def choice(question, options, default=0, back=None, esc=None):
         attrs = termios.tcgetattr(fd)
         attrs[3] &= ~termios.ISIG
         termios.tcsetattr(fd, termios.TCSANOW, attrs)
-        os.write(fd, HIDE.encode())
+        os.write(out, HIDE.encode())
         draw()
         while True:
             data = os.read(fd, 16)
@@ -992,7 +1013,7 @@ def choice(question, options, default=0, back=None, esc=None):
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
         label = next((o[1] for o in options if o[0] == result), "")
-        os.write(fd, f"\r\x1b[K\x1b[1;34m{question}\x1b[0m  {label}\r\n{SHOW}".encode())
+        os.write(out, f"\r\x1b[K\x1b[1;34m{question}\x1b[0m  {label}\r\n{SHOW}".encode())
         os.close(fd)
     return result
 
