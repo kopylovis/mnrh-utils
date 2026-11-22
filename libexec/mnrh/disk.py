@@ -342,7 +342,7 @@ def scan_app_caches():
                 hint="переиндексирует при запуске" if ide else "приложение пересоздаст")
     mnrh = os.path.join(HOME, ".cache", "mnrh")
     add(SAFE, "снимки окон mnrh shot", [os.path.join(mnrh, "shots")])
-    add(REVIEW, "резервные копии claudemeister sessions slim", glob.glob(os.path.join(mnrh, "slim-backup", "*")),
+    add(REVIEW, "резервные копии agentmeister sessions slim", glob.glob(os.path.join(mnrh, "slim-backup", "*")),
         hint="после удаления сжатие уже не вернуть через --undo")
 
 
