@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -8,16 +9,19 @@ import time
 from collections import defaultdict
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import adb_path, bundle_info, confirm, gradle_versions_in_use, has_flag, parse_env
+from mnrhlib import (HOME, adb_path, bundle_info, confirm, gradle_versions_in_use, has_flag, parse_env, projects,
+                     tilde)
 
 args = sys.argv[1:]
-if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not in ("clean", "status", "watch")):
+if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not in ("clean", "status", "watch", "tune")):
     print("mnrh ram                 меню с действиями (без терминала — то же, что status)")
     print("mnrh ram status          кто ест оперативную память, сгруппировано по приложениям")
     print("mnrh ram -p              то же по отдельным процессам")
     print("mnrh ram -n 30           показать больше строк (по умолчанию 15)")
     print("mnrh ram watch           следить, кто растет в памяти с начала наблюдения; -i 2 обновлять раз в 2 с")
     print("                         (по умолчанию 5), Ctrl+C выход и итог")
+    print("mnrh ram tune            сколько памяти разрешено демонам Gradle и Kotlin в проектах и как долго они живут")
+    print("mnrh ram tune --apply    записать в ~/.gradle/gradle.properties выход демона через 30 минут простоя")
     print("mnrh ram clean           отметить галочками, что остановить: демоны Gradle и Kotlin, каждый iOS-симулятор")
     print("                         и эмулятор Android отдельной строкой; потом показать, сколько вернулось")
     print("mnrh ram clean -y        без меню: демоны и симуляторы (без терминала -y обязателен)")
@@ -685,10 +689,146 @@ def clean():
               + f". Закрыть их: {CLEAN_HINT} --apps")
 
 
+GRADLE_PROPS = os.path.join(HOME, ".gradle", "gradle.properties")
+IDLE_KEY = "org.gradle.daemon.idletimeout"
+IDLE_WANTED = 30 * 60 * 1000
+IDLE_DEFAULT = 3 * 3600 * 1000
+
+
+def read_props(path):
+    """Только ключи и значения gradle.properties; остальное в файле (пароли и т.п.) никуда не выводится."""
+    props = {}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith(("#", "!")) or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        props[key.strip()] = value.strip().replace("\\=", "=").replace("\\:", ":")
+    return props
+
+
+def xmx_mb(text):
+    m = re.search(r"-Xmx(\d+)([kKmMgG]?)", text or "")
+    if not m:
+        return None
+    return int(m.group(1)) * {"k": 1 / 1024, "m": 1, "g": 1024, "": 1 / 1048576}[m.group(2).lower()]
+
+
+def daemon_heaps(props):
+    """(Xmx Gradle-демона, Xmx Kotlin-демона, откуда Kotlin) в МБ; None, если не задано."""
+    jvm = props.get("org.gradle.jvmargs", "")
+    gradle = xmx_mb(jvm)
+    kotlin = xmx_mb(props.get("kotlin.daemon.jvmargs"))
+    if kotlin is not None:
+        return gradle, kotlin, "kotlin.daemon.jvmargs"
+    m = re.search(r'-Dkotlin\.daemon\.jvm\.options="?([^" ]+)', jvm)
+    if m and xmx_mb(m.group(1)) is not None:
+        return gradle, xmx_mb(m.group(1)), "kotlin.daemon.jvm.options"
+    return gradle, None, "как у Gradle"
+
+
+def gb(mb):
+    return f"{mb / 1024:g} ГБ" if mb >= 1024 else f"{mb:g} МБ"
+
+
+def tune():
+    total_mb = int(run(["sysctl", "-n", "hw.memsize"]) or 0) / 1048576
+    cap = max(2048, min(4096, total_mb // 4))
+    home = read_props(GRADLE_PROPS) or {}
+    print(f"Демоны сборки на Mac с {total_mb / 1024:.0f} ГБ памяти. Разумный потолок одного демона {gb(cap)}.\n")
+
+    idle = home.get(IDLE_KEY)
+    idle_ms = int(idle) if idle and idle.isdigit() else None
+    if idle_ms is None:
+        print(f"Простой: {IDLE_KEY} не задан, демон Gradle держит память 3 ч после последней сборки.")
+    else:
+        print(f"Простой: {IDLE_KEY}={idle_ms}, демон уходит через {idle_ms // 60000} мин после последней сборки.")
+    need_idle = (idle_ms or IDLE_DEFAULT) > 2 * IDLE_WANTED
+    if need_idle:
+        print(f"  совет: {IDLE_KEY}={IDLE_WANTED} (30 мин) в {tilde(GRADLE_PROPS)}, записать: mnrh ram tune --apply")
+    if "org.gradle.jvmargs" in home:
+        print(f"  org.gradle.jvmargs задан в {tilde(GRADLE_PROPS)} и перекрывает jvmargs всех проектов целиком")
+    print()
+
+    rows = []
+    for proj in projects():
+        props = read_props(os.path.join(proj, "gradle.properties"))
+        if props is None:
+            continue
+        merged = dict(props, **home)
+        gradle, kotlin, source = daemon_heaps(merged)
+        if gradle is None and kotlin is None:
+            continue
+        rows.append((os.path.basename(proj), gradle, kotlin, source))
+    if rows:
+        print(f"{'GRADLE':>8}  {'KOTLIN':>8}  ПРОЕКТ")
+        for name, gradle, kotlin, source in sorted(rows, key=lambda r: -((r[1] or 512) + (r[2] or r[1] or 512))):
+            g = gb(gradle) if gradle else "512 МБ"
+            k = gb(kotlin) if kotlin else f"={g}"
+            over = [what for what, mb in (("Gradle", gradle), ("Kotlin", kotlin)) if mb and mb > cap]
+            note = f"  больше {gb(cap)}: {', '.join(over)}" if over else ""
+            print(f"{g:>8}  {k:>8}  {name}{note}")
+        worst = max((r[1] or 512) + (r[2] or r[1] or 512) for r in rows)
+        print("=X у Kotlin: отдельно не задано, Kotlin-демон берет столько же, сколько Gradle.")
+        print(f"\nGradle и Kotlin-демон одного проекта вместе могут взять до {gb(worst)}.")
+        if any((r[1] or 0) > cap or (r[2] or 0) > cap for r in rows):
+            print(f"Снизить: -Xmx{int(cap // 1024)}g в org.gradle.jvmargs и kotlin.daemon.jvmargs в gradle.properties "
+                  "этих проектов. Если сборка начнет падать с OutOfMemoryError, верни прежнее значение.")
+        print("Еще вариант: kotlin.compiler.execution.strategy=in-process. Тогда Kotlin компилирует внутри "
+              "демона Gradle,\nотдельного Kotlin-демона нет, но Gradle-демону нужно больше памяти.")
+        print(f"\n-Xmx в {tilde(GRADLE_PROPS)} mnrh не пишет: глобальный org.gradle.jvmargs заменил бы jvmargs "
+              "каждого проекта целиком.")
+
+    if not has_flag(args, "--apply"):
+        return
+    if not need_idle:
+        print("\nЗаписывать нечего: простой демона уже короткий.")
+        return
+    line = f"{IDLE_KEY}={IDLE_WANTED}"
+    if not confirm(f"Записать {line} в {tilde(GRADLE_PROPS)}?", has_flag(args, "-y", "--yes")):
+        print("Не записано.")
+        return
+    write_prop(GRADLE_PROPS, IDLE_KEY, str(IDLE_WANTED))
+    print(f"Записано. Уже запущенные демоны живут по-старому, новые уйдут через 30 минут простоя "
+          f"(снять сразу: {CLEAN_HINT} --gradle).")
+
+
+def write_prop(path, key, value):
+    """Меняет строку key=... на месте или дописывает в конец; остальные строки и права файла не трогает."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except FileNotFoundError:
+        text = ""
+    rx = re.compile(r"^[ \t]*" + re.escape(key) + r"[ \t]*[=:].*$", re.M)
+    if rx.search(text):
+        text = rx.sub(lambda _: f"{key}={value}", text, count=1)
+    else:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += f"# mnrh ram tune: демон Gradle уходит через 30 минут простоя\n{key}={value}\n"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".mnrh-tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    if os.path.exists(path):
+        shutil.copymode(path, tmp)
+    else:
+        os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
 if __name__ == "__main__":
     if args and args[0] == "clean":
         clean()
     elif args and args[0] == "watch":
         watch()
+    elif args and args[0] == "tune":
+        tune()
     else:
         show()
