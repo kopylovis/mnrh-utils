@@ -11,11 +11,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib
 from mnrhlib import adb_path, bundle_info, confirm, gradle_versions_in_use, has_flag, parse_env
 
 args = sys.argv[1:]
-if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not in ("clean", "status")):
+if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not in ("clean", "status", "watch")):
     print("mnrh ram                 меню с действиями (без терминала — то же, что status)")
     print("mnrh ram status          кто ест оперативную память, сгруппировано по приложениям")
     print("mnrh ram -p              то же по отдельным процессам")
     print("mnrh ram -n 30           показать больше строк (по умолчанию 15)")
+    print("mnrh ram watch           следить, кто растет в памяти с начала наблюдения; -i 2 обновлять раз в 2 с")
+    print("                         (по умолчанию 5), Ctrl+C выход и итог")
     print("mnrh ram clean           отметить галочками, что остановить: демоны Gradle и Kotlin, каждый iOS-симулятор")
     print("                         и эмулятор Android отдельной строкой; потом показать, сколько вернулось")
     print("mnrh ram clean -y        без меню: демоны и симуляторы (без терминала -y обязателен)")
@@ -29,6 +31,12 @@ if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not
     print("                         несохраненное приложение спросит само")
     sys.exit(0)
 limit = 15
+interval = 5.0
+if "-i" in args:
+    try:
+        interval = max(1.0, float(args[args.index("-i") + 1]))
+    except (IndexError, ValueError):
+        sys.exit("mnrh ram: после -i нужно число секунд")
 if "-n" in args:
     try:
         limit = int(args[args.index("-n") + 1])
@@ -195,13 +203,71 @@ def mark(kind, sims_booted):
     return ""
 
 
+def grouped(rows):
+    """{подпись: [память, сжато, процессов, вид]} по приложениям."""
+    groups = defaultdict(lambda: [0.0, 0.0, 0, None])
+    for r in rows:
+        g = groups[r["label"]]
+        g[0] += r["mem"]
+        g[1] += r["cmprs"]
+        g[2] += 1
+        g[3] = g[3] or r["kind"]
+    return groups
+
+
+def header(s):
+    return (f"Давление памяти: {s['pressure']}. Занято {s['used']:.1f} из {s['total']:.0f} ГБ · приложения {s['app']:.1f}"
+            f" · wired {s['wired']:.1f} · сжато {s['compressed']:.1f} · свободно {max(s['total'] - s['used'], 0):.1f}"
+            f" · swap {s['swap']:.1f}")
+
+
+def growth(start, now):
+    """[(подпись, память, прирост, новое ли)] по убыванию прироста."""
+    out = [(label, mb, mb - start.get(label, 0.0), label not in start) for label, mb in now.items()]
+    return sorted(out, key=lambda x: -x[2])
+
+
+def signed(mb):
+    return ("+" if mb >= 0 else "-") + fmt(abs(mb)).strip()
+
+
+def watch():
+    rows = collect()
+    if not rows:
+        sys.exit(NO_PROCESSES)
+    start = {label: g[0] for label, g in grouped(rows).items()}
+    first = memory_state()
+    if not sys.stdout.isatty():
+        print("mnrh ram watch следит в терминале. Без него один снимок:\n")
+        show()
+        return
+    began = time.time()
+    now = start
+    try:
+        while True:
+            time.sleep(interval)
+            rows = collect()
+            now = {label: g[0] for label, g in grouped(rows).items()}
+            s = memory_state()
+            spent = int(time.time() - began)
+            lines = [header(s), f"Слежу {spent // 60} мин {spent % 60:02d} с, обновление раз в {interval:g} с, "
+                                f"занято {signed((s['used'] - first['used']) * 1024)} с начала. Ctrl+C выход", "",
+                     f"{'ПАМЯТЬ':>9}  {'РОСТ':>10}  ПРИЛОЖЕНИЕ"]
+            for label, mem, delta, new in growth(start, now)[:limit]:
+                lines.append(f"{fmt(mem):>9}  {signed(delta):>10}  {label}" + ("  (новое)" if new else ""))
+            sys.stdout.write("\x1b[H\x1b[2J" + "\n".join(lines) + "\n")
+            sys.stdout.flush()
+    except KeyboardInterrupt:
+        top = [x for x in growth(start, now) if x[2] >= 50][:5]
+        print("\nЗа время наблюдения выросли больше всех: " + (", ".join(f"{label} {signed(d)}" for label, _, d, _ in top)
+                                                            if top else "никто заметно не вырос"))
+
+
 def show():
     rows = collect()
     s = memory_state()
     sims_booted = bool(booted_simulators())
-    print(f"Давление памяти: {s['pressure']}. Занято {s['used']:.1f} из {s['total']:.0f} ГБ · приложения {s['app']:.1f}"
-          f" · wired {s['wired']:.1f} · сжато {s['compressed']:.1f} · свободно {max(s['total'] - s['used'], 0):.1f}"
-          f" · swap {s['swap']:.1f}")
+    print(header(s))
     if s["pressure"] in ("повышенное", "критическое"):
         print("macOS уже не хватает памяти, она сжимает страницы и уводит их в swap. Освободить: " + CLEAN_HINT)
     print()
@@ -216,14 +282,7 @@ def show():
         for r in rows[:limit]:
             print(f"{fmt(r['mem']):>9}  {fmt(r['cmprs']):>9}  {r['pid']:>6}  {r['label']}{mark(r['kind'], sims_booted)}")
     else:
-        groups = defaultdict(lambda: [0.0, 0.0, 0, None])
-        for r in rows:
-            g = groups[r["label"]]
-            g[0] += r["mem"]
-            g[1] += r["cmprs"]
-            g[2] += 1
-            g[3] = g[3] or r["kind"]
-        ordered = sorted(groups.items(), key=lambda kv: kv[1][0], reverse=True)
+        ordered = sorted(grouped(rows).items(), key=lambda kv: kv[1][0], reverse=True)
         print(f"{'ПАМЯТЬ':>9}  {'СЖАТО':>9}  {'ПРОЦ':>4}  ПРИЛОЖЕНИЕ")
         for label, (mem, cmprs, count, kind) in ordered[:limit]:
             print(f"{fmt(mem):>9}  {fmt(cmprs):>9}  {count:>4}  {label}{mark(kind, sims_booted)}")
@@ -629,5 +688,7 @@ def clean():
 if __name__ == "__main__":
     if args and args[0] == "clean":
         clean()
+    elif args and args[0] == "watch":
+        watch()
     else:
         show()
