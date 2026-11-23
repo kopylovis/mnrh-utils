@@ -282,7 +282,9 @@ def scan_simulators():
             if days is None or days > 60:
                 when = f"не запускался {days} дн." if days is not None else "ни разу не запускался"
                 add(REVIEW, f"runtime iOS {r.get('version')}, {when}", size=r.get("sizeBytes", 0),
-                    hint=f"xcrun simctl runtime delete {rid}")
+                    hint="симуляторы этой версии перестанут запускаться, скачать заново можно в Xcode",
+                    action=lambda r_id=rid: subprocess.run(["xcrun", "simctl", "runtime", "delete", r_id],
+                                                           capture_output=True, timeout=600).returncode == 0)
 
     ds = glob.glob(f"{L}/Developer/Xcode/iOS DeviceSupport/*")
     if len(ds) > 1:
