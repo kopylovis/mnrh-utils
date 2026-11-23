@@ -21,6 +21,8 @@ if has_flag(args, "-h", "--help"):
     print("mnrh disk status       что можно почистить: безопасное и то, что удалять осознанно")
     print("mnrh disk clean        отметить в списке, что удалить (безопасное уже отмечено), и удалить")
     print("mnrh disk clean -y     без вопросов удалить безопасное, что в меню отмечено заранее, для скриптов")
+    print("mnrh disk top          куда ушло место на всем диске, по папкам")
+    print("mnrh disk top <папка>  что внутри папки, по убыванию; -n 30 показать больше строк (по умолчанию 15)")
     print()
     print("Крупные пункты разбиты на части: build/ по проектам, DerivedData, версии Gradle и Kotlin/Native.")
     print("build/ и DerivedData заранее отмечены только у проектов, где давно ничего не менялось.")
@@ -536,6 +538,93 @@ def scan_simulators():
             hint="скачаются снова при подключении устройства с этой версией")
 
 
+def size_col(n):
+    return paint(f"{human(n):>9}", "36")
+
+
+def sizes_of(paths):
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return dict(zip(paths, pool.map(du_bytes, paths)))
+
+
+def children(path):
+    try:
+        return [os.path.join(path, n) for n in os.listdir(path) if not os.path.islink(os.path.join(path, n))]
+    except OSError:
+        return []
+
+
+def top_lines(sizes, limit, indent="  ", min_size=MIN_SHOW):
+    ordered = sorted(sizes.items(), key=lambda kv: -kv[1])
+    shown = [(p, n) for p, n in ordered[:limit] if n >= min_size]
+    for p, n in shown:
+        print(f"{indent}{size_col(n)}  {os.path.basename(p)}{'/' if os.path.isdir(p) else ''}")
+    rest = sum(n for _, n in ordered[len(shown):])
+    if rest >= min_size:
+        print(paint(f"{indent}{human(rest):>9}  остальное ({len(ordered) - len(shown)})", "2"))
+
+
+def top_limit():
+    if "-n" in args:
+        try:
+            return int(args[args.index("-n") + 1])
+        except (IndexError, ValueError):
+            sys.exit("mnrh disk top: после -n нужно число")
+    return 15
+
+
+def disk_top():
+    rest = [a for a in args[1:] if not a.startswith("-") and not a.isdigit()]
+    limit = top_limit()
+    if rest:
+        path = os.path.abspath(os.path.expanduser(rest[0]))
+        if not os.path.isdir(path):
+            sys.exit(f"mnrh disk top: нет такой папки {rest[0]}")
+        print(paint(f"{tilde(path)}, считаю размеры…", "2"))
+        found = sizes_of(children(path))
+        top_lines(found, limit)
+        print(paint(f"  {human(sum(found.values())):>9}  всего", "1"))
+        print(paint("Глубже: mnrh disk top <папка>. Что из этого можно почистить: mnrh disk", "2"))
+        return
+    total, used, free = shutil.disk_usage("/System/Volumes/Data")
+    print(f"Занято {human(used)} из {human(total)}, свободно {human(free)}")
+    print(paint("Считаю размеры, это займет около минуты…", "2") + "\n")
+    lib = os.path.join(HOME, "Library")
+    # Папки с разбивкой считаем по детям за один проход: итог папки = сумма детей.
+    split = {HOME: [c for c in children(HOME) if c != lib], lib: children(lib),
+             "/Applications": children("/Applications"), "/Library": children("/Library")}
+    whole = [("/opt/homebrew", "Homebrew /opt/homebrew"), ("/usr/local", "/usr/local"),
+             ("/private/var/folders", "временные файлы /private/var/folders"),
+             ("/private/var/vm", "swap и образ сна /private/var/vm"), ("/Users/Shared", "/Users/Shared")]
+    whole = [(p, label) for p, label in whole if os.path.isdir(p)]
+    found = sizes_of([c for kids in split.values() for c in kids] + [p for p, _ in whole])
+    part = {d: {c: found[c] for c in kids} for d, kids in split.items()}
+    part[HOME][lib] = sum(part[lib].values())
+    big = {d: sum(v.values()) for d, v in part.items() if d != lib}
+    big.update({p: found[p] for p, _ in whole})
+    labels = {HOME: "домашняя папка ~", "/Applications": "/Applications", "/Library": "/Library",
+              **{p: label for p, label in whole}}
+    for p in sorted(big, key=lambda d: -big[d]):
+        if big[p] < MIN_SHOW:
+            continue
+        print(f"{size_col(big[p])}  {paint(labels[p], '1')}")
+        if p in part:
+            top_lines(part[p], limit if p == HOME else 8, min_size=BIG)
+        if p == HOME:
+            print(paint(f"  {'':>9}  в ~/Library:", "2"))
+            top_lines(part[lib], 6, indent="    ", min_size=BIG)
+    rest_size = max(used - sum(big.values()), 0)
+    print(f"{size_col(rest_size)}  {paint('macOS, снимки Time Machine и то, что нельзя прочитать без прав', '1')}")
+    print()
+    print(paint("Часть папок закрыта правами macOS (Корзина, почта, данные других пользователей), "
+                "их размер попал в последнюю строку.", "2"))
+    print(paint("Глубже: mnrh disk top ~/Library. Что можно почистить: mnrh disk", "2"))
+
+
+if args[:1] == ["top"]:
+    disk_top()
+    sys.exit(0)
+
 for scan in (scan_ides, scan_build_outputs, scan_gradle, scan_konan, scan_simple_caches, scan_brew, scan_dev_caches,
              scan_downloads, scan_orphans, scan_simulators, scan_devices, scan_avds, scan_archives, scan_app_caches):
     scan()
@@ -561,10 +650,6 @@ def app_name(it):
 
 def blocked(it):
     return busy.get(id(it), False)
-
-
-def size_col(n):
-    return paint(f"{human(n):>9}", "36")
 
 
 def entries(group):
