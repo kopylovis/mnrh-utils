@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import adb_path, confirm, gradle_versions_in_use, has_flag, parse_env
+from mnrhlib import adb_path, bundle_info, confirm, gradle_versions_in_use, has_flag, parse_env
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not in ("clean", "status")):
@@ -25,7 +25,8 @@ if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not
     print("  --daemons, --gradle, --kotlin, --sim, --orphans  только это; --emulator ещё эмулятор Android,")
     print("  --sessions ещё простаивающие сессии Claude Code и Codex")
     print("  -f                     снять и занятые сборкой демоны")
-    print("Приложения clean не закрывает: у них могут быть несохранённые данные. Подскажет, какие закрыть вручную.")
+    print("  --apps                 ещё тяжелые фоновые приложения (от 1 ГБ): им уходит обычная команда «Закрыть»,")
+    print("                         несохраненное приложение спросит само")
     sys.exit(0)
 limit = 15
 if "-n" in args:
@@ -39,7 +40,7 @@ NO_PROCESSES = "Список процессов прочитать не удал
 UNITS = {"B": 1 / 1048576, "K": 1 / 1024, "M": 1, "G": 1024, "T": 1048576}
 BUSY_CPU = 5.0
 DEFAULT_KEYS = {"gradle", "gradle-stale", "kotlin", "sim", "orphan"}
-ADDED_ONLY = {"emulator", "session"}  # эти флаги добавляют к отмеченному по умолчанию, а не заменяют его
+ADDED_ONLY = {"emulator", "session", "app"}  # эти флаги добавляют к отмеченному по умолчанию, а не заменяют его
 
 
 def run(cmd, timeout=30):
@@ -381,6 +382,46 @@ def idle_sessions(rows):
     return found
 
 
+HEAVY_APP = 1024
+KEEP_APPS = ("/System/", "/Library/Developer/", "/Applications/Xcode.app/Contents/Developer/")
+
+
+def front_pid():
+    asn = run(["lsappinfo", "front"], timeout=5).strip()
+    m = re.search(r'"pid"=(\d+)', run(["lsappinfo", "info", "-only", "pid", asn], timeout=5)) if asn else None
+    return m.group(1) if m else None
+
+
+def heavy_apps(rows):
+    """[(путь .app, bundle id, имя, МБ, pids)] приложений от HEAVY_APP, кроме активного, системных
+    и того, в чьем окне запущен mnrh (терминал)."""
+    mine = ancestors(rows, str(os.getpid()))
+    front = front_pid()
+    apps = {}
+    for r in rows:
+        m = re.match(r"(.*?/[^/]+\.app)/", r["cmd"])
+        if r["kind"] != "app" or not m or r["uid"] != os.getuid():
+            continue
+        a = apps.setdefault(m.group(1), {"mb": 0.0, "pids": [], "skip": m.group(1).startswith(KEEP_APPS)})
+        a["mb"] += r["mem"]
+        a["pids"].append(r["pid"])
+        a["skip"] |= r["pid"] in mine or r["pid"] == front
+    found = []
+    for path, a in apps.items():
+        if a["skip"] or a["mb"] < HEAVY_APP:
+            continue
+        bid, name = bundle_info(path)
+        if bid:
+            found.append((path, bid, name, a["mb"], a["pids"]))
+    return sorted(found, key=lambda x: -x[3])
+
+
+def quit_app(bid):
+    """Обычная команда «Закрыть», без ожидания ответа: если есть несохраненное, приложение спросит само."""
+    script = f'ignoring application responses\ntell application id "{bid}" to quit\nend ignoring'
+    run(["osascript", "-e", script], timeout=15)
+
+
 def find_targets(rows):
     """Что можно остановить, по строке на пункт меню."""
     daemons = [r for r in rows if r["kind"] == "daemon" and r["cmd"].split(" ")[0].rsplit("/", 1)[-1] == "java"]
@@ -441,6 +482,9 @@ def find_targets(rows):
     for g in sorted(groups.values(), key=lambda g: (g["key"], -g["mb"])):
         g["label"] = f"сироты {g['id'].split(':', 1)[1]}" + (f" ×{len(g['pids'])}" if len(g["pids"]) > 1 else "")
         targets.append(g)
+    for path, bid, name, mb, pids in heavy_apps(rows):
+        targets.append({"key": "app", "id": "app:" + bid, "label": f"приложение {name}", "mb": mb,
+                        "note": "закроется как по ⌘Q, несохраненное спросит само", "bundle": bid, "name": name})
     for t in targets:
         t.setdefault("id", t["key"])
     return targets
@@ -450,7 +494,8 @@ def wanted_keys():
     picked = set()
     for flag, keys in (("--daemons", ("gradle", "gradle-stale", "kotlin")), ("--gradle", ("gradle", "gradle-stale")),
                        ("--kotlin", ("kotlin",)), ("--sim", ("sim",)), ("--emulator", ("emulator",)), ("--orphans", ("orphan",)),
-                       ("--sessions", ("session",))):
+                       ("--sessions", ("session",)),
+                       ("--apps", ("app",))):
         if flag in args:
             picked.update(keys)
     if picked <= ADDED_ONLY:
@@ -484,6 +529,9 @@ def stop(chosen):
     pids = [p for t in chosen for p in t.get("pids", [])]
     if pids:
         stop_daemons(pids)
+    apps = [t for t in chosen if t["key"] == "app"]
+    for t in apps:
+        quit_app(t["bundle"])
     for t in chosen:
         for pid in t.get("term", []):
             try:
@@ -501,6 +549,9 @@ def stop(chosen):
             break
         time.sleep(1)
     time.sleep(3)
+    still = {t["label"] for t in apps if any(t["bundle"] == bid for _, bid, _, _, _ in heavy_apps(collect()))}
+    if still:
+        print("Еще не закрылись (наверное, ждут ответа про несохраненное): " + ", ".join(sorted(still)))
     after = memory_state()
     print(f"Свободно: {max(before['total'] - before['used'], 0):.1f} -> "
           f"{max(after['total'] - after['used'], 0):.1f} ГБ   |   swap: {before['swap']:.1f} -> {after['swap']:.1f} ГБ")
@@ -559,14 +610,10 @@ def clean():
     if chosen:
         stop(chosen)
 
-    apps = defaultdict(float)
-    for r in rows:
-        if r["kind"] == "app":
-            apps[r["label"]] += r["mem"]
-    heavy = [(label, mb) for label, mb in sorted(apps.items(), key=lambda kv: -kv[1]) if mb >= 1024][:3]
-    if heavy:
-        print("Больше всего ещё держат приложения, их закрыть вручную: "
-              + ", ".join(f"{label} {fmt(mb).strip()}" for label, mb in heavy))
+    left = [t for t in targets if t["key"] == "app" and t not in chosen][:3]
+    if left and not interactive:
+        print("Больше всего еще держат приложения: " + ", ".join(f"{t['name']} {fmt(t['mb']).strip()}" for t in left)
+              + f". Закрыть их: {CLEAN_HINT} --apps")
 
 
 if __name__ == "__main__":
