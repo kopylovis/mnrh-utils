@@ -186,6 +186,11 @@ def scan_gradle():
             stale.setdefault(v, []).append(p)
     add_group(SAFE, f"Gradle: версии, которые не использует ни один проект (в работе: {', '.join(sorted(used))})",
               [(f"Gradle {v}", paths, True) for v, paths in sorted(stale.items(), key=lambda kv: version_key(kv[0]))])
+    day_ago = time.time() - 86400
+    tmp = [p for p in glob.glob(os.path.join(g, ".tmp", "*")) + glob.glob(os.path.join(g, ".tmp", ".*"))
+           if os.path.basename(p) != ".DS_Store" and os.path.lexists(p) and os.lstat(p).st_mtime < day_ago]
+    add(SAFE, "Gradle: временные файлы и отчеты configuration cache в ~/.gradle/.tmp", tmp,
+        hint="Gradle их не удаляет, берутся только старше суток")
     add(SAFE, "Gradle: build cache", [os.path.join(g, "caches", "build-cache-1")], app="gradle",
         hint="при запущенных демонах Gradle пропускается")
     current = [os.path.join(g, "caches", v) for v in sorted(used) if os.path.isdir(os.path.join(g, "caches", v))]
