@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import adb_path, confirm, has_flag, parse_env
+from mnrhlib import adb_path, confirm, gradle_versions_in_use, has_flag, parse_env
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not in ("clean", "status")):
@@ -19,6 +19,7 @@ if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not
     print("mnrh ram clean           отметить галочками, что остановить: демоны Gradle и Kotlin, каждый iOS-симулятор")
     print("                         и эмулятор Android отдельной строкой; потом показать, сколько вернулось")
     print("mnrh ram clean -y        без меню: демоны и симуляторы (без терминала -y обязателен)")
+    print("                         Демоны Gradle версий, которых нет в проектах, отмечены всегда")
     print("                         Сироты: node, MCP-серверы, vite, LSP и скрипты, чья программа уже закрыта")
     print("  --daemons, --gradle, --kotlin, --sim, --orphans  только это; --emulator ещё эмулятор Android")
     print("  -f                     снять и занятые сборкой демоны")
@@ -35,7 +36,7 @@ CLEAN_HINT = "mnrh ram clean"
 NO_PROCESSES = "Список процессов прочитать не удалось: ps и top ничего не вернули (песочница или нет прав)."
 UNITS = {"B": 1 / 1048576, "K": 1 / 1024, "M": 1, "G": 1024, "T": 1048576}
 BUSY_CPU = 5.0
-DEFAULT_KEYS = {"gradle", "kotlin", "sim", "orphan"}
+DEFAULT_KEYS = {"gradle", "gradle-stale", "kotlin", "sim", "orphan"}
 ADDED_ONLY = {"emulator"}  # эти флаги добавляют к отмеченному по умолчанию, а не заменяют его
 
 
@@ -324,15 +325,37 @@ def orphans(rows):
     return found
 
 
+IDES = {"Android Studio", "IntelliJ IDEA", "IntelliJ IDEA CE", "IntelliJ IDEA Ultimate", "Fleet"}
+
+
+def gradle_version(cmd):
+    """Версия Gradle по команде демона: GradleDaemon 9.9.1 в конце или gradle-9.9.1 в classpath."""
+    m = re.search(r"GradleDaemon (\d+\.\d+(?:\.\d+)?)", cmd) or re.search(r"gradle-(\d+\.\d+(?:\.\d+)?)-", cmd)
+    return m.group(1) if m else None
+
+
 def find_targets(rows):
     """Что можно остановить, по строке на пункт меню."""
     daemons = [r for r in rows if r["kind"] == "daemon" and r["cmd"].split(" ")[0].rsplit("/", 1)[-1] == "java"]
     targets = []
+    used = gradle_versions_in_use()
+    stale = [r for r in daemons if not r["label"].startswith("Kotlin") and used
+             and gradle_version(r["cmd"]) not in (None, *used)]
+    if stale:
+        versions = sorted({gradle_version(r["cmd"]) for r in stale}, key=lambda v: [int(n) for n in v.split(".")])
+        busy = sum(r["cpu"] > BUSY_CPU for r in stale)
+        targets.append({"key": "gradle-stale", "label": f"Gradle-демоны {', '.join(versions)}: {len(stale)}",
+                        "note": "этих версий нет ни в одном проекте" + (", но сборка идет" if busy else ""),
+                        "mb": sum(r["mem"] for r in stale), "pids": [r["pid"] for r in stale]})
+    gradle_alive = any(not r["label"].startswith("Kotlin") for r in daemons)
+    ide_alive = any(r["kind"] == "app" and r["label"] in IDES for r in rows)
     for key, title in (("gradle", "Gradle-демоны"), ("kotlin", "Kotlin-демоны")):
-        own = [r for r in daemons if (r["label"].startswith("Kotlin")) == (key == "kotlin")]
-        idle = [r for r in own if r["cpu"] <= BUSY_CPU]
-        busy = [r for r in own if r["cpu"] > BUSY_CPU]
-        for part, group, note in ((key, idle, ""), (key + "-busy", busy, "заняты сборкой, она упадёт")):
+        own = [r for r in daemons if (r["label"].startswith("Kotlin")) == (key == "kotlin") and r not in stale]
+        lonely = key == "kotlin" and not gradle_alive and not ide_alive
+        idle = [r for r in own if r["cpu"] <= BUSY_CPU or lonely]
+        busy = [r for r in own if r not in idle]
+        for part, group, note in ((key, idle, "ни Gradle, ни IDE не запущены" if lonely else ""),
+                                  (key + "-busy", busy, "заняты сборкой, она упадёт")):
             if group:
                 targets.append({"key": part, "label": f"{title}: {len(group)}", "note": note,
                                 "mb": sum(r["mem"] for r in group), "pids": [r["pid"] for r in group]})
@@ -368,8 +391,8 @@ def find_targets(rows):
 
 def wanted_keys():
     picked = set()
-    for flag, keys in (("--daemons", ("gradle", "kotlin")), ("--gradle", ("gradle",)), ("--kotlin", ("kotlin",)),
-                       ("--sim", ("sim",)), ("--emulator", ("emulator",)), ("--orphans", ("orphan",))):
+    for flag, keys in (("--daemons", ("gradle", "gradle-stale", "kotlin")), ("--gradle", ("gradle", "gradle-stale")),
+                       ("--kotlin", ("kotlin",)), ("--sim", ("sim",)), ("--emulator", ("emulator",)), ("--orphans", ("orphan",))):
         if flag in args:
             picked.update(keys)
     if picked <= ADDED_ONLY:
