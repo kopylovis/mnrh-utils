@@ -20,7 +20,10 @@ if has_flag(args, "-h", "--help"):
     print("mnrh disk              меню с действиями (без терминала — то же, что status)")
     print("mnrh disk status       что можно почистить: безопасное и то, что удалять осознанно")
     print("mnrh disk clean        отметить в списке, что удалить (безопасное уже отмечено), и удалить")
-    print("mnrh disk clean -y     удалить только безопасное без вопросов — для скриптов")
+    print("mnrh disk clean -y     без вопросов удалить безопасное, что в меню отмечено заранее, для скриптов")
+    print()
+    print("Крупные пункты разбиты на части: build/ по проектам, DerivedData, версии Gradle и Kotlin/Native.")
+    print("build/ и DerivedData заранее отмечены только у проектов, где давно ничего не менялось.")
     print()
     print("Кеши приложений, которые сейчас открыты (Chrome, Android Studio…), пропускаются: закрой и повтори.")
     sys.exit(0)
@@ -33,8 +36,12 @@ MIN_SHOW = 1048576
 BIG = 300 * 1048576
 
 
+IDLE_DAYS = 30
+SHOW_PARTS = 5
+
+
 class Item:
-    def __init__(self, level, label, paths=(), hint=None, action=None, size=None, app=None):
+    def __init__(self, level, label, paths=(), hint=None, action=None, size=None, app=None, group=None, marked=None):
         self.level = level
         self.label = label
         self.paths = [p for p in paths if os.path.lexists(p)]
@@ -42,17 +49,49 @@ class Item:
         self.action = action
         self.size = size
         self.app = app
+        self.group = group
+        self.marked = level == SAFE if marked is None else marked
 
 
 items = []
 covered = set()
+group_hints = {}
 
 
-def add(level, label, paths=(), hint=None, action=None, size=None, app=None):
-    it = Item(level, label, paths, hint, action, size, app)
+def add(level, label, paths=(), hint=None, action=None, size=None, app=None, group=None, marked=None):
+    it = Item(level, label, paths, hint, action, size, app, group, marked)
     covered.update(os.path.realpath(p) for p in it.paths)
     if it.paths or it.size:
         items.append(it)
+
+
+def add_group(level, title, parts, hint=None, app=None):
+    """Крупный пункт по частям: каждая часть отмечается в меню отдельно. parts: (подпись, пути, отметить ли)."""
+    group_hints[title] = hint
+    for label, paths, marked in parts:
+        add(level, label, paths, app=app, group=title, marked=marked)
+
+
+def days_since(ts):
+    return max(int((time.time() - ts) // 86400), 0)
+
+
+def ago(days):
+    return "сегодня" if days == 0 else "вчера" if days == 1 else f"{days} дн. назад"
+
+
+def project_idle_days(proj):
+    """Сколько дней в проекте ничего не происходило: последний коммит или изменение индекса git."""
+    times = []
+    ct = run(["git", "-C", proj, "log", "-1", "--format=%ct"], timeout=10).strip()
+    if ct.isdigit():
+        times.append(int(ct))
+    for name in ("index", "HEAD"):
+        try:
+            times.append(os.path.getmtime(os.path.join(proj, ".git", name)))
+        except OSError:
+            pass
+    return days_since(max(times)) if times else None
 
 
 def app_running(app):
@@ -95,24 +134,36 @@ def scan_ides():
     logs = stale_ide_dirs([f"{L}/Logs/Google"], as_re) + stale_ide_dirs([f"{L}/Logs/JetBrains"], jb_re)
     settings = (stale_ide_dirs([f"{L}/Application Support/Google"], as_re)
                 + stale_ide_dirs([f"{L}/Application Support/JetBrains"], jb_re))
-    add(SAFE, "кеши старых версий Android Studio и JetBrains", caches)
-    add(SAFE, "логи старых версий Android Studio и JetBrains", logs)
-    add(REVIEW, "настройки старых версий Android Studio и JetBrains", settings,
-        hint="плагины и настройки прошлых версий, текущая их уже перенесла")
+    by_version = {}
+    for p in caches + logs:
+        by_version.setdefault(os.path.basename(p), []).append(p)
+    add_group(SAFE, "кеши и логи старых версий Android Studio и JetBrains",
+              [(name, paths, True) for name, paths in sorted(by_version.items())])
+    add_group(REVIEW, "настройки старых версий Android Studio и JetBrains",
+              [(os.path.basename(p), [p], False) for p in sorted(settings)],
+              hint="плагины и настройки прошлых версий, текущая их уже перенесла")
 
 
 def scan_build_outputs():
-    builds = [d for proj in projects() for d in gradle_build_dirs(proj)]
-    add(SAFE, f"build/ и .gradle/ в проектах {tilde(DEV)}", builds,
-        hint="пересоберутся при следующей сборке")
-
-    modules = []
+    builds, modules = [], []
     for proj in projects():
-        for root, dirs, files in os.walk(proj):
-            if "node_modules" in dirs:
-                modules.append(os.path.join(root, "node_modules"))
-            dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "build")]
-    add(REVIEW, "node_modules в проектах", modules, hint="вернутся через npm install")
+        name = os.path.basename(proj)
+        idle = project_idle_days(proj)
+        when = f", последний коммит {ago(idle)}" if idle is not None else ""
+        stale = idle is None or idle >= IDLE_DAYS
+        dirs = gradle_build_dirs(proj)
+        if dirs:
+            builds.append((name + when, dirs, stale))
+        found = []
+        for root, subdirs, files in os.walk(proj):
+            if "node_modules" in subdirs:
+                found.append(os.path.join(root, "node_modules"))
+            subdirs[:] = [d for d in subdirs if d not in ("node_modules", ".git", "build")]
+        if found:
+            modules.append((name + when, found, False))
+    add_group(SAFE, f"build/ и .gradle/ в проектах {tilde(DEV)}", builds,
+              hint=f"пересоберутся при следующей сборке, заранее отмечены проекты без коммитов {IDLE_DAYS}+ дн.")
+    add_group(REVIEW, "node_modules в проектах", modules, hint="вернутся через npm install")
 
 
 def scan_gradle():
@@ -120,11 +171,17 @@ def scan_gradle():
     g = os.path.join(HOME, ".gradle")
     if not used or not os.path.isdir(g):
         return
-    stale = [p for p in glob.glob(os.path.join(g, "caches", "*"))
-             if re.fullmatch(r"\d+\.\d+(\.\d+)?", os.path.basename(p)) and os.path.basename(p) not in used]
-    stale += [p for p in glob.glob(os.path.join(g, "wrapper", "dists", "gradle-*"))
-              if re.sub(r"gradle-([\d.]+)-(bin|all)", r"\1", os.path.basename(p)) not in used]
-    add(SAFE, f"Gradle: версии, которые не использует ни один проект (в работе: {', '.join(sorted(used))})", stale)
+    stale = {}
+    for p in glob.glob(os.path.join(g, "caches", "*")):
+        v = os.path.basename(p)
+        if re.fullmatch(r"\d+\.\d+(\.\d+)?", v) and v not in used:
+            stale.setdefault(v, []).append(p)
+    for p in glob.glob(os.path.join(g, "wrapper", "dists", "gradle-*")):
+        v = re.sub(r"gradle-([\d.]+)-(bin|all)", r"\1", os.path.basename(p))
+        if v not in used:
+            stale.setdefault(v, []).append(p)
+    add_group(SAFE, f"Gradle: версии, которые не использует ни один проект (в работе: {', '.join(sorted(used))})",
+              [(f"Gradle {v}", paths, True) for v, paths in sorted(stale.items(), key=lambda kv: version_key(kv[0]))])
     add(SAFE, "Gradle: build cache", [os.path.join(g, "caches", "build-cache-1")], app="gradle",
         hint="при запущенных демонах Gradle пропускается")
     current = [os.path.join(g, "caches", v) for v in sorted(used) if os.path.isdir(os.path.join(g, "caches", v))]
@@ -139,8 +196,10 @@ def scan_konan():
     if not used or not konan_prebuilts():
         return
     old, deps = konan_unused(used)
-    add(SAFE, f"Kotlin/Native старых версий (в проектах: {', '.join(sorted(used))})", old,
-        hint="скачается снова, если какой-то проект вернётся на эту версию")
+    add_group(SAFE, f"Kotlin/Native старых версий (в проектах: {', '.join(sorted(used))})",
+              [(os.path.basename(p).replace("kotlin-native-prebuilt-", "Kotlin/Native "), [p], True)
+               for p in sorted(old, key=lambda p: version_key(os.path.basename(p)))],
+              hint="скачается снова, если какой-то проект вернется на эту версию")
     add(SAFE, "Kotlin/Native: LLVM и инструменты от старых версий", deps,
         hint="текущим версиям Kotlin не нужны")
 
@@ -180,7 +239,7 @@ def scan_avds():
 
 
 def scan_archives():
-    found = {}
+    found, names = {}, {}
     for arc in glob.glob(os.path.join(L, "Developer", "Xcode", "Archives", "*", "*.xcarchive")):
         try:
             with open(os.path.join(arc, "Info.plist"), "rb") as f:
@@ -191,12 +250,16 @@ def scan_archives():
         key = (ap.get("CFBundleIdentifier") or info.get("Name"), ap.get("CFBundleShortVersionString"))
         build = ap.get("CFBundleVersion") or "0"
         found.setdefault(key, []).append((version_key(build), info.get("CreationDate") or datetime.min, arc))
-    old = []
-    for key, arcs in found.items():
+        names[key] = info.get("Name") or os.path.basename(arc).rsplit(" ", 2)[0]
+    parts = []
+    for (bundle, version), arcs in sorted(found.items(), key=lambda kv: str(kv[0])):
         arcs.sort()
-        old += [a for _, _, a in arcs[:-1]]
-    add(REVIEW, f"архивы Xcode: {len(old)} старых сборок тех же версий", old,
-        hint="у каждой версии остаётся последняя сборка с dSYM для расшифровки падений")
+        old = [a for _, _, a in arcs[:-1]]
+        if old:
+            parts.append((f"{names[(bundle, version)]} {version or ''}".strip() + f": старых сборок {len(old)}",
+                          old, False))
+    add_group(REVIEW, "архивы Xcode: старые сборки тех же версий", parts,
+              hint="у каждой версии остается последняя сборка с dSYM для расшифровки падений")
 
 
 FRIENDLY = {"com.openai.codex": ("Codex", "Codex"), "codex-runtimes": ("Codex: среды выполнения", "Codex"),
@@ -238,8 +301,17 @@ def scan_app_caches():
 
 
 def scan_simple_caches():
-    add(SAFE, "Xcode DerivedData", glob.glob(f"{L}/Developer/Xcode/DerivedData/*"),
-        hint="Xcode пересоберёт индексы")
+    derived = []
+    for p in sorted(glob.glob(f"{L}/Developer/Xcode/DerivedData/*")):
+        name = re.sub(r"-[a-z]{28}$", "", os.path.basename(p))
+        try:
+            idle = days_since(os.path.getmtime(p))
+        except OSError:
+            idle = None
+        derived.append((f"{name}, менялся {ago(idle)}" if idle is not None else name, [p],
+                        idle is None or idle >= 7))
+    add_group(SAFE, "Xcode DerivedData", derived,
+              hint="Xcode пересоберет и переиндексирует, заранее отмечено то, что не менялось 7+ дн.")
     add(SAFE, "кеш npm", [os.path.join(HOME, ".npm", "_cacache"), os.path.join(HOME, ".npm", "_npx")])
     add(SAFE, "кеши pip, SwiftPM, CocoaPods",
         [f"{L}/Caches/pip", f"{L}/Caches/org.swift.swiftpm", f"{L}/Caches/CocoaPods"])
@@ -324,17 +396,51 @@ def size_col(n):
     return paint(f"{human(n):>9}", "36")
 
 
-def show(title, group):
+def entries(group):
+    """Пункты и группы по убыванию размера: (размер, пункт или None, заголовок группы, части группы)."""
+    out, groups = [], {}
+    for it in group:
+        if it.group:
+            groups.setdefault(it.group, []).append(it)
+        else:
+            out.append((it.size, it, None, None))
+    for title, parts in groups.items():
+        if len(parts) == 1:
+            out.append((parts[0].size, parts[0], None, None))
+        else:
+            out.append((sum(p.size for p in parts), None, title, sorted(parts, key=lambda p: -p.size)))
+    return sorted(out, key=lambda e: -e[0])
+
+
+def label_of(it):
+    """Подпись пункта вне группы: у одиночной части группы к ней добавляется заголовок группы."""
+    return f"{it.group} ({it.label})" if it.group else it.label
+
+
+def hint_of(it):
+    return group_hints.get(it.group) if it.group else it.hint
+
+
+def note_of(it):
+    hint = hint_of(it)
+    return paint(f"   закрой {app_name(it)}", "33") if blocked(it) else paint(f"   {hint}", "2") if hint else ""
+
+
+def show(title, group, parts_shown=SHOW_PARTS):
     if not group:
         return
     print(paint(title, "1;34"))
-    for it in group:
-        line = f"  {size_col(it.size)}  {it.label}"
-        if blocked(it):
-            line += paint(f"   закрой {app_name(it)}", "33")
-        elif it.hint:
-            line += paint(f"   {it.hint}", "2")
-        print(line)
+    for size, it, gtitle, parts in entries(group):
+        if it:
+            print(f"  {size_col(size)}  {label_of(it)}{note_of(it)}")
+            continue
+        hint = group_hints.get(gtitle)
+        print(f"  {size_col(size)}  {gtitle}" + (paint(f"   {hint}", "2") if hint else ""))
+        for p in parts[:parts_shown]:
+            print(f"    {paint(f'{human(p.size):>9}', '2')}  {p.label}{note_of(p) if blocked(p) else ''}")
+        rest = parts[parts_shown:]
+        if rest:
+            print(paint(f"    {'':>9}  и еще {len(rest)} на {human(sum(p.size for p in rest))}", "2"))
     print(paint(f"  {human(sum(i.size for i in group)):>9}  итого", "1") + "\n")
 
 
@@ -348,32 +454,54 @@ def remove(it):
 
 def run_cleanup(chosen):
     _, _, before = shutil.disk_usage("/System/Volumes/Data")
-    done = 0
+    done, header = 0, None
+    counts = {}
     for it in chosen:
+        counts[it.group] = counts.get(it.group, 0) + 1
+    for it in chosen:
+        grouped = it.group and counts[it.group] > 1
+        if grouped and it.group != header:
+            print(f"  {it.group}")
+        header = it.group if grouped else None
+        pad = "    " if grouped else "  "
+        name = it.label if grouped else label_of(it)
         if blocked(it) and app_running(it.app):
-            print(f"  {paint('пропущено', '33')}: {it.label} — закрой {app_name(it)} и повтори")
+            print(f"{pad}{paint('пропущено', '33')}: {name}, закрой {app_name(it)} и повтори")
             continue
         ok = remove(it)
         done += ok
-        print(f"  {paint('✓', '32') if ok else paint('✗ не вышло:', '31')} {it.label}")
+        print(f"{pad}{paint('✓', '32') if ok else paint('✗ не вышло:', '31')} {name}")
     after = shutil.disk_usage("/System/Volumes/Data")[2]
     print(f"\nСвободно: {human(before)} → " + paint(human(after), "1;32") +
           paint(f" (+{human(max(after - before, 0))})", "32"))
 
 
+def ordered(group):
+    """Пункты в том порядке, в каком они в меню и в сводке: группы целиком, части по убыванию."""
+    return [x for _, it, _, parts in entries(group) for x in ([it] if it else parts)]
+
+
 def choose(previous=None):
     from menu import pick_many
     rows, order = [], []
-    for title, group in (("Безопасно — пересоздаётся само", safe), ("Осознанно — прочитай пояснение", review)):
+    for title, group in (("Безопасно, пересоздается само", safe), ("Осознанно, прочитай пояснение", review)):
         if not group:
             continue
         rows.append((None, title))
         order.append(None)
-        for it in group:
-            note = f"закрой {app_name(it)}" if blocked(it) else (it.hint or "")
-            rows.append((it.label, f"{human(it.size):>8}  {it.label}" + (f"  \x1b[2m{note}\x1b[0m" if note else "")))
-            order.append(it)
-    marked = {i for i, it in enumerate(order) if it is not None and it.level == SAFE and not blocked(it)}
+        for size, it, gtitle, parts in entries(group):
+            if gtitle:
+                hint = group_hints.get(gtitle)
+                rows.append((None, f"  {gtitle} · {human(size)}" + (f"  \x1b[2m{hint}\x1b[0m" if hint else "")))
+                order.append(None)
+            for x in [it] if it else parts:
+                note = f"закрой {app_name(x)}" if blocked(x) else ((x.hint or "") if gtitle else (hint_of(x) or ""))
+                indent = "    " if gtitle else ""
+                label = x.label if gtitle else label_of(x)
+                rows.append((label, f"{human(x.size):>8}  {indent}{label}" +
+                             (f"  \x1b[2m{note}\x1b[0m" if note else "")))
+                order.append(x)
+    marked = {i for i, it in enumerate(order) if it is not None and it.marked and not blocked(it)}
     if previous is not None:
         marked = {i for i, it in enumerate(order) if it is not None and it in previous}
 
@@ -390,7 +518,7 @@ def choose(previous=None):
 total, used_b, free_before = shutil.disk_usage("/System/Volumes/Data")
 print(f"Свободно {human(free_before)} из {human(total)}\n")
 if not apply:
-    show("Безопасно, пересоздаётся само:", safe)
+    show("Безопасно, пересоздается само:", safe)
     show("Осознанно, прочитай пояснение:", review)
 
 if not safe and not review:
@@ -405,11 +533,12 @@ if not interactive:
     if not assume_yes:
         print("Не терминал, выбрать нельзя. Удалить только безопасное без вопросов: mnrh disk clean -y")
         sys.exit(2)
-    if not safe:
+    preset = [it for it in safe if it.marked]
+    if not preset:
         print("Безопасно удалять нечего.")
         sys.exit(0)
-    show("Удаляю безопасное:", safe)
-    run_cleanup(safe)
+    show("Удаляю безопасное:", preset)
+    run_cleanup(ordered(preset))
     sys.exit(0)
 
 from menu import choice
@@ -422,9 +551,16 @@ while True:
         sys.exit(0)
     size = sum(i.size for i in chosen)
     print(paint(f"\nУдалю {len(chosen)}, ", "1;34") + paint(human(size), "1;36") + paint(":", "1;34"))
-    for it in chosen:
-        warn = paint(f"  {it.hint}", "2") if it.level == REVIEW and it.hint else ""
-        print(f"  {size_col(it.size)}  {it.label}{warn}")
+    for size_, it, gtitle, parts in entries(chosen):
+        if it:
+            warn = paint(f"  {hint_of(it)}", "2") if it.level == REVIEW and hint_of(it) else ""
+            print(f"  {size_col(size_)}  {label_of(it)}{warn}")
+            continue
+        hint = group_hints.get(gtitle)
+        warn = paint(f"  {hint}", "2") if parts[0].level == REVIEW and hint else ""
+        print(f"  {size_col(size_)}  {gtitle}{warn}")
+        for p in parts:
+            print(f"    {paint(f'{human(p.size):>9}', '2')}  {p.label}")
     print()
     answer = choice("Удалить?", [("go", "Удалить", "yд"), ("back", "← К списку", "nн"), ("quit", "Выйти", "qй")],
                     default=1, back="back")
@@ -433,4 +569,4 @@ while True:
     if answer == "quit":
         print("Ничего не удалено.")
         sys.exit(0)
-run_cleanup(chosen)
+run_cleanup(ordered(chosen))
