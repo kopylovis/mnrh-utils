@@ -16,8 +16,8 @@ if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not
     print("mnrh ram status          кто ест оперативную память, сгруппировано по приложениям")
     print("mnrh ram -p              то же по отдельным процессам")
     print("mnrh ram -n 30           показать больше строк (по умолчанию 15)")
-    print("mnrh ram clean           отметить галочками, что остановить: демоны Gradle и Kotlin, iOS-симуляторы,")
-    print("                         эмуляторы Android; потом показать, сколько вернулось")
+    print("mnrh ram clean           отметить галочками, что остановить: демоны Gradle и Kotlin, каждый iOS-симулятор")
+    print("                         и эмулятор Android отдельной строкой; потом показать, сколько вернулось")
     print("mnrh ram clean -y        без меню: демоны и симуляторы (без терминала -y обязателен)")
     print("  --daemons, --gradle, --kotlin, --sim  только это; --emulator ещё эмулятор Android")
     print("  -f                     снять и занятые сборкой демоны")
@@ -82,11 +82,13 @@ def classify(cmd):
 
 def collect():
     commands, cpu = {}, {}
-    for line in run(["ps", "-axo", "pid=,pcpu=,command="]).splitlines():
-        parts = line.strip().split(None, 2)
-        if len(parts) == 3:
-            commands[parts[0]] = parts[2]
-            cpu[parts[0]] = float(parts[1])
+    info = {}
+    for line in run(["ps", "-axo", "pid=,ppid=,uid=,pcpu=,etime=,command="]).splitlines():
+        parts = line.strip().split(None, 5)
+        if len(parts) == 6:
+            commands[parts[0]] = parts[5]
+            cpu[parts[0]] = float(parts[3])
+            info[parts[0]] = {"ppid": parts[1], "uid": int(parts[2]), "age": seconds(parts[4])}
     rows, started = [], False
     for line in run(["top", "-l", "1", "-stats", "pid,mem,cmprs"]).splitlines():
         if line.startswith("PID"):
@@ -97,9 +99,59 @@ def collect():
             continue
         pid = cols[0]
         label, kind = classify(commands.get(pid, ""))
+        extra = info.get(pid, {"ppid": "", "uid": -1, "age": 0})
         rows.append({"pid": pid, "mem": to_mb(cols[1]), "cmprs": to_mb(cols[2]), "label": label,
-                     "kind": kind, "cpu": cpu.get(pid, 0.0), "cmd": commands.get(pid, "")})
+                     "kind": kind, "cpu": cpu.get(pid, 0.0), "cmd": commands.get(pid, ""), **extra})
     return rows
+
+
+def seconds(etime):
+    """Время работы из ps etime ([[дд-]чч:]мм:сс) в секундах."""
+    days, _, rest = etime.rpartition("-")
+    total = 0
+    for part in rest.split(":"):
+        total = total * 60 + int(part or 0)
+    return total + int(days or 0) * 86400 if rest.replace(":", "").isdigit() else 0
+
+
+def descendants(rows, roots):
+    """{pid: корень} для корней и всех их потомков по ppid."""
+    owner = dict(roots)
+    children = defaultdict(list)
+    for r in rows:
+        children[r["ppid"]].append(r["pid"])
+    todo = list(owner)
+    while todo:
+        pid = todo.pop()
+        for child in children.get(pid, []):
+            if child not in owner:
+                owner[child] = owner[pid]
+                todo.append(child)
+    return owner
+
+
+DEVICE_DIR = re.compile(r"/CoreSimulator/Devices/([0-9A-F-]{36})/")
+
+
+def owned_mb(rows, roots):
+    """{хозяин: МБ}: корневые процессы {pid: хозяин} вместе со всеми потомками."""
+    owner = descendants(rows, roots)
+    mb = defaultdict(float)
+    for r in rows:
+        if r["pid"] in owner:
+            mb[owner[r["pid"]]] += r["mem"]
+    return mb
+
+
+def simulator_mb(rows):
+    """{udid: МБ}: процессы, в чьей команде папка устройства, и их потомки (их запускает launchd_sim)."""
+    return owned_mb(rows, {r["pid"]: m.group(1) for r in rows for m in [DEVICE_DIR.search(r["cmd"])] if m})
+
+
+def emulator_mb(rows):
+    """{имя AVD: МБ} по процессам qemu с -avd и их потомкам."""
+    return owned_mb(rows, {r["pid"]: m.group(1) for r in rows if r["kind"] == "emulator"
+                           for m in [re.search(r"(?:^|\s)-avd\s+(\S+)", r["cmd"])] if m})
 
 
 def memory_state():
@@ -176,8 +228,10 @@ def show():
 
 
 def booted_simulators():
+    """[(udid, имя, «iOS 27.0»)] запущенных симуляторов."""
     data = json.loads(run(["xcrun", "simctl", "list", "devices", "booted", "-j"]) or "{}")
-    return [d["name"] for lst in data.get("devices", {}).values() for d in lst if d.get("state") == "Booted"]
+    return [(d["udid"], d["name"], rt.split(".")[-1].replace("-", " ", 1).replace("-", "."))
+            for rt, lst in data.get("devices", {}).items() for d in lst if d.get("state") == "Booted"]
 
 
 def running_emulators(adb):
@@ -229,18 +283,22 @@ def find_targets(rows):
             if group:
                 targets.append({"key": part, "label": f"{title}: {len(group)}", "note": note,
                                 "mb": sum(r["mem"] for r in group), "pids": [r["pid"] for r in group]})
-    mb = defaultdict(float)
-    for r in rows:
-        mb[r["kind"]] += r["mem"]
-    sims = booted_simulators()
-    if sims:
-        targets.append({"key": "sim", "label": f"iOS-симуляторы: {', '.join(sims)}", "mb": mb["sim"],
-                        "note": "данные и входы в аккаунты сохранятся"})
+    sim_mb = simulator_mb(rows)
+    for udid, name, runtime in booted_simulators():
+        targets.append({"key": "sim", "id": "sim:" + udid, "label": f"iOS-симулятор {name} ({runtime})",
+                        "mb": sim_mb.get(udid, 0.0), "note": "данные и входы в аккаунты сохранятся", "udid": udid})
     adb = adb_path()
     emus = running_emulators(adb)
-    if emus:
-        targets.append({"key": "emulator", "label": "Android-эмуляторы: " + ", ".join(avd_name(adb, e) for e in emus),
-                        "mb": mb["emulator"], "note": "состояние сохранится в Quick Boot", "adb": adb, "serials": emus})
+    emu_mb = emulator_mb(rows)
+    for serial in emus:
+        name = avd_name(adb, serial)
+        mb = emu_mb.get(name, 0.0)
+        if not mb and len(emus) == 1:
+            mb = sum(r["mem"] for r in rows if r["kind"] == "emulator")
+        targets.append({"key": "emulator", "id": "emulator:" + serial, "label": f"Android-эмулятор {name}",
+                        "mb": mb, "note": "состояние сохранится в Quick Boot", "adb": adb, "serial": serial})
+    for t in targets:
+        t.setdefault("id", t["key"])
     return targets
 
 
@@ -259,14 +317,14 @@ def wanted_keys():
 
 def choose(targets, marked):
     from menu import pick_many
-    rows = [(t["key"], f"{fmt(t['mb']):>9}  {t['label']}" + (f"  \x1b[2m{t['note']}\x1b[0m" if t["note"] else ""))
+    rows = [(t["label"], f"{fmt(t['mb']):>9}  {t['label']}" + (f"  \x1b[2m{t['note']}\x1b[0m" if t["note"] else ""))
             for t in targets]
 
     def summary(marks):
         return f"отмечено {len(marks)} · {fmt(sum(targets[i]['mb'] for i in marks)).strip()}"
 
     picked = pick_many(rows, title="\x1b[1;35mmnrh ram\x1b[0m  \x1b[2mчто остановить?\x1b[0m",
-                       marked={i for i, t in enumerate(targets) if t["key"] in marked}, summary=summary)
+                       marked={i for i, t in enumerate(targets) if t["key"] in marked or t["id"] in marked}, summary=summary)
     return None if picked is None else [targets[i] for i in sorted(picked)]
 
 
@@ -281,16 +339,16 @@ def stop(chosen):
     pids = [p for t in chosen for p in t.get("pids", [])]
     if pids:
         stop_daemons(pids)
-    if any(t["key"] == "sim" for t in chosen):
-        run(["xcrun", "simctl", "shutdown", "all"], timeout=120)
-    emu = next((t for t in chosen if t["key"] == "emulator"), None)
-    if emu:
-        for serial in emu["serials"]:
-            run([emu["adb"], "-s", serial, "emu", "kill"], timeout=60)
-        for _ in range(15):
-            if not any(r["kind"] == "emulator" for r in collect()):
-                break
-            time.sleep(1)
+    for t in chosen:
+        if t["key"] == "sim":
+            run(["xcrun", "simctl", "shutdown", t["udid"]], timeout=120)
+    emus = [t for t in chosen if t["key"] == "emulator"]
+    for t in emus:
+        run([t["adb"], "-s", t["serial"], "emu", "kill"], timeout=60)
+    for _ in range(15 if emus else 0):
+        if not set(t["serial"] for t in emus) & set(running_emulators(emus[0]["adb"])):
+            break
+        time.sleep(1)
     time.sleep(3)
     after = memory_state()
     print(f"Свободно: {max(before['total'] - before['used'], 0):.1f} -> "
@@ -329,7 +387,7 @@ def clean():
                 print("Ничего не остановлено.")
                 chosen = []
                 break
-            marked = {t["key"] for t in chosen}
+            marked = {t["id"] for t in chosen}
     else:
         chosen = [t for t in targets if t["key"] in marked]
         skipped = [t for t in targets if t["key"].endswith("-busy") and t not in chosen]
@@ -343,9 +401,10 @@ def clean():
             if not confirm("Остановить?", has_flag(args, "-y", "--yes")):
                 print("Отменено.")
                 return
-        emu = next((t for t in targets if t["key"] == "emulator" and t not in chosen), None)
-        if emu and emu["mb"] >= 512:
-            print(f"Android-эмулятор держит {fmt(emu['mb']).strip()}, его не трогал: {CLEAN_HINT} --emulator")
+        left = [t for t in targets if t["key"] == "emulator" and t not in chosen]
+        if sum(t["mb"] for t in left) >= 512:
+            print(f"Android-эмуляторы держат {fmt(sum(t['mb'] for t in left)).strip()}, их не трогал: "
+                  f"{CLEAN_HINT} --emulator")
     if chosen:
         stop(chosen)
 
