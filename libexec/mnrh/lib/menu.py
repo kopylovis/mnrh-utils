@@ -52,7 +52,7 @@ def split_keys(data):
 
 
 def tr(ru, en):
-    """Строка на языке интерфейса claudemeister; без mnrhlib рядом по-русски."""
+    """Строка на языке интерфейса agentmeister; без mnrhlib рядом по-русски."""
     try:
         from mnrhlib import tr as translate
         return translate(ru, en)
@@ -294,15 +294,14 @@ REDRAW = "\x1b]7777;mnrh-redraw\x07"
 FRAME, FRAME_DIM, ACCENT, ROW_BG = "38;5;110", "38;5;240", "38;5;110", "48;5;238"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
 # имя над рамками и папка share/<имя>/icons: этот же файл лежит в mnrh, имя берется по bin/ проекта
-BRAND = next((name for name in ("claudemeister", "mnrh") if os.path.exists(os.path.join(ROOT, "bin", name))),
-             "claudemeister")
+BRAND = "mnrh" if os.path.exists(os.path.join(ROOT, "bin", "mnrh")) else "agentmeister"
 
 
 _ICONS = None
 
 
 def config_value(key):
-    """Строка key=значение из ~/.config/mnrh/config, общего для claudemeister и mnrh."""
+    """Строка key=значение из ~/.config/mnrh/config, общего для agentmeister и mnrh."""
     path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "mnrh", "config")
     try:
         with open(path, encoding="utf-8") as f:

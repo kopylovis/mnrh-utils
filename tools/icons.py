@@ -21,7 +21,7 @@ GRAY, CLAUDE, KOTLIN, GRADLE = "#6b7685", "#d97757", "#7f52ff", "#1c8a8a"
 # имя: (emoji, цвет плитки, значок). Значок: SVG внутри плитки, линии белые, толщина 2.2. emoji те же, что в
 # ICONS в libexec/mnrh/lib/launcher.py.
 ICONS = {
-    "claudemeister": ("🤖", CLAUDE, '<path d="M16 8v16M8 16h16M10.3 10.3l11.4 11.4M21.7 10.3 10.3 21.7"/>'),
+    "agentmeister": ("🤖", CLAUDE, '<path d="M16 8v16M8 16h16M10.3 10.3l11.4 11.4M21.7 10.3 10.3 21.7"/>'),
     "repos": ("📚", DEV, '<circle cx="11" cy="9.5" r="2"/><circle cx="11" cy="22.5" r="2"/><circle cx="21" cy="12.5" r="2"/>'
                          '<path d="M11 11.5v9M21 14.5c0 4-10 2.5-10 6"/>'),
     "deps": ("📦", DEV, '<path d="M16 8 23.5 12v8L16 24l-7.5-4v-8z"/><path d="M8.5 12 16 16l7.5-4M16 16v8"/>'),

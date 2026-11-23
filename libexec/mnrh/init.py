@@ -5,7 +5,7 @@ import sys
 
 LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 sys.path.insert(0, LIB)
-from mnrhlib import CONFIG, DEFAULT_DEV, HOME, claudemeister_path, has_flag, paint, read_config, tilde, write_config
+from mnrhlib import CONFIG, DEFAULT_DEV, HOME, agentmeister_path, has_flag, paint, read_config, tilde, write_config
 from menu import pick
 
 CANDIDATES = ["Developer", "Projects", "AndroidStudioProjects", "StudioProjects", "IdeaProjects",
@@ -92,7 +92,7 @@ def connect_claude():
     if not shutil.which("claude"):
         print("Claude Code не найден. Когда поставишь его, выполни: agentmeister setup")
         return
-    cm = claudemeister_path()
+    cm = agentmeister_path()
     if not cm:
         print("agentmeister не найден: brew install kopylovis/tap/agentmeister, потом agentmeister setup")
         return

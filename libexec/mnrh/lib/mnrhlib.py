@@ -121,16 +121,16 @@ def tossling_path():
     return next((p for p in TOSSLING_PATHS if os.access(p, os.X_OK)), None)
 
 
-CLAUDEMEISTER_PATHS = tuple(os.path.join(d, "agentmeister")
-                            for d in ("/opt/homebrew/bin", "/usr/local/bin", os.path.join(HOME, ".local", "bin")))
+AGENTMEISTER_PATHS = tuple(os.path.join(d, "agentmeister")
+                           for d in ("/opt/homebrew/bin", "/usr/local/bin", os.path.join(HOME, ".local", "bin")))
 
 
-def claudemeister_path():
-    """mnrh claudemeister, todo, shot и deps теперь в отдельной программе agentmeister."""
-    forced = os.environ.get("MNRH_CLAUDEMEISTER")
+def agentmeister_path():
+    """Путь к agentmeister: mnrh agentmeister, todo, shot и deps передают ему все аргументы."""
+    forced = os.environ.get("MNRH_AGENTMEISTER")
     if forced is not None:
         return forced if os.access(forced, os.X_OK) else None
-    return shutil.which("agentmeister") or next((p for p in CLAUDEMEISTER_PATHS if os.access(p, os.X_OK)), None)
+    return shutil.which("agentmeister") or next((p for p in AGENTMEISTER_PATHS if os.access(p, os.X_OK)), None)
 
 
 def read_config():

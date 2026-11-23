@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
-# mnrh deps <...> = claudemeister deps <...>
-source "$(dirname "${BASH_SOURCE[0]}")/lib/claudemeister.sh"
+# mnrh deps <...> = agentmeister deps <...>
+source "$(dirname "${BASH_SOURCE[0]}")/lib/agentmeister.sh"
 cm_exec deps "$@"
