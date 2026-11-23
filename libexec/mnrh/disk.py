@@ -364,6 +364,62 @@ def find_traces():
     return found
 
 
+INSTALLERS = (".dmg", ".pkg", ".xip", ".iso")
+TO_TRASH = set()
+FILE_DAYS = 14
+FILE_MIN = 100 * 1048576
+
+
+def last_used(path):
+    """Когда файл открывали в последний раз или меняли, что позже."""
+    when = os.path.getmtime(path)
+    used = run(["mdls", "-name", "kMDItemLastUsedDate", "-raw", path], timeout=10).strip()
+    try:
+        when = max(when, datetime.strptime(used[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
+    except ValueError:
+        pass
+    return when
+
+
+def to_trash(path):
+    trash = os.path.join(HOME, ".Trash")
+    name = os.path.basename(path)
+    target = os.path.join(trash, name)
+    n = 1
+    while os.path.lexists(target):
+        stem, ext = os.path.splitext(name)
+        target = os.path.join(trash, f"{stem} {n}{ext}")
+        n += 1
+    os.makedirs(trash, exist_ok=True)
+    os.rename(path, target)
+
+
+def scan_downloads():
+    installers, other = [], []
+    for base in (os.path.join(HOME, "Downloads"), os.path.join(HOME, "Desktop")):
+        for root, dirs, files in os.walk(base):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and not d.endswith((".app", ".photoslibrary"))
+                       and root == base]
+            for f in files:
+                p = os.path.join(root, f)
+                try:
+                    if os.path.islink(p) or os.path.getsize(p) < FILE_MIN:
+                        continue
+                    days = days_since(last_used(p))
+                except OSError:
+                    continue
+                if days < FILE_DAYS:
+                    continue
+                (installers if f.lower().endswith(INSTALLERS) else other).append((p, days))
+    for title, found, marked in (("установщики в Загрузках и на Рабочем столе", installers, True),
+                                 ("крупные файлы в Загрузках и на Рабочем столе", other, False)):
+        group_hints[title] = f"не открывались {FILE_DAYS}+ дн., уйдут в Корзину"
+        TO_TRASH.add(title)
+        for p, days in found:
+            add(REVIEW, f"{tilde(p)}, открывался {ago(days)}", [p], group=title, marked=marked,
+                action=lambda path=p: to_trash(path))
+
+
 def scan_dev_caches():
     add(SAFE, "кеш модулей clang", [os.path.join(USER_CACHE, "clang", "ModuleCache")],
         hint="Xcode и clang соберут модули заново при следующей сборке")
@@ -420,7 +476,7 @@ def scan_simulators():
 
 
 for scan in (scan_ides, scan_build_outputs, scan_gradle, scan_konan, scan_simple_caches, scan_brew, scan_dev_caches,
-             scan_simulators, scan_devices, scan_avds, scan_archives, scan_app_caches):
+             scan_downloads, scan_simulators, scan_devices, scan_avds, scan_archives, scan_app_caches):
     scan()
 
 with ThreadPoolExecutor(max_workers=8) as pool:
@@ -540,6 +596,9 @@ def run_cleanup(chosen):
     after = shutil.disk_usage("/System/Volumes/Data")[2]
     print(f"\nСвободно: {human(before)} → " + paint(human(after), "1;32") +
           paint(f" (+{human(max(after - before, 0))})", "32"))
+    trashed = sum(it.size for it in chosen if it.group in TO_TRASH and not os.path.lexists(it.paths[0]))
+    if trashed:
+        print(paint(f"В Корзину ушло {human(trashed)}, это место освободится, когда очистишь Корзину.", "2"))
 
 
 def ordered(group):
