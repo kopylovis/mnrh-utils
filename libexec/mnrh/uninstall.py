@@ -9,7 +9,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import APP_DIRS, HOME, OK, BAD, WARN, bundle_info, confirm, du_bytes, find_apps, has_flag, human, paint, run, tilde
+from mnrhlib import (HOME, OK, BAD, RECENT_DAYS, SUFFIXES, bundle_info, confirm, du_bytes, find_apps, has_flag, human,
+                     last_change, orphan_paths, paint, run, strip, tilde)
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help") or not args:
@@ -28,30 +29,6 @@ BY_ID = ["Caches", "Preferences", "Containers", "Group Containers", "Saved Appli
          "WebKit", "Application Scripts", "Cookies", "Application Support", "Logs", "LaunchAgents",
          os.path.join("Preferences", "ByHost")]
 BY_NAME = ["Application Support", "Caches", "Logs"]
-SUFFIXES = (".plist", ".savedState", ".binarycookies")
-BUNDLE_ID = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9_-]+){2,}$")
-# Консольные инструменты и фоновые службы без своего .app: их данные — не остатки.
-TOOLS = ("org.swift.", "com.firebase.", "com.google.Keystone", "com.google.GoogleUpdater", "com.google.SoftwareUpdate",
-         "com.microsoft.autoupdate", "org.cocoapods", "com.github.", "org.python.", "org.nodejs.", "com.docker.",
-         "com.jetbrains.toolbox", "io.flutter.", "com.crashlytics.", "org.gradle.", "org.jetbrains.kotlin")
-RECENT_DAYS = 7
-
-
-def last_change(path):
-    """Самое свежее изменение внутри (не глубже 3 уровней, чтобы не тормозить)."""
-    newest = os.path.getmtime(path) if os.path.exists(path) else 0
-    base = path.rstrip("/").count("/")
-    for root, dirs, files in os.walk(path):
-        if root.count("/") - base >= 3:
-            dirs[:] = []
-        for f in files:
-            try:
-                newest = max(newest, os.path.getmtime(os.path.join(root, f)))
-            except OSError:
-                pass
-    return newest
-
-
 def find_app(query):
     candidates = [a for a in find_apps(query) if not a.startswith("/System/")]
     if len(candidates) > 1:
@@ -60,13 +37,6 @@ def find_app(query):
             print(f"  {os.path.basename(c)[:-4]}")
         sys.exit(2)
     return candidates[0] if candidates else None
-
-
-def strip(name):
-    for s in SUFFIXES:
-        if name.endswith(s):
-            return name[: -len(s)]
-    return name
 
 
 def leftovers(bundle_id, app_name):
@@ -169,49 +139,8 @@ def uninstall(query):
                                                                else " — остальное без прав, см. выше"))
 
 
-def installed_ids():
-    ids = set()
-    out = run(["mdfind", "-attr", "kMDItemCFBundleIdentifier", "kMDItemContentType == 'com.apple.application-bundle'"],
-              timeout=60)
-    for line in out.splitlines():
-        m = re.search(r"kMDItemCFBundleIdentifier = (\S+)", line)
-        if m and m.group(1) != "(null)":
-            ids.add(m.group(1))
-    # Без Spotlight тоже работаем: пробегаем папки приложений сами.
-    for d in APP_DIRS + ["/System/Applications", "/System/Applications/Utilities"]:
-        for app in glob.glob(os.path.join(d, "*.app")):
-            bid, _ = bundle_info(app)
-            if bid:
-                ids.add(bid)
-    return ids
-
-
 def orphans():
-    ids = installed_ids()
-    lowered = {i.lower() for i in ids}
-
-    def owned(base):
-        b = base.lower()
-        if b.startswith("com.apple.") or b.startswith("group.com.apple.") or \
-                any(b.startswith(t.lower()) for t in TOOLS):
-            return True
-        if b.startswith("group."):
-            b = b[len("group."):]
-        b = re.sub(r"^[a-z0-9]{10}\.", "", b)  # префикс Team ID у Group Containers
-        return any(b == i or b.startswith(i + ".") or i.startswith(b + ".") for i in lowered)
-
-    found = []
-    for sub in ("Caches", "Containers", "Group Containers", "Application Support", "HTTPStorages", "WebKit",
-                "Saved Application State", "Application Scripts", "Logs"):
-        d = os.path.join(LIB, sub)
-        try:
-            names = os.listdir(d)
-        except OSError:
-            continue
-        for n in names:
-            base = strip(n)
-            if BUNDLE_ID.match(base) and not owned(base):
-                found.append(os.path.join(d, n))
+    found = orphan_paths()
     size = sizes(found)
     found = [p for p in found if size[p] >= 1048576]
     found.sort(key=lambda p: -size[p])

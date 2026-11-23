@@ -11,9 +11,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import (DEV, HOME, du_bytes, gradle_build_dirs, gradle_versions_in_use, has_flag, human,
-                     konan_prebuilts, konan_unused, kotlin_versions_in_use, paint, projects, remove_under_home, run,
-                     tilde, version_key)
+from mnrhlib import (DEV, HOME, RECENT_DAYS, du_bytes, gradle_build_dirs, gradle_versions_in_use, has_flag, human,
+                     konan_prebuilts, konan_unused, kotlin_versions_in_use, last_change, orphan_paths, paint, projects,
+                     remove_under_home, run, tilde, version_key)
 
 args = sys.argv[1:]
 if has_flag(args, "-h", "--help"):
@@ -420,6 +420,17 @@ def scan_downloads():
                 action=lambda path=p: to_trash(path))
 
 
+def scan_orphans():
+    """Данные в ~/Library приложений, которых уже нет. Свежие (менялись за неделю) чем-то используются, их не трогаем."""
+    now = time.time()
+    found = [p for p in orphan_paths() if now - last_change(p) >= RECENT_DAYS * 86400]
+    title = "остатки удаленных приложений в ~/Library"
+    group_hints[title] = "приложений с такими bundle id нет, уйдут в Корзину"
+    TO_TRASH.add(title)
+    for p in found:
+        add(REVIEW, tilde(p), [p], group=title, marked=False, action=lambda path=p: to_trash(path))
+
+
 def scan_dev_caches():
     add(SAFE, "кеш модулей clang", [os.path.join(USER_CACHE, "clang", "ModuleCache")],
         hint="Xcode и clang соберут модули заново при следующей сборке")
@@ -476,7 +487,7 @@ def scan_simulators():
 
 
 for scan in (scan_ides, scan_build_outputs, scan_gradle, scan_konan, scan_simple_caches, scan_brew, scan_dev_caches,
-             scan_downloads, scan_simulators, scan_devices, scan_avds, scan_archives, scan_app_caches):
+             scan_downloads, scan_orphans, scan_simulators, scan_devices, scan_avds, scan_archives, scan_app_caches):
     scan()
 
 with ThreadPoolExecutor(max_workers=8) as pool:
