@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from mnrhlib import (DEV, HOME, RECENT_DAYS, du_bytes, gradle_build_dirs, gradle_versions_in_use, has_flag, human,
+from mnrhlib import (DEV, HOME, RECENT_DAYS, android_sdk, du_bytes, gradle_build_dirs, gradle_versions_in_use, has_flag, human,
                      konan_prebuilts, konan_unused, kotlin_versions_in_use, last_change, orphan_paths, paint, projects,
                      remove_under_home, run, tilde, version_key)
 
@@ -226,18 +226,56 @@ def scan_devices():
                 action=lambda u=udid: subprocess.run(["xcrun", "simctl", "erase", u], capture_output=True).returncode == 0)
 
 
+AVD_IDLE_DAYS = 60
+
+
+def avd_last_run(avd):
+    """Эмулятор переписывает файлы в своей папке при каждом запуске: берем самый свежий из верхнего уровня."""
+    times = [os.path.getmtime(avd)]
+    for f in os.listdir(avd):
+        try:
+            times.append(os.path.getmtime(os.path.join(avd, f)))
+        except OSError:
+            pass
+    return max(times)
+
+
 def scan_avds():
-    for avd in sorted(glob.glob(os.path.join(HOME, ".android", "avd", "*.avd"))):
+    avd_dir = os.path.join(HOME, ".android", "avd")
+    images, idle = set(), []
+    for avd in sorted(glob.glob(os.path.join(avd_dir, "*.avd"))):
         name = os.path.basename(avd)[:-4]
+        try:
+            config = open(os.path.join(avd, "config.ini"), encoding="utf-8", errors="replace").read()
+        except OSError:
+            config = ""
+        images |= {m.strip().rstrip("/") for m in re.findall(r"^image\.sysdir\.\d+\s*=\s*(.+)$", config, re.M)}
+        days = days_since(avd_last_run(avd))
+        if days >= AVD_IDLE_DAYS:
+            idle.append((f"{name}, не запускался {days} дн.", [avd, os.path.join(avd_dir, name + ".ini")], name))
         data = glob.glob(os.path.join(avd, "userdata-qemu.img*")) + glob.glob(os.path.join(avd, "cache.img*")) + \
             glob.glob(os.path.join(avd, "snapshots")) + glob.glob(os.path.join(avd, "*.qcow2"))
         size = sum(du_bytes(p) for p in data)
         if size < BIG:
             continue
-        days = int((time.time() - os.path.getmtime(avd)) // 86400)
         add(REVIEW, f"эмулятор {name}: данные и снимки Quick Boot, не запускался {days} дн." if days
             else f"эмулятор {name}: данные и снимки Quick Boot", data, size=size, app=f"avd:{name}",
             hint="как Wipe Data: приложения и вход в аккаунты сбросятся")
+    title = f"эмуляторы Android, которые не запускались {AVD_IDLE_DAYS}+ дн."
+    group_hints[title] = "удалятся целиком, создать заново можно в Device Manager"
+    for label, paths, name in idle:
+        add(REVIEW, label, paths, group=title, marked=False, app=f"avd:{name}")
+
+    sdk = android_sdk()
+    if not sdk or not os.path.isdir(os.path.join(avd_dir)):
+        return
+    unused = []
+    for p in sorted(glob.glob(os.path.join(sdk, "system-images", "*", "*", "*"))):
+        rel = os.path.relpath(p, sdk)
+        if os.path.isdir(p) and rel not in images:
+            unused.append((rel.replace("system-images/", "", 1), [p], False))
+    add_group(REVIEW, "образы Android, которые не нужны ни одному эмулятору", unused,
+              hint="скачаются снова, если создать эмулятор на этом образе")
 
 
 def scan_archives():
@@ -453,6 +491,9 @@ def scan_dev_caches():
     add(REVIEW, "Dart и Flutter: скачанные пакеты", [pub], hint="вернутся через flutter pub get, нужен интернет")
 
 
+PLATFORMS = {"iphonesimulator": "iOS", "watchsimulator": "watchOS", "appletvsimulator": "tvOS", "xrsimulator": "visionOS"}
+
+
 def scan_simulators():
     devs = json.loads(run(["xcrun", "simctl", "list", "devices", "-j"]) or "{}").get("devices", {})
     unavailable = [d for lst in devs.values() for d in lst if not d.get("isAvailable", True)]
@@ -461,20 +502,29 @@ def scan_simulators():
         action=lambda: subprocess.run(["xcrun", "simctl", "delete", "unavailable"], capture_output=True))
 
     runtimes = json.loads(run(["xcrun", "simctl", "runtime", "list", "-j"]) or "{}")
+    count = {rt: len(lst) for rt, lst in devs.items() if lst}
     by_platform = {}
     for rid, r in runtimes.items():
         by_platform.setdefault(r.get("platformIdentifier", ""), []).append((rid, r))
     now = datetime.now(timezone.utc)
-    for rts in by_platform.values():
-        newest = max(rts, key=lambda x: version_key(x[1].get("version", "0")))[0]
+    for platform, rts in by_platform.items():
+        name = next((n for key, n in PLATFORMS.items() if key in platform), "")
+        # Оставляем самый новый runtime. Сборок одной версии бывает несколько (iOS-27-2 и iOS-27-2-iPhone19-4
+        # под одно устройство), тогда ту, на которой больше симуляторов.
+        newest = max(rts, key=lambda x: (version_key(x[1].get("version", "0")),
+                                         count.get(x[1].get("runtimeIdentifier"), 0),
+                                         version_key(x[1].get("build", ""))))[0]
         for rid, r in rts:
-            if rid == newest:
+            if rid == newest or r.get("deletable") is False:
                 continue
             last = r.get("lastUsedAt")
             days = (now - datetime.fromisoformat(last.replace("Z", "+00:00"))).days if last else None
             if days is None or days > 60:
                 when = f"не запускался {days} дн." if days is not None else "ни разу не запускался"
-                add(REVIEW, f"runtime iOS {r.get('version')}, {when}", size=r.get("sizeBytes", 0),
+                n = count.get(r.get("runtimeIdentifier"), 0)
+                when += f", симуляторов на нем {n}" if n else ", симуляторов на нем нет"
+                add(REVIEW, f"runtime {name} {r.get('version')} ({r.get('build')}), {when}".replace("  ", " "),
+                    size=r.get("sizeBytes", 0),
                     hint="симуляторы этой версии перестанут запускаться, скачать заново можно в Xcode",
                     action=lambda r_id=rid: subprocess.run(["xcrun", "simctl", "runtime", "delete", r_id],
                                                            capture_output=True, timeout=600).returncode == 0)
