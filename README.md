@@ -187,7 +187,8 @@ claudemeister ставится сам по себе: `brew install kopylovis/tap
 `build/` и `.gradle/` в проектах, кеши версий Gradle, которые не использует ни один проект,
 и build cache, Kotlin/Native версий, которых нет в проектах, и LLVM от старых версий Kotlin
 в `~/.konan/dependencies`, DerivedData, кеши npm, pip, SwiftPM, CocoaPods, старые версии в
-Homebrew, симуляторы без runtime, снимки `mnrh shot`, кеш модулей clang в
+Homebrew, симуляторы без runtime, снимки `mnrh shot`, файлы старше суток в `~/.gradle/.tmp`,
+кеш модулей clang в
 `$(getconf DARWIN_USER_CACHE_DIR)`, кеш сборки Go, временные `.ktrace` от Instruments в `$TMPDIR`
 (пока Instruments и xctrace не запущены).
 
