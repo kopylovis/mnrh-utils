@@ -19,7 +19,8 @@ if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not
     print("mnrh ram clean           отметить галочками, что остановить: демоны Gradle и Kotlin, каждый iOS-симулятор")
     print("                         и эмулятор Android отдельной строкой; потом показать, сколько вернулось")
     print("mnrh ram clean -y        без меню: демоны и симуляторы (без терминала -y обязателен)")
-    print("  --daemons, --gradle, --kotlin, --sim  только это; --emulator ещё эмулятор Android")
+    print("                         Сироты: node, MCP-серверы, vite, LSP и скрипты, чья программа уже закрыта")
+    print("  --daemons, --gradle, --kotlin, --sim, --orphans  только это; --emulator ещё эмулятор Android")
     print("  -f                     снять и занятые сборкой демоны")
     print("Приложения clean не закрывает: у них могут быть несохранённые данные. Подскажет, какие закрыть вручную.")
     sys.exit(0)
@@ -34,6 +35,8 @@ CLEAN_HINT = "mnrh ram clean"
 NO_PROCESSES = "Список процессов прочитать не удалось: ps и top ничего не вернули (песочница или нет прав)."
 UNITS = {"B": 1 / 1048576, "K": 1 / 1024, "M": 1, "G": 1024, "T": 1048576}
 BUSY_CPU = 5.0
+DEFAULT_KEYS = {"gradle", "kotlin", "sim", "orphan"}
+ADDED_ONLY = {"emulator"}  # эти флаги добавляют к отмеченному по умолчанию, а не заменяют его
 
 
 def run(cmd, timeout=30):
@@ -223,6 +226,9 @@ def show():
         held.append(f"демоны сборки {fmt(daemon_mb).strip()}")
     if sim_mb >= 512:
         held.append(f"iOS-симуляторы {fmt(sim_mb).strip()}")
+    orphan_mb = sum(r["mem"] for r, _, dev in orphans(rows) if dev)
+    if orphan_mb >= 256:
+        held.append(f"процессы-сироты {fmt(orphan_mb).strip()}")
     if held:
         print(f"\nМожно вернуть: {', '.join(held)}. Освободить: {CLEAN_HINT}")
 
@@ -271,6 +277,53 @@ def avd_name(adb, serial):
     return lines[0].strip() if lines and lines[0].strip() else serial
 
 
+SYSTEM_PREFIXES = ("/System/", "/usr/libexec/", "/usr/sbin/", "/usr/bin/", "/sbin/", "/bin/", "/Library/Apple/",
+                   "/Library/Developer/", "/Applications/Xcode")
+DEV_TOOLS = (("mcp", "MCP-серверы"), ("vite", "vite"), ("metro", "metro"), ("webpack", "webpack"),
+             ("next-server", "next dev"), ("next dev", "next dev"), ("esbuild", "esbuild"), ("tsserver", "tsserver"),
+             ("typescript-language-server", "TypeScript LSP"), ("eslint_d", "eslint_d"), ("kotlin-lsp", "kotlin-lsp"),
+             ("sourcekit-lsp", "sourcekit-lsp"), ("gopls", "gopls"), ("rust-analyzer", "rust-analyzer"),
+             ("jdtls", "jdtls"), ("node_modules/.bin/", None))
+INTERPRETERS = re.compile(r"^(node|bun|deno|python[\d.]*|ruby|java)$")
+
+
+def launchd_jobs():
+    """PID процессов, которые запустил и держит launchd: у них PPID 1 законно."""
+    return {line.split()[0] for line in run(["launchctl", "list"]).splitlines()[1:] if line.split()[:1] != ["-"]}
+
+
+def orphan_tool(cmd):
+    """(название, явный dev-инструмент) или None, если на инструмент разработки не похоже."""
+    low = cmd.lower()
+    for needle, name in DEV_TOOLS:
+        if needle in low:
+            if name is None:
+                name = low.split("node_modules/.bin/", 1)[1].split()[0].split("/")[0]
+            return name, True
+    words = cmd.split()
+    base = words[0].rsplit("/", 1)[-1]
+    if INTERPRETERS.match(base):
+        script = next((w.rsplit("/", 1)[-1] for w in words[1:] if not w.startswith("-")), "")
+        return f"{base} {script}".strip(), False
+    return None
+
+
+def orphans(rows):
+    """Процессы пользователя, чей родитель умер (PPID 1), не из launchd и похожие на инструменты разработки.
+    Если launchctl ничего не ответил, сервисы launchd от сирот не отличить, и отмеченных по умолчанию нет."""
+    jobs = launchd_jobs()
+    known = bool(jobs)
+    found = []
+    for r in rows:
+        if r["ppid"] != "1" or r["uid"] != os.getuid() or r["kind"] is not None or r["pid"] in jobs \
+                or r["label"] == "Claude Code (CLI)" or "codex" in r["cmd"] or r["cmd"].startswith(SYSTEM_PREFIXES):
+            continue
+        tool = orphan_tool(r["cmd"])
+        if tool:
+            found.append((r, tool[0], known and tool[1] and r["cpu"] <= BUSY_CPU))
+    return found
+
+
 def find_targets(rows):
     """Что можно остановить, по строке на пункт меню."""
     daemons = [r for r in rows if r["kind"] == "daemon" and r["cmd"].split(" ")[0].rsplit("/", 1)[-1] == "java"]
@@ -297,6 +350,17 @@ def find_targets(rows):
             mb = sum(r["mem"] for r in rows if r["kind"] == "emulator")
         targets.append({"key": "emulator", "id": "emulator:" + serial, "label": f"Android-эмулятор {name}",
                         "mb": mb, "note": "состояние сохранится в Quick Boot", "adb": adb, "serial": serial})
+    groups = {}
+    for r, name, dev in orphans(rows):
+        key = "orphan" if dev else "orphan-other"
+        g = groups.setdefault((key, name), {"key": key, "id": f"{key}:{name}", "mb": 0.0, "pids": [],
+                                            "note": "родитель закрыт, их никто не ждет" if dev
+                                            else "родитель закрыт; проверь, не твоя ли это фоновая задача"})
+        g["mb"] += r["mem"]
+        g["pids"].append(r["pid"])
+    for g in sorted(groups.values(), key=lambda g: (g["key"], -g["mb"])):
+        g["label"] = f"сироты {g['id'].split(':', 1)[1]}" + (f" ×{len(g['pids'])}" if len(g["pids"]) > 1 else "")
+        targets.append(g)
     for t in targets:
         t.setdefault("id", t["key"])
     return targets
@@ -305,11 +369,11 @@ def find_targets(rows):
 def wanted_keys():
     picked = set()
     for flag, keys in (("--daemons", ("gradle", "kotlin")), ("--gradle", ("gradle",)), ("--kotlin", ("kotlin",)),
-                       ("--sim", ("sim",)), ("--emulator", ("emulator",))):
+                       ("--sim", ("sim",)), ("--emulator", ("emulator",)), ("--orphans", ("orphan",))):
         if flag in args:
             picked.update(keys)
-    if not picked or picked == {"emulator"}:
-        picked |= {"gradle", "kotlin", "sim"}
+    if picked <= ADDED_ONLY:
+        picked |= DEFAULT_KEYS
     if has_flag(args, "-f", "--force"):
         picked |= {k + "-busy" for k in ("gradle", "kotlin") if k in picked}
     return picked
@@ -390,7 +454,7 @@ def clean():
             marked = {t["id"] for t in chosen}
     else:
         chosen = [t for t in targets if t["key"] in marked]
-        skipped = [t for t in targets if t["key"].endswith("-busy") and t not in chosen]
+        skipped = [t for t in targets if t["key"].endswith("-busy") and t["key"][:-5] in marked and t not in chosen]
         if not chosen:
             print("Останавливать нечего" + (": демоны заняты сборкой, снять их: mnrh ram clean -f." if skipped else "."))
         else:
@@ -418,7 +482,8 @@ def clean():
               + ", ".join(f"{label} {fmt(mb).strip()}" for label, mb in heavy))
 
 
-if args and args[0] == "clean":
-    clean()
-else:
-    show()
+if __name__ == "__main__":
+    if args and args[0] == "clean":
+        clean()
+    else:
+        show()
