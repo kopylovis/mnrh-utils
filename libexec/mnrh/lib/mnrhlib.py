@@ -426,3 +426,82 @@ def find_project(query=None, cwd=None):
     if hits:
         return None, f"«{query}» подходит к нескольким проектам: {', '.join(hits)}"
     return None, f"проекта «{query}» нет в {tilde(root)}"
+
+
+# Остатки удаленных приложений в ~/Library: mnrh uninstall --orphans и mnrh disk.
+SUFFIXES = (".plist", ".savedState", ".binarycookies")
+BUNDLE_ID = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9_-]+){2,}$")
+# Консольные инструменты и фоновые службы без своего .app: их данные не остатки.
+TOOLS = ("org.swift.", "com.firebase.", "com.google.Keystone", "com.google.GoogleUpdater", "com.google.SoftwareUpdate",
+         "com.microsoft.autoupdate", "org.cocoapods", "com.github.", "org.python.", "org.nodejs.", "com.docker.",
+         "com.jetbrains.toolbox", "io.flutter.", "com.crashlytics.", "org.gradle.", "org.jetbrains.kotlin")
+RECENT_DAYS = 7
+ORPHAN_DIRS = ("Caches", "Containers", "Group Containers", "Application Support", "HTTPStorages", "WebKit",
+               "Saved Application State", "Application Scripts", "Logs")
+
+
+def strip(name):
+    for s in SUFFIXES:
+        if name.endswith(s):
+            return name[: -len(s)]
+    return name
+
+
+def last_change(path):
+    """Самое свежее изменение внутри (не глубже 3 уровней, чтобы не тормозить)."""
+    newest = os.path.getmtime(path) if os.path.exists(path) else 0
+    base = path.rstrip("/").count("/")
+    for root, dirs, files in os.walk(path):
+        if root.count("/") - base >= 3:
+            dirs[:] = []
+        for f in files:
+            try:
+                newest = max(newest, os.path.getmtime(os.path.join(root, f)))
+            except OSError:
+                pass
+    return newest
+
+
+def installed_ids():
+    ids = set()
+    out = run(["mdfind", "-attr", "kMDItemCFBundleIdentifier", "kMDItemContentType == 'com.apple.application-bundle'"],
+              timeout=60)
+    for line in out.splitlines():
+        m = re.search(r"kMDItemCFBundleIdentifier = (\S+)", line)
+        if m and m.group(1) != "(null)":
+            ids.add(m.group(1))
+    # Без Spotlight тоже работаем: пробегаем папки приложений сами.
+    for d in APP_DIRS + ["/System/Applications", "/System/Applications/Utilities"]:
+        for app in glob.glob(os.path.join(d, "*.app")):
+            bid, _ = bundle_info(app)
+            if bid:
+                ids.add(bid)
+    return ids
+
+
+def orphan_paths():
+    """Папки и файлы в ~/Library с bundle id приложений, которых нет в системе. Без размеров и без проверки свежести."""
+    lowered = {i.lower() for i in installed_ids()}
+
+    def owned(base):
+        b = base.lower()
+        if b.startswith("com.apple.") or b.startswith("group.com.apple.") or \
+                any(b.startswith(t.lower()) for t in TOOLS):
+            return True
+        if b.startswith("group."):
+            b = b[len("group."):]
+        b = re.sub(r"^[a-z0-9]{10}\.", "", b)  # префикс Team ID у Group Containers
+        return any(b == i or b.startswith(i + ".") or i.startswith(b + ".") for i in lowered)
+
+    found = []
+    for sub in ORPHAN_DIRS:
+        d = os.path.join(HOME, "Library", sub)
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for n in names:
+            base = strip(n)
+            if BUNDLE_ID.match(base) and not owned(base):
+                found.append(os.path.join(d, n))
+    return found
