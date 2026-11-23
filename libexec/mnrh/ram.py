@@ -21,7 +21,9 @@ if has_flag(args, "-h", "--help") or (args and args[0].isalpha() and args[0] not
     print("mnrh ram clean -y        без меню: демоны и симуляторы (без терминала -y обязателен)")
     print("                         Демоны Gradle версий, которых нет в проектах, отмечены всегда")
     print("                         Сироты: node, MCP-серверы, vite, LSP и скрипты, чья программа уже закрыта")
-    print("  --daemons, --gradle, --kotlin, --sim, --orphans  только это; --emulator ещё эмулятор Android")
+    print("                         Сессии Claude Code и Codex, которые давно молчат, показаны без отметки")
+    print("  --daemons, --gradle, --kotlin, --sim, --orphans  только это; --emulator ещё эмулятор Android,")
+    print("  --sessions ещё простаивающие сессии Claude Code и Codex")
     print("  -f                     снять и занятые сборкой демоны")
     print("Приложения clean не закрывает: у них могут быть несохранённые данные. Подскажет, какие закрыть вручную.")
     sys.exit(0)
@@ -37,7 +39,7 @@ NO_PROCESSES = "Список процессов прочитать не удал
 UNITS = {"B": 1 / 1048576, "K": 1 / 1024, "M": 1, "G": 1024, "T": 1048576}
 BUSY_CPU = 5.0
 DEFAULT_KEYS = {"gradle", "gradle-stale", "kotlin", "sim", "orphan"}
-ADDED_ONLY = {"emulator"}  # эти флаги добавляют к отмеченному по умолчанию, а не заменяют его
+ADDED_ONLY = {"emulator", "session"}  # эти флаги добавляют к отмеченному по умолчанию, а не заменяют его
 
 
 def run(cmd, timeout=30):
@@ -79,6 +81,8 @@ def classify(cmd):
         return app.group(1), "app"
     if base == "claude" or "/claude/versions/" in first:
         return "Claude Code (CLI)", None
+    if "@openai/codex" in cmd or re.match(r"codex(-[\w-]+)?$", base):
+        return "Codex (CLI)", None
     if base == "java":
         return "Java (прочее)", None
     return base or "неизвестно", None
@@ -317,7 +321,7 @@ def orphans(rows):
     found = []
     for r in rows:
         if r["ppid"] != "1" or r["uid"] != os.getuid() or r["kind"] is not None or r["pid"] in jobs \
-                or r["label"] == "Claude Code (CLI)" or "codex" in r["cmd"] or r["cmd"].startswith(SYSTEM_PREFIXES):
+                or r["label"] in SESSIONS or r["cmd"].startswith(SYSTEM_PREFIXES):
             continue
         tool = orphan_tool(r["cmd"])
         if tool:
@@ -332,6 +336,49 @@ def gradle_version(cmd):
     """Версия Gradle по команде демона: GradleDaemon 9.9.1 в конце или gradle-9.9.1 в classpath."""
     m = re.search(r"GradleDaemon (\d+\.\d+(?:\.\d+)?)", cmd) or re.search(r"gradle-(\d+\.\d+(?:\.\d+)?)-", cmd)
     return m.group(1) if m else None
+
+
+SESSIONS = ("Claude Code (CLI)", "Codex (CLI)")
+CLAUDE_SESSIONS = os.path.join(os.path.expanduser("~"), ".claude", "sessions")
+IDLE_SESSION = 30 * 60
+
+
+def ancestors(rows, pid):
+    """PID процесса и всех его родителей: свою сессию не предлагаем закрыть."""
+    parent = {r["pid"]: r["ppid"] for r in rows}
+    chain = set()
+    while pid and pid not in chain and pid != "1":
+        chain.add(pid)
+        pid = parent.get(pid)
+    return chain
+
+
+def idle_sessions(rows):
+    """[(строка ps, подпись, сколько секунд молчит)] сессий Claude Code и Codex, которые давно простаивают.
+    У Claude Code статус и время его смены лежат в ~/.claude/sessions/<pid>.json; у Codex их нет,
+    там простой это CPU около нуля и больше часа работы."""
+    mine = ancestors(rows, str(os.getpid()))
+    tops = {r["pid"] for r in rows if r["label"] in SESSIONS}
+    found = []
+    now = time.time()
+    for r in rows:
+        if r["label"] not in SESSIONS or r["pid"] in mine or r["ppid"] in tops or r["uid"] != os.getuid():
+            continue
+        try:
+            with open(os.path.join(CLAUDE_SESSIONS, r["pid"] + ".json")) as f:
+                info = json.load(f)
+        except (OSError, ValueError):
+            info = None
+        if info and info.get("pid") == int(r["pid"]):
+            quiet = now - info.get("statusUpdatedAt", now * 1000) / 1000
+            if info.get("status") != "idle" or quiet < IDLE_SESSION:
+                continue
+            where = info.get("name") or info.get("cwd", "").replace(os.path.expanduser("~"), "~", 1)
+            found.append((r, f"Claude Code {where}".strip(), quiet))
+        elif r["cpu"] < 1 and r["age"] >= 2 * IDLE_SESSION:
+            name = "Claude Code" if r["label"].startswith("Claude") else "Codex"
+            found.append((r, f"{name}, PID {r['pid']}", None))
+    return found
 
 
 def find_targets(rows):
@@ -381,6 +428,16 @@ def find_targets(rows):
                                             else "родитель закрыт; проверь, не твоя ли это фоновая задача"})
         g["mb"] += r["mem"]
         g["pids"].append(r["pid"])
+    sessions = idle_sessions(rows)
+    session_mb = owned_mb(rows, {r["pid"]: r["pid"] for r, _, _ in sessions})
+    for r, label, quiet in sessions:
+        note = (f"молчит {int(quiet // 3600)} ч" if quiet >= 3600 else f"молчит {int(quiet // 60)} мин") if quiet \
+            else f"CPU около нуля, работает {r['age'] // 3600} ч"
+        targets.append({"key": "session", "id": "session:" + r["pid"], "label": f"сессия {label}",
+                        "mb": session_mb.get(r["pid"], r["mem"]),
+                        "note": note + ("; вернуться: claude --resume" if label.startswith("Claude") else
+                                        "; вернуться: codex resume"),
+                        "term": [r["pid"]]})
     for g in sorted(groups.values(), key=lambda g: (g["key"], -g["mb"])):
         g["label"] = f"сироты {g['id'].split(':', 1)[1]}" + (f" ×{len(g['pids'])}" if len(g["pids"]) > 1 else "")
         targets.append(g)
@@ -392,7 +449,8 @@ def find_targets(rows):
 def wanted_keys():
     picked = set()
     for flag, keys in (("--daemons", ("gradle", "gradle-stale", "kotlin")), ("--gradle", ("gradle", "gradle-stale")),
-                       ("--kotlin", ("kotlin",)), ("--sim", ("sim",)), ("--emulator", ("emulator",)), ("--orphans", ("orphan",))):
+                       ("--kotlin", ("kotlin",)), ("--sim", ("sim",)), ("--emulator", ("emulator",)), ("--orphans", ("orphan",)),
+                       ("--sessions", ("session",))):
         if flag in args:
             picked.update(keys)
     if picked <= ADDED_ONLY:
@@ -426,6 +484,12 @@ def stop(chosen):
     pids = [p for t in chosen for p in t.get("pids", [])]
     if pids:
         stop_daemons(pids)
+    for t in chosen:
+        for pid in t.get("term", []):
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
     for t in chosen:
         if t["key"] == "sim":
             run(["xcrun", "simctl", "shutdown", t["udid"]], timeout=120)
