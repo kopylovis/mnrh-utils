@@ -98,6 +98,8 @@ test:
 	@./bin/mnrh disk >/dev/null
 	@./bin/mnrh disk status >/dev/null
 	@./bin/mnrh disk clean </dev/null >/dev/null; rc=$$?; test $$rc -eq 2 -o $$rc -eq 0
+	@./bin/mnrh disk top ~/.gradle -n 3 >/dev/null
+	@! ./bin/mnrh disk top /nonexistent-mnrh >/dev/null 2>&1
 	@./bin/mnrh doctor >/dev/null; test $$? -le 1
 	@./bin/mnrh doctor status >/dev/null; test $$? -le 1
 	@! ./bin/mnrh no-such-command >/dev/null 2>&1
