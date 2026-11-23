@@ -163,6 +163,9 @@ def emulator_mb(rows):
                            for m in [re.search(r"(?:^|\s)-avd\s+(\S+)", r["cmd"])] if m})
 
 
+PRESSURE = {"1": "норма", "2": "повышенное", "4": "критическое"}
+
+
 def memory_state():
     vm = run(["vm_stat"])
     page = int(re.search(r"page size of (\d+)", vm).group(1))
@@ -179,7 +182,9 @@ def memory_state():
     swap = re.search(r"used = ([\d.]+)M", run(["sysctl", "-n", "vm.swapusage"]))
     stored = pages("Pages stored in compressor")
     occupied = pages("Pages occupied by compressor")
+    level = run(["sysctl", "-n", "kern.memorystatus_vm_pressure_level"]).strip()
     return {"total": total, "wired": wired, "compressed": compressed, "app": app,
+            "pressure": PRESSURE.get(level, "неизвестно"),
             "used": app + wired + compressed, "swap": float(swap.group(1)) / 1024 if swap else 0,
             "ratio": stored / occupied if occupied else 0}
 
@@ -194,8 +199,11 @@ def show():
     rows = collect()
     s = memory_state()
     sims_booted = bool(booted_simulators())
-    print(f"Занято {s['used']:.1f} из {s['total']:.0f} ГБ · приложения {s['app']:.1f} · wired {s['wired']:.1f} · "
-          f"сжато {s['compressed']:.1f} · свободно {max(s['total'] - s['used'], 0):.1f} · swap {s['swap']:.1f}")
+    print(f"Давление памяти: {s['pressure']}. Занято {s['used']:.1f} из {s['total']:.0f} ГБ · приложения {s['app']:.1f}"
+          f" · wired {s['wired']:.1f} · сжато {s['compressed']:.1f} · свободно {max(s['total'] - s['used'], 0):.1f}"
+          f" · swap {s['swap']:.1f}")
+    if s["pressure"] in ("повышенное", "критическое"):
+        print("macOS уже не хватает памяти, она сжимает страницы и уводит их в swap. Освободить: " + CLEAN_HINT)
     print()
     if not rows:
         print(NO_PROCESSES)
@@ -554,7 +562,9 @@ def stop(chosen):
         print("Еще не закрылись (наверное, ждут ответа про несохраненное): " + ", ".join(sorted(still)))
     after = memory_state()
     print(f"Свободно: {max(before['total'] - before['used'], 0):.1f} -> "
-          f"{max(after['total'] - after['used'], 0):.1f} ГБ   |   swap: {before['swap']:.1f} -> {after['swap']:.1f} ГБ")
+          f"{max(after['total'] - after['used'], 0):.1f} ГБ   |   swap: {before['swap']:.1f} -> {after['swap']:.1f} ГБ"
+          f"   |   давление: {before['pressure']}"
+          + (f" -> {after['pressure']}" if after["pressure"] != before["pressure"] else ""))
     if after["swap"] > 0.5 and after["swap"] >= before["swap"] - 0.1:
         print("Swap сам уменьшается не сразу: macOS подтягивает страницы обратно по мере обращения к ним.")
 
