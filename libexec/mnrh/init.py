@@ -20,7 +20,7 @@ def usage():
     print("mnrh init --show          показать текущую настройку")
     print()
     print(f"Настройка хранится в {tilde(CONFIG)}; на время можно переопределить MNRH_PROJECTS=<папка>.")
-    print("Папку используют mnrh claudemeister, repos, gradle и disk.")
+    print("Папку используют mnrh agentmeister, repos, gradle и disk.")
 
 
 def repo_count(path):
@@ -90,14 +90,14 @@ def choose_projects():
 
 def connect_claude():
     if not shutil.which("claude"):
-        print("Claude Code не найден. Когда поставишь его, выполни: claudemeister setup")
+        print("Claude Code не найден. Когда поставишь его, выполни: agentmeister setup")
         return
     cm = claudemeister_path()
     if not cm:
-        print("claudemeister не найден: brew install kopylovis/tap/claudemeister, потом claudemeister setup")
+        print("agentmeister не найден: brew install kopylovis/tap/agentmeister, потом agentmeister setup")
         return
-    i = pick([("да", "да — /restart, /forget, MCP-сервер claudemeister и хук zsh"), ("нет", "нет, позже: claudemeister setup")],
-             title="Подключить claudemeister к Claude Code?", label="Claude Code")
+    i = pick([("да", "да — /restart, /forget, MCP-сервер agentmeister и хук zsh"), ("нет", "нет, позже: agentmeister setup")],
+             title="Подключить agentmeister к Claude Code?", label="Claude Code")
     if i == 0:
         subprocess.run([cm, "setup"])
 

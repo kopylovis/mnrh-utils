@@ -54,7 +54,7 @@ def status():
         return 1
     print(f"{OK} уведомления уходят на {target[0]}, канал по умолчанию «{ntfy_alert.DEFAULT_TOPIC}»")
     mode = ntfy_alert.phone_mode()
-    claude = {"off": "выключены (claudemeister notify phone away — включить)",
+    claude = {"off": "выключены (agentmeister notify phone away — включить)",
               "away": "когда ты не за Mac", "always": "всегда"}[mode]
     print(f"  Claude Code в канал «{ntfy_alert.CLAUDE_TOPIC}»: {claude}")
     return 0

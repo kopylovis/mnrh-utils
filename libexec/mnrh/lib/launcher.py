@@ -120,7 +120,7 @@ def dim(text):
 
 
 # значки только шириной в две клетки и без VS16, иначе едут рамки меню
-ICONS = {"claudemeister": "🤖", "repos": "📚", "deps": "📦", "ssh": "🔑", "alert": "📣", "init": "🧰", "ram": "🧠",
+ICONS = {"agentmeister": "🤖", "repos": "📚", "deps": "📦", "ssh": "🔑", "alert": "📣", "init": "🧰", "ram": "🧠",
          "disk": "💽", "gradle": "🐘", "kotlin": "🟣", "build-tools": "🔨", "sim": "📱", "killdaemons": "💀",
          "doctor": "🏥", "fix": "🔧", "path": "🧭", "outdated": "⏰", "login": "🚪", "sleep": "😴", "scroll": "🐭",
          "nomusic": "🔇", "tossling": "📋", "uninstall": "🧹", "ports": "🔌", "todo": "📝", "shot": "📸"}
@@ -157,7 +157,7 @@ def action_info(name, desc, action):
 
 
 # эти команды запускают Claude Code: ему нужен настоящий терминал, их запускает bin/mnrh после меню
-OUTSIDE = {"claudemeister", "claude"}
+OUTSIDE = {"agentmeister", "claude"}
 MNRH = os.path.join(menu_lib.ROOT, "bin", "mnrh")
 
 

@@ -80,7 +80,7 @@ def explain(a):
             owner = ps(int(behalf.group(2)))
             if not owner:
                 return "caffeinate", f"держал сон для «{behalf.group(1)}», а тот уже закрыт", True
-            what = "claudemeister -k" if behalf.group(1) == "claude" else behalf.group(1)
+            what = "agentmeister -k" if behalf.group(1) == "claude" else behalf.group(1)
             return "caffeinate", f"{what}: пока открыт {short(owner['command'])} (pid {behalf.group(2)})", False
         if "-t" in info.get("command", ""):
             parent = ps(info["ppid"]) if info else None
