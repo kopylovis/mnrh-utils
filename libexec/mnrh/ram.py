@@ -31,6 +31,7 @@ if "-n" in args:
         sys.exit("mnrh ram: после -n нужно число")
 
 CLEAN_HINT = "mnrh ram clean"
+NO_PROCESSES = "Список процессов прочитать не удалось: ps и top ничего не вернули (песочница или нет прав)."
 UNITS = {"B": 1 / 1048576, "K": 1 / 1024, "M": 1, "G": 1024, "T": 1048576}
 BUSY_CPU = 5.0
 
@@ -135,6 +136,10 @@ def show():
     print(f"Занято {s['used']:.1f} из {s['total']:.0f} ГБ · приложения {s['app']:.1f} · wired {s['wired']:.1f} · "
           f"сжато {s['compressed']:.1f} · свободно {max(s['total'] - s['used'], 0):.1f} · swap {s['swap']:.1f}")
     print()
+    if not rows:
+        print(NO_PROCESSES)
+        print("Общие цифры выше верные, разбивки по приложениям нет.")
+        return
 
     if "-p" in args:
         rows.sort(key=lambda r: r["mem"], reverse=True)
@@ -296,6 +301,9 @@ def stop(chosen):
 
 def clean():
     rows = collect()
+    if not rows:
+        print(NO_PROCESSES)
+        print("Демоны не видны, остановить можно только симуляторы и эмуляторы.\n")
     targets = find_targets(rows)
     marked = wanted_keys()
     interactive = sys.stdin.isatty() and sys.stdout.isatty() and not has_flag(args, "-y", "--yes")
