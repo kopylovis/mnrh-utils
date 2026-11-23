@@ -1,5 +1,5 @@
-# Хук перезапуска Claude Code. Копия в claudemeister; эта остается для строк в ~/.zshrc, которые поставил
-# mnrh claude setup, пока claudemeister setup не переведет их на свою.
+# Хук перезапуска Claude Code. Копия в agentmeister; эта остается для строк в ~/.zshrc, которые поставил
+# mnrh claude setup, пока agentmeister setup не переведет их на свою.
 export MNRH_RESTART_HOOK=1
 
 _mnrh_restart() {

@@ -103,11 +103,11 @@ test:
 	@./bin/mnrh doctor >/dev/null; test $$? -le 1
 	@./bin/mnrh doctor status >/dev/null; test $$? -le 1
 	@! ./bin/mnrh no-such-command >/dev/null 2>&1
-	@bash -n libexec/mnrh/lib/claudemeister.sh
+	@bash -n libexec/mnrh/lib/agentmeister.sh
 	@zsh -n share/mnrh/restart.zsh
-	@for c in agentmeister claude todo shot deps; do MNRH_CLAUDEMEISTER=/nonexistent ./bin/mnrh $$c -h 2>&1 >/dev/null | grep -q 'brew install kopylovis/tap/agentmeister' || { echo "mnrh $$c без agentmeister"; exit 1; }; done
-	@MNRH_CLAUDEMEISTER=/bin/echo ./bin/mnrh todo add x | grep -qx 'todo add x'
-	@MNRH_CLAUDEMEISTER=/bin/echo ./bin/mnrh agentmeister setup --country KZ | grep -qx 'setup --country KZ'
-	@MNRH_CLAUDEMEISTER=/bin/echo ./bin/mnrh claude setup | grep -qx 'setup'
+	@for c in agentmeister claude todo shot deps; do MNRH_AGENTMEISTER=/nonexistent ./bin/mnrh $$c -h 2>&1 >/dev/null | grep -q 'brew install kopylovis/tap/agentmeister' || { echo "mnrh $$c без agentmeister"; exit 1; }; done
+	@MNRH_AGENTMEISTER=/bin/echo ./bin/mnrh todo add x | grep -qx 'todo add x'
+	@MNRH_AGENTMEISTER=/bin/echo ./bin/mnrh agentmeister setup --country KZ | grep -qx 'setup --country KZ'
+	@MNRH_AGENTMEISTER=/bin/echo ./bin/mnrh claude setup | grep -qx 'setup'
 	@find libexec -name __pycache__ -type d -exec rm -rf {} +
 	@echo "все проверки пройдены"

@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
-# mnrh todo <...> = claudemeister todo <...>
-source "$(dirname "${BASH_SOURCE[0]}")/lib/claudemeister.sh"
+# mnrh todo <...> = agentmeister todo <...>
+source "$(dirname "${BASH_SOURCE[0]}")/lib/agentmeister.sh"
 cm_exec todo "$@"

@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
-# mnrh shot <...> = claudemeister shot <...>
-source "$(dirname "${BASH_SOURCE[0]}")/lib/claudemeister.sh"
+# mnrh shot <...> = agentmeister shot <...>
+source "$(dirname "${BASH_SOURCE[0]}")/lib/agentmeister.sh"
 cm_exec shot "$@"
