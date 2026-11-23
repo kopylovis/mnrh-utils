@@ -101,6 +101,8 @@ def app_running(app):
         return bool(run(["pgrep", "-f", "GradleDaemon"]).strip())
     if app.startswith("avd:"):
         return bool(run(["pgrep", "-f", f"-avd {app[4:]}( |$)"]).strip())
+    if app == "instruments":
+        return bool(run(["pgrep", "-f", "/Instruments.app/Contents/MacOS/|/usr/bin/xctrace "]).strip())
     return bool(run(["pgrep", "-f", f"/{app}.app/Contents/MacOS/"]).strip())
 
 
@@ -320,16 +322,68 @@ def scan_simple_caches():
         hint="удалится насовсем")
 
 
+def brew_frees(out):
+    m = re.search(r"free approximately ([\d.]+)\s*([KMG]B)", out)
+    return float(m.group(1)) * {"KB": 1024, "MB": 1048576, "GB": 1073741824}[m.group(2)] if m else 0
+
+
 def scan_brew():
     if not shutil.which("brew"):
         return
     env = dict(os.environ, HOMEBREW_NO_AUTOREMOVE="1")
-    out = run(["brew", "cleanup", "-n"], timeout=120, env=env)
-    m = re.search(r"free approximately ([\d.]+)\s*([KMG]B)", out)
-    if m:
-        size = float(m.group(1)) * {"KB": 1024, "MB": 1048576, "GB": 1073741824}[m.group(2)]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        old = pool.submit(run, ["brew", "cleanup", "-n"], 120, env)
+        every = pool.submit(run, ["brew", "cleanup", "-n", "--prune=all"], 120, env)
+        size, whole = brew_frees(old.result()), brew_frees(every.result())
+    if size:
         add(SAFE, "Homebrew: старые версии и кеш загрузок", size=size,
             action=lambda: subprocess.run(["brew", "cleanup"], capture_output=True, env=env))
+    if whole - size >= MIN_SHOW:
+        add(REVIEW, "Homebrew: загрузки текущих версий", size=whole - size,
+            hint="нужны, только чтобы переустановить без интернета",
+            action=lambda: subprocess.run(["brew", "cleanup", "--prune=all"], capture_output=True, env=env))
+
+
+USER_CACHE = os.path.realpath(run(["getconf", "DARWIN_USER_CACHE_DIR"], timeout=5).strip() or "/nonexistent")
+USER_TEMP = os.path.realpath(run(["getconf", "DARWIN_USER_TEMP_DIR"], timeout=5).strip() or "/nonexistent")
+TRACE_SPOTS = [(DEV, 5), (os.path.join(HOME, "Desktop"), 2), (os.path.join(HOME, "Downloads"), 2),
+               (os.path.join(HOME, "Documents"), 2), ("/private/tmp", 2)]
+
+
+def find_traces():
+    """Записи Instruments: пакеты .trace и файлы .ktrace там, куда их обычно сохраняют."""
+    found = []
+    for base, depth in TRACE_SPOTS:
+        base_depth = base.rstrip("/").count("/")
+        for root, dirs, files in os.walk(base):
+            found += [os.path.join(root, d) for d in dirs if d.endswith(".trace")]
+            found += [os.path.join(root, f) for f in files if f.endswith(".ktrace")]
+            dirs[:] = [d for d in dirs if not d.endswith(".trace") and not d.startswith(".")
+                       and d not in ("node_modules", "build", "Pods", "DerivedData")
+                       and root.count("/") - base_depth < depth]
+    return found
+
+
+def scan_dev_caches():
+    add(SAFE, "кеш модулей clang", [os.path.join(USER_CACHE, "clang", "ModuleCache")],
+        hint="Xcode и clang соберут модули заново при следующей сборке")
+    add(SAFE, "временные файлы Instruments", glob.glob(os.path.join(USER_TEMP, "instruments*.ktrace")),
+        app="instruments", hint="остаются после профилирования, одна запись бывает на 5-20 ГБ")
+    traces = find_traces()
+    add_group(REVIEW, "записи Instruments (.trace, .ktrace)",
+              [(f"{tilde(p)}, {ago(days_since(os.path.getmtime(p)))}", [p], False) for p in traces],
+              hint="удаляются насовсем, нужные цифры перенеси до этого", app="instruments")
+    go = shutil.which("go")
+    if go:
+        gocache, modcache = (run([go, "env", "GOCACHE", "GOMODCACHE"], timeout=20).splitlines() + ["", ""])[:2]
+        if gocache:
+            add(SAFE, "Go: кеш сборки", [gocache],
+                action=lambda: subprocess.run([go, "clean", "-cache"], capture_output=True).returncode == 0)
+        if modcache:
+            add(REVIEW, "Go: скачанные модули", [modcache], hint="скачаются заново при сборке, нужен интернет",
+                action=lambda: subprocess.run([go, "clean", "-modcache"], capture_output=True).returncode == 0)
+    pub = os.environ.get("PUB_CACHE") or os.path.join(HOME, ".pub-cache")
+    add(REVIEW, "Dart и Flutter: скачанные пакеты", [pub], hint="вернутся через flutter pub get, нужен интернет")
 
 
 def scan_simulators():
@@ -365,8 +419,8 @@ def scan_simulators():
             hint="скачаются снова при подключении устройства с этой версией")
 
 
-for scan in (scan_ides, scan_build_outputs, scan_gradle, scan_konan, scan_simple_caches, scan_brew, scan_simulators,
-             scan_devices, scan_avds, scan_archives, scan_app_caches):
+for scan in (scan_ides, scan_build_outputs, scan_gradle, scan_konan, scan_simple_caches, scan_brew, scan_dev_caches,
+             scan_simulators, scan_devices, scan_avds, scan_archives, scan_app_caches):
     scan()
 
 with ThreadPoolExecutor(max_workers=8) as pool:
@@ -444,11 +498,23 @@ def show(title, group, parts_shown=SHOW_PARTS):
     print(paint(f"  {human(sum(i.size for i in group)):>9}  итого", "1") + "\n")
 
 
+def remove_path(path):
+    """Удаляет в домашней папке, во временных папках пользователя и в /private/tmp, больше нигде."""
+    real = os.path.realpath(path)
+    if any(real.startswith(root + os.sep) for root in (USER_CACHE, USER_TEMP, "/private/tmp")):
+        if os.path.islink(path) or os.path.isfile(path):
+            os.unlink(path)
+        else:
+            shutil.rmtree(path, ignore_errors=True)
+    else:
+        remove_under_home(path)
+
+
 def remove(it):
     if it.action:
         return it.action() is not False
     for p in it.paths:
-        remove_under_home(p)
+        remove_path(p)
     return True
 
 
@@ -516,7 +582,12 @@ def choose(previous=None):
 
 
 total, used_b, free_before = shutil.disk_usage("/System/Volumes/Data")
-print(f"Свободно {human(free_before)} из {human(total)}\n")
+snapshots = [l for l in run(["tmutil", "listlocalsnapshots", "/"], timeout=20).splitlines() if "TimeMachine" in l]
+print(f"Свободно {human(free_before)} из {human(total)}")
+if snapshots:
+    print(paint(f"Локальных снимков Time Machine {len(snapshots)}. Их место macOS освободит сама, когда диск "
+                "заполнится, удалить сразу можно командой tmutil thinlocalsnapshots / 999999999999 4", "2"))
+print()
 if not apply:
     show("Безопасно, пересоздается само:", safe)
     show("Осознанно, прочитай пояснение:", review)
