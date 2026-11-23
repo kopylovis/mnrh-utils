@@ -184,7 +184,9 @@ claudemeister ставится сам по себе: `brew install kopylovis/tap
 `build/` и `.gradle/` в проектах, кеши версий Gradle, которые не использует ни один проект,
 и build cache, Kotlin/Native версий, которых нет в проектах, и LLVM от старых версий Kotlin
 в `~/.konan/dependencies`, DerivedData, кеши npm, pip, SwiftPM, CocoaPods, старые версии в
-Homebrew, симуляторы без runtime, снимки `mnrh shot`.
+Homebrew, симуляторы без runtime, снимки `mnrh shot`, кеш модулей clang в
+`$(getconf DARWIN_USER_CACHE_DIR)`, кеш сборки Go, временные `.ktrace` от Instruments в `$TMPDIR`
+(пока Instruments и xctrace не запущены).
 
 **Осознанно** — удаляется только по отметке:
 
@@ -196,7 +198,14 @@ Homebrew, симуляторы без runtime, снимки `mnrh shot`.
   устройство останется) и каждого эмулятора Android (как Wipe Data);
 - индексы текущих Android Studio и JetBrains, кеш Chrome, крупные (от 300 МБ) кеши
   приложений в `~/Library/Caches` и `~/.cache`, node_modules, Корзина, резервные копии
-  `claudemeister sessions slim`, старые runtime и символы iOS для отладки.
+  `claudemeister sessions slim`, старые runtime и символы iOS для отладки;
+- загрузки текущих версий Homebrew (`brew cleanup --prune=all`), скачанные модули Go
+  (`go clean -modcache`), пакеты Dart и Flutter в `~/.pub-cache`;
+- записи Instruments (`.trace`, `.ktrace`) в проектах, на Рабочем столе, в Загрузках,
+  Документах и `/private/tmp`, каждая отдельной строкой.
+
+Если на диске есть локальные снимки Time Machine, `mnrh disk` скажет, сколько их, и как удалить
+их сразу. Обычно этого не нужно, macOS освобождает их место сама.
 
 Системные кеши `com.apple.*` не трогаются никогда.
 
